@@ -26,6 +26,7 @@ desktop.ini
 # Applications
 node_modules/
 dist/
+build/
 .tauri/
 .gradle/
 local.properties
