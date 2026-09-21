@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
-use capabilities::{CapabilityQuery, PlatformCapability};
+use capabilities::CapabilityQuery;
 use clipboard::{ClipboardAck, ClipboardFormat, ClipboardSynchronizer, ClipboardUpdate};
 use notifications::{NotificationAck, NotificationDispatcher, NotificationPost};
 use protocol::CapabilityId;
@@ -80,12 +81,14 @@ pub fn spawn_capabilities_dispatcher(
                     }
                     CapabilityId::CLIPBOARD => {
                         debug!("Handling incoming clipboard stream from {peer_fp}");
+                        let mut caps = HashSet::new();
+                        caps.insert(CapabilityId::CLIPBOARD);
                         let query = CapabilityQuery {
-                            capability: PlatformCapability::ClipboardRead,
-                            platform_available: true,
-                            app_permitted: true,
-                            peer_trusted: true,
-                            session_negotiated: true,
+                            capability: CapabilityId::CLIPBOARD,
+                            is_os_available: true,
+                            is_app_permitted: true,
+                            is_peer_authorized: true,
+                            negotiated_session_capabilities: caps,
                         };
 
                         let on_received = handlers.on_clipboard_received.clone();
@@ -118,12 +121,14 @@ pub fn spawn_capabilities_dispatcher(
                     }
                     CapabilityId::NOTIFICATIONS => {
                         debug!("Handling incoming notification stream from {peer_fp}");
+                        let mut caps = HashSet::new();
+                        caps.insert(CapabilityId::NOTIFICATIONS);
                         let query = CapabilityQuery {
-                            capability: PlatformCapability::NotificationReceive,
-                            platform_available: true,
-                            app_permitted: true,
-                            peer_trusted: true,
-                            session_negotiated: true,
+                            capability: CapabilityId::NOTIFICATIONS,
+                            is_os_available: true,
+                            is_app_permitted: true,
+                            is_peer_authorized: true,
+                            negotiated_session_capabilities: caps,
                         };
 
                         let on_received = handlers.on_notification_received.clone();

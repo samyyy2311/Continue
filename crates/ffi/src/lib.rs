@@ -590,17 +590,19 @@ pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(),
 
     runtime.block_on(async move {
         let synchronizer = clipboard::ClipboardSynchronizer::new();
+        let mut caps = std::collections::HashSet::new();
+        caps.insert(protocol::CapabilityId::CLIPBOARD);
         let query = capabilities::CapabilityQuery {
-            capability: capabilities::PlatformCapability::ClipboardWrite,
-            platform_available: true,
-            app_permitted: true,
-            peer_trusted: true,
-            session_negotiated: true,
+            capability: protocol::CapabilityId::CLIPBOARD,
+            is_os_available: true,
+            is_app_permitted: true,
+            is_peer_authorized: true,
+            negotiated_session_capabilities: caps,
         };
 
         mux.send_clipboard_to_peer(
             &synchronizer,
-            clipboard::ClipboardFormat::PlainText,
+            clipboard::ClipboardFormat::ClipboardFormatTextPlain,
             text.into_bytes(),
             &query,
         )
@@ -630,12 +632,14 @@ pub fn send_notification(
 
     runtime.block_on(async move {
         let dispatcher = notifications::NotificationDispatcher::new();
+        let mut caps = std::collections::HashSet::new();
+        caps.insert(protocol::CapabilityId::NOTIFICATIONS);
         let query = capabilities::CapabilityQuery {
-            capability: capabilities::PlatformCapability::NotificationSend,
-            platform_available: true,
-            app_permitted: true,
-            peer_trusted: true,
-            session_negotiated: true,
+            capability: protocol::CapabilityId::NOTIFICATIONS,
+            is_os_available: true,
+            is_app_permitted: true,
+            is_peer_authorized: true,
+            negotiated_session_capabilities: caps,
         };
 
         let now = std::time::SystemTime::now()
@@ -645,13 +649,12 @@ pub fn send_notification(
 
         let post = notifications::NotificationPost {
             notification_id: format!("notif-{now}"),
+            package_name: "continue.ffi".to_string(),
             app_name,
             title,
             body,
-            icon_png: vec![],
+            timestamp: now,
             actions: vec![],
-            posted_at: now,
-            urgency: 0,
         };
 
         mux.send_notification_to_peer(&dispatcher, post, &query)

@@ -64,9 +64,15 @@ interface ContinueCoreBridge {
 
     fun disconnect(peerFingerprint: String)
 
-    fun sendFile(peerFingerprint: String, filePath: String): Long
+    fun sendFile(
+        peerFingerprint: String,
+        filePath: String,
+    ): Long
 
-    fun sendClipboardText(peerFingerprint: String, text: String)
+    fun sendClipboardText(
+        peerFingerprint: String,
+        text: String,
+    )
 
     fun sendNotification(
         peerFingerprint: String,
@@ -236,12 +242,18 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         connectedPeers.remove(peerFingerprint)
     }
 
-    override fun sendFile(peerFingerprint: String, filePath: String): Long {
+    override fun sendFile(
+        peerFingerprint: String,
+        filePath: String,
+    ): Long {
         checkInitialized()
         return 0L
     }
 
-    override fun sendClipboardText(peerFingerprint: String, text: String) {
+    override fun sendClipboardText(
+        peerFingerprint: String,
+        text: String,
+    ) {
         checkInitialized()
     }
 
@@ -340,10 +352,15 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
         disconnectNative(peerFingerprint)
     }
 
-    override fun sendFile(peerFingerprint: String, filePath: String): Long =
-        sendFileNative(peerFingerprint, filePath)
+    override fun sendFile(
+        peerFingerprint: String,
+        filePath: String,
+    ): Long = sendFileNative(peerFingerprint, filePath)
 
-    override fun sendClipboardText(peerFingerprint: String, text: String) {
+    override fun sendClipboardText(
+        peerFingerprint: String,
+        text: String,
+    ) {
         sendClipboardTextNative(peerFingerprint, text)
     }
 
@@ -413,9 +430,15 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
 
     private external fun disconnectNative(peerFingerprint: String)
 
-    private external fun sendFileNative(peerFingerprint: String, filePath: String): Long
+    private external fun sendFileNative(
+        peerFingerprint: String,
+        filePath: String,
+    ): Long
 
-    private external fun sendClipboardTextNative(peerFingerprint: String, text: String)
+    private external fun sendClipboardTextNative(
+        peerFingerprint: String,
+        text: String,
+    )
 
     private external fun sendNotificationNative(
         peerFingerprint: String,
