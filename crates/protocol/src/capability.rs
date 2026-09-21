@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fmt;
@@ -11,6 +11,7 @@ use std::fmt;
 pub struct CapabilityId(pub u32);
 
 impl CapabilityId {
+    pub const CONTROL: Self = Self(0);
     pub const FILE_TRANSFER: Self = Self(1);
     pub const CLIPBOARD: Self = Self(2);
     pub const NOTIFICATIONS: Self = Self(3);
@@ -25,6 +26,7 @@ impl CapabilityId {
 
     pub fn known_name(&self) -> Option<&'static str> {
         match *self {
+            Self::CONTROL => Some("control"),
             Self::FILE_TRANSFER => Some("file_transfer"),
             Self::CLIPBOARD => Some("clipboard"),
             Self::NOTIFICATIONS => Some("notifications"),

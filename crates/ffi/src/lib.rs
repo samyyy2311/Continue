@@ -3,6 +3,7 @@
 
 uniffi::include_scaffolding!("continue");
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
@@ -11,6 +12,7 @@ use identity::IdentitySigner;
 use pairing::{InitiatorPairing, ReplayCache, TrustStore, TrustedPeer};
 use permissions::{PermissionStore, PersistedGrant};
 use protocol::CapabilityId;
+use sessions::SessionMultiplexer;
 use transport::TransportCertificate;
 
 #[derive(Debug, Error)]
@@ -48,6 +50,7 @@ struct CoreState {
     replay_cache: Arc<ReplayCache>,
     advertiser: Option<DiscoveryAdvertiser>,
     active_pairing: Option<ActivePairing>,
+    active_sessions: Arc<Mutex<HashMap<String, Arc<SessionMultiplexer>>>>,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -100,6 +103,7 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
         replay_cache: Arc::new(ReplayCache::new()),
         advertiser: None,
         active_pairing: None,
+        active_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let mut lock = CORE.lock().unwrap();
@@ -454,13 +458,91 @@ pub fn revoke_permission(
     Ok(())
 }
 
-pub fn disconnect(peer_fingerprint: String) -> Result<(), ContinueFfiError> {
+pub fn connect_to_peer(peer_fingerprint: String, endpoint: String) -> Result<(), ContinueFfiError> {
+    let (runtime, transport_cert, trust_store, active_sessions) = {
+        let lock = CORE.lock().unwrap();
+        let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+        (
+            state.runtime.clone(),
+            state.transport_cert.clone(),
+            state.trust_store.clone(),
+            state.active_sessions.clone(),
+        )
+    };
+
+    runtime.block_on(async move {
+        let peer = trust_store
+            .get_peer(&peer_fingerprint)
+            .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?
+            .ok_or_else(|| ContinueFfiError::InternalError("Peer not found in trust store".to_string()))?;
+
+        let addr: std::net::SocketAddr = endpoint.parse().map_err(|e| {
+            ContinueFfiError::InternalError(format!("Invalid endpoint address: {e}"))
+        })?;
+
+        let client_tls = transport_cert
+            .build_pinned_client_tls(peer.transport_spki_hash)
+            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
+
+        let bind_addr: std::net::SocketAddr = if addr.is_ipv6() {
+            "[::]:0".parse().unwrap()
+        } else {
+            "0.0.0.0:0".parse().unwrap()
+        };
+
+        let client_endpoint = transport::create_client_endpoint(bind_addr, client_tls)
+            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
+
+        let connection = client_endpoint
+            .connect(addr, "continue-device")
+            .map_err(|e| ContinueFfiError::InternalError(format!("Connect failed: {e}")))?
+            .await
+            .map_err(|e| ContinueFfiError::InternalError(format!("Handshake failed: {e}")))?;
+
+        let mux = Arc::new(SessionMultiplexer::new(peer_fingerprint.clone(), connection));
+        mux.spawn_keepalive_sender();
+        let _ = mux.spawn_router(16);
+
+        let mut lock = active_sessions.lock().unwrap();
+        lock.insert(peer_fingerprint, mux);
+        Ok(())
+    })
+}
+
+pub fn is_peer_connected(peer_fingerprint: String) -> Result<bool, ContinueFfiError> {
     let lock = CORE.lock().unwrap();
     let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+    let sessions = state.active_sessions.lock().unwrap();
+    Ok(sessions.contains_key(&peer_fingerprint))
+}
 
-    state
-        .permission_store
-        .clear_allow_once_for_peer(&peer_fingerprint);
+pub fn disconnect(peer_fingerprint: String) -> Result<(), ContinueFfiError> {
+    let (runtime, active_sessions, permission_store) = {
+        let lock = CORE.lock().unwrap();
+        let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+        (
+            state.runtime.clone(),
+            state.active_sessions.clone(),
+            state.permission_store.clone(),
+        )
+    };
+
+    permission_store.clear_allow_once_for_peer(&peer_fingerprint);
+
+    let maybe_mux = {
+        let mut lock = active_sessions.lock().unwrap();
+        lock.remove(&peer_fingerprint)
+    };
+
+    if let Some(mux) = maybe_mux {
+        runtime.block_on(async move {
+            mux.disconnect(
+                protocol::v1::DisconnectReason::DisconnectReasonNormal,
+                "Disconnected by user".to_string(),
+            )
+            .await;
+        });
+    }
 
     Ok(())
 }

@@ -37,6 +37,7 @@ async fn run_fault_injection_suite() -> Result<()> {
     test_quic_loopback_pairing().await?;
     test_clipboard_capability_and_echo_suppression().await?;
     test_notification_body_size_enforcement().await?;
+    test_session_multiplexer_routing().await?;
     Ok(())
 }
 
@@ -297,5 +298,46 @@ async fn test_notification_body_size_enforcement() -> Result<()> {
     ));
 
     info!("Check passed: Notification body size bounded strictly to MAX_NOTIFICATION_BODY_BYTES (4 KB)");
+    Ok(())
+}
+
+async fn test_session_multiplexer_routing() -> Result<()> {
+    use protocol::CapabilityId;
+    use sessions::SessionMultiplexer;
+
+    let server_cert = transport::TransportCertificate::generate()?;
+    let client_cert = transport::TransportCertificate::generate()?;
+
+    let server_tls = server_cert.build_pinned_server_tls(client_cert.spki_hash)?;
+    let client_tls = client_cert.build_pinned_client_tls(server_cert.spki_hash)?;
+
+    let server_endpoint = transport::create_server_endpoint("127.0.0.1:0".parse()?, server_tls)?;
+    let bound_addr = server_endpoint.local_addr()?;
+
+    let client_endpoint = transport::create_client_endpoint("127.0.0.1:0".parse()?, client_tls)?;
+
+    let server_handle = tokio::spawn(async move {
+        let incoming = server_endpoint
+            .accept()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("No incoming conn"))?;
+        let conn = incoming.await?;
+        let mux = SessionMultiplexer::new("client".to_string(), conn);
+        let mut rx = mux.spawn_router(4);
+
+        let stream = rx.recv().await.ok_or_else(|| anyhow::anyhow!("No stream"))?;
+        assert_eq!(stream.capability, CapabilityId::CLIPBOARD);
+
+        anyhow::Ok(())
+    });
+
+    let client_conn = client_endpoint.connect(bound_addr, "continue-device")?.await?;
+    let client_mux = SessionMultiplexer::new("server".to_string(), client_conn);
+
+    let (mut send, _recv) = client_mux.open_stream(CapabilityId::CLIPBOARD).await?;
+    send.finish()?;
+
+    server_handle.await??;
+    info!("Check passed: QUIC stream multiplexing and capability routing verified");
     Ok(())
 }

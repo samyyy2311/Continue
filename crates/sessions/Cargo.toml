@@ -11,9 +11,18 @@ protocol = { path = "../protocol" }
 transport = { path = "../transport" }
 pairing = { path = "../pairing" }
 identity = { path = "../identity" }
-tokio = { workspace = true, features = ["sync", "time", "rt"] }
+capabilities = { path = "../capabilities" }
+permissions = { path = "../permissions" }
+quinn = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "rt", "net"] }
 rand = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 prost = { workspace = true }
 bytes = { workspace = true }
+
+[dev-dependencies]
+crypto = { path = "../crypto" }
+rustls = { workspace = true }
+rcgen = { workspace = true }
+tokio = { workspace = true, features = ["full"] }

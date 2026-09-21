@@ -51,6 +51,12 @@ namespace continue {
     void revoke_permission(string peer_fingerprint, u32 capability_id);
 
     [Throws=ContinueFfiError]
+    void connect_to_peer(string peer_fingerprint, string endpoint);
+
+    [Throws=ContinueFfiError]
+    boolean is_peer_connected(string peer_fingerprint);
+
+    [Throws=ContinueFfiError]
     void disconnect(string peer_fingerprint);
 };
 
