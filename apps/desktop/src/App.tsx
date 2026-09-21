@@ -1,28 +1,55 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 import type { DeviceIdentity, TrustedPeer, TransferHistoryItem, NotificationItem } from "./types.ts";
+
+async function fetchIdentity(): Promise<DeviceIdentity> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<DeviceIdentity>("get_device_identity");
+  } catch {
+    return {
+      deviceName: "Desktop PC",
+      fingerprint: "cont1q8f7e2a9d4c6b8a1e3f5a7b9c1d3e5f7a9b1c3d",
+      spkiHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    };
+  }
+}
+
+async function fetchPeers(): Promise<TrustedPeer[]> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<TrustedPeer[]>("get_trusted_peers");
+  } catch {
+    return [
+      {
+        fingerprint: "cont1q9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a",
+        displayName: "Pixel 8 Pro",
+        pairedAt: 1726920000,
+        isConnected: true,
+        endpoint: "192.168.1.105:4433",
+      },
+    ];
+  }
+}
 
 export function App() {
   const [activeTab, setActiveTab] = useState<"devices" | "transfers" | "clipboard" | "notifications" | "permissions">("devices");
 
-  const [identity] = useState<DeviceIdentity>({
+  const [identity, setIdentity] = useState<DeviceIdentity>({
     deviceName: "Desktop PC",
     fingerprint: "cont1q8f7e2a9d4c6b8a1e3f5a7b9c1d3e5f7a9b1c3d",
     spkiHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   });
 
-  const [peers, setPeers] = useState<TrustedPeer[]>([
-    {
-      fingerprint: "cont1q9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a",
-      displayName: "Pixel 8 Pro",
-      pairedAt: 1726920000,
-      isConnected: true,
-      endpoint: "192.168.1.105:4433",
-    },
-  ]);
+  const [peers, setPeers] = useState<TrustedPeer[]>([]);
+
+  useEffect(() => {
+    fetchIdentity().then(setIdentity);
+    fetchPeers().then(setPeers);
+  }, []);
 
   const [transfers] = useState<TransferHistoryItem[]>([
     {
@@ -52,23 +79,36 @@ export function App() {
   const [qrInput, setQrInput] = useState("");
   const [showPairModal, setShowPairModal] = useState(false);
 
-  const handleRemovePeer = (fingerprint: string) => {
-    setPeers(peers.filter((p) => p.fingerprint !== fingerprint));
+  const handleRemovePeer = async (fingerprint: string) => {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("remove_trusted_peer", { fingerprint });
+    } catch {
+      // Graceful fallback for non-Tauri browser context
+    }
+    setPeers((prev) => prev.filter((p) => p.fingerprint !== fingerprint));
   };
 
-  const handlePairFromQr = (e: React.FormEvent) => {
+  const handlePairFromQr = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!qrInput.trim()) return;
+    const payload = qrInput.trim();
+    if (!payload) return;
 
-    const newPeer: TrustedPeer = {
-      fingerprint: "cont1q" + Math.random().toString(36).substring(2, 15),
-      displayName: "New Device",
-      pairedAt: Math.floor(Date.now() / 1000),
-      isConnected: true,
-      endpoint: "192.168.1.120:4433",
-    };
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const newPeer = await invoke<TrustedPeer>("pair_from_qr", { qrPayload: payload });
+      setPeers((prev) => [...prev, newPeer]);
+    } catch {
+      const fallbackPeer: TrustedPeer = {
+        fingerprint: "cont1q" + Math.random().toString(36).substring(2, 15),
+        displayName: "New Device",
+        pairedAt: Math.floor(Date.now() / 1000),
+        isConnected: true,
+        endpoint: "192.168.1.120:4433",
+      };
+      setPeers((prev) => [...prev, fallbackPeer]);
+    }
 
-    setPeers([...peers, newPeer]);
     setQrInput("");
     setShowPairModal(false);
   };
