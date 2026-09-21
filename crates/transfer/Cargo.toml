@@ -1,0 +1,22 @@
+[package]
+name = "transfer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+limits = { path = "../limits" }
+protocol = { path = "../protocol" }
+transport = { path = "../transport" }
+quinn = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "sync", "rt"] }
+sha2 = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+rustls = { workspace = true }
+rcgen = { workspace = true }
+rand = { workspace = true }

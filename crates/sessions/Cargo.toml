@@ -1,0 +1,19 @@
+[package]
+name = "sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+limits = { path = "../limits" }
+protocol = { path = "../protocol" }
+transport = { path = "../transport" }
+pairing = { path = "../pairing" }
+identity = { path = "../identity" }
+tokio = { workspace = true, features = ["sync", "time", "rt"] }
+rand = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+prost = { workspace = true }
+bytes = { workspace = true }

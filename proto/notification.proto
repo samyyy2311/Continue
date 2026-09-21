@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Notification action button.
+message NotificationAction {
+  string action_id = 1;
+  string label     = 2;
+  bool   is_reply  = 3;
+}
+
+// Posted notification event forwarded to connected and authorized peers.
+message NotificationPost {
+  string                     notification_id = 1;
+  string                     package_name    = 2;
+  string                     app_name        = 3;
+  string                     title           = 4;
+  string                     body            = 5;
+  uint64                     timestamp       = 6;
+  repeated NotificationAction actions         = 7;
+}
+
+// Notification dismissal forwarded to remote peers.
+message NotificationDismiss {
+  string notification_id = 1;
+  string package_name    = 2;
+}
+
+// Remote action invoked by a peer (e.g. quick reply or button click).
+message NotificationActionInvoke {
+  string notification_id = 1;
+  string action_id       = 2;
+  string reply_text      = 3;
+}
+
+// Response acknowledging receipt and processing of a notification event.
+message NotificationAck {
+  string notification_id = 1;
+  bool   handled         = 2;
+}

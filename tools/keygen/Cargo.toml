@@ -1,0 +1,15 @@
+[package]
+name = "keygen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "keygen"
+path = "src/main.rs"
+
+[dependencies]
+crypto = { path = "../../crates/crypto" }
+identity = { path = "../../crates/identity" }
+base64 = { workspace = true }

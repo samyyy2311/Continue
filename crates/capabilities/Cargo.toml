@@ -1,0 +1,13 @@
+[package]
+name = "capabilities"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+limits = { path = "../limits" }
+protocol = { path = "../protocol" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }

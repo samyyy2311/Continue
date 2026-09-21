@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Error codes used in protocol-level error responses.
+enum ErrorCode {
+  ERROR_UNSPECIFIED    = 0;
+  ERROR_PROTOCOL       = 1;   // malformed message or unexpected message type
+  ERROR_AUTH           = 2;   // authentication failure
+  ERROR_UNAUTHORIZED   = 3;   // capability or permission denied
+  ERROR_FRAME_TOO_LARGE = 4;  // frame exceeded stream type limit
+  ERROR_UNSUPPORTED    = 5;   // unsupported protocol version or capability
+  ERROR_TIMEOUT        = 6;
+  ERROR_TRANSFER       = 7;   // file transfer error
+}
+
+// Sent when a protocol error causes stream or connection termination.
+message ErrorDetail {
+  ErrorCode code    = 1;
+  string    message = 2; // human-readable diagnostic; not shown to end users
+}

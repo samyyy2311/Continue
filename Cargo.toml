@@ -1,0 +1,95 @@
+[workspace]
+members = [
+    "crates/limits",
+    "crates/crypto",
+    "crates/identity",
+    "crates/protocol",
+    "crates/transport",
+    "crates/discovery",
+    "crates/pairing",
+    "crates/sessions",
+    "crates/capabilities",
+    "crates/permissions",
+    "crates/transfer",
+    "crates/clipboard",
+    "crates/notifications",
+    "crates/ffi",
+    "tests/peer",
+    "tools/keygen",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = []
+publish = false
+
+[workspace.dependencies]
+# Async runtime — individual crates declare only the features they need
+tokio = "1"
+tokio-util = "0.7"
+
+# QUIC and TLS
+quinn = "0.11"
+rustls = "0.23"
+rcgen = "0.13"
+
+# Cryptography
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+hkdf = "0.12"
+sha2 = "0.10"
+hmac = "0.12"
+chacha20poly1305 = "0.10"
+zeroize = { version = "1", features = ["derive"] }
+rand = "0.8"
+base64 = "0.22"
+blake3 = "1"
+
+# Protocol
+prost = "0.13"
+prost-build = "0.13"
+bytes = "1"
+
+# Discovery
+mdns-sd = "0.11"
+
+# FFI
+uniffi = "0.28"
+
+# Storage
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Platform-specific
+[target.'cfg(target_os = "windows")'.workspace.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Security_Cryptography"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.workspace.dependencies]
+security-framework = "2"
+
+[target.'cfg(target_os = "linux")'.workspace.dependencies]
+zbus = "4"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.dev]
+opt-level = 0
+debug = true

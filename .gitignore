@@ -1,0 +1,33 @@
+# Generated build files
+/target/
+**/*.rs.bk
+
+# SQLite databases generated during development and tests
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Temporary / partial transfer files
+*.continue_part
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE and editor settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Applications
+node_modules/
+dist/
+.tauri/
+.gradle/
+local.properties
+*.apk
+*.aab

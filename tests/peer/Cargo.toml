@@ -1,0 +1,31 @@
+[package]
+name = "peer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "peer"
+path = "src/main.rs"
+
+[dependencies]
+limits = { path = "../../crates/limits" }
+crypto = { path = "../../crates/crypto" }
+identity = { path = "../../crates/identity" }
+protocol = { path = "../../crates/protocol" }
+transport = { path = "../../crates/transport" }
+pairing = { path = "../../crates/pairing" }
+sessions = { path = "../../crates/sessions" }
+capabilities = { path = "../../crates/capabilities" }
+permissions = { path = "../../crates/permissions" }
+transfer = { path = "../../crates/transfer" }
+clipboard = { path = "../../crates/clipboard" }
+notifications = { path = "../../crates/notifications" }
+tokio = { workspace = true, features = ["full"] }
+quinn = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+prost = { workspace = true }
+bytes = { workspace = true }

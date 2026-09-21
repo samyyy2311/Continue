@@ -1,0 +1,11 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// A UTC timestamp.
+message Timestamp {
+  int64 seconds = 1;
+  int32 nanos   = 2;
+}

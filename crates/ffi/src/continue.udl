@@ -1,0 +1,71 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+
+namespace continue {
+    [Throws=ContinueFfiError]
+    void init_core(string db_path);
+
+    [Throws=ContinueFfiError]
+    string get_device_fingerprint();
+
+    [Throws=ContinueFfiError]
+    string get_device_spki_hash();
+
+    [Throws=ContinueFfiError]
+    void start_discovery(u16 port, u32 protocol_version);
+
+    [Throws=ContinueFfiError]
+    void stop_discovery();
+
+    [Throws=ContinueFfiError]
+    string generate_qr_payload(string endpoint);
+
+    [Throws=ContinueFfiError]
+    string start_pairing_server(u16 listen_port, string advertised_endpoint);
+
+    [Throws=ContinueFfiError]
+    TrustedPeerFfi await_pairing_result(u32 timeout_secs);
+
+    [Throws=ContinueFfiError]
+    void cancel_pairing();
+
+    [Throws=ContinueFfiError]
+    TrustedPeerFfi pair_from_qr(string qr_payload);
+
+    [Throws=ContinueFfiError]
+    sequence<TrustedPeerFfi> list_trusted_peers();
+
+    [Throws=ContinueFfiError]
+    boolean remove_trusted_peer(string fingerprint);
+
+    [Throws=ContinueFfiError]
+    sequence<u32> get_capabilities();
+
+    [Throws=ContinueFfiError]
+    string query_permission(string peer_fingerprint, u32 capability_id);
+
+    [Throws=ContinueFfiError]
+    void set_permission(string peer_fingerprint, u32 capability_id, string grant);
+
+    [Throws=ContinueFfiError]
+    void revoke_permission(string peer_fingerprint, u32 capability_id);
+
+    [Throws=ContinueFfiError]
+    void disconnect(string peer_fingerprint);
+};
+
+dictionary TrustedPeerFfi {
+    string fingerprint;
+    string display_name;
+    u64 paired_at;
+};
+
+[Error]
+enum ContinueFfiError {
+    "InternalError",
+    "InvalidQr",
+    "PairingFailed",
+    "PairingTimeout",
+    "DatabaseError",
+    "NotInitialized",
+};

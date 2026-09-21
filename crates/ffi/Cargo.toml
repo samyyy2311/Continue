@@ -1,0 +1,31 @@
+[package]
+name = "ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib", "staticlib"]
+name = "continue_ffi"
+
+[dependencies]
+identity = { path = "../identity" }
+discovery = { path = "../discovery" }
+pairing = { path = "../pairing" }
+transport = { path = "../transport" }
+sessions = { path = "../sessions" }
+capabilities = { path = "../capabilities" }
+permissions = { path = "../permissions" }
+protocol = { path = "../protocol" }
+transfer = { path = "../transfer" }
+clipboard = { path = "../clipboard" }
+notifications = { path = "../notifications" }
+limits = { path = "../limits" }
+uniffi = { workspace = true }
+quinn = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "time", "sync"] }
+thiserror = { workspace = true }
+
+[build-dependencies]
+uniffi = { workspace = true, features = ["build"] }

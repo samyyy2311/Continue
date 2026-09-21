@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Initiates a file transfer request over a dedicated QUIC stream.
+message FileTransferRequest {
+  string transfer_id     = 1;
+  string file_name       = 2;
+  uint64 file_size       = 3;
+  bytes  sha256_checksum = 4;
+  string mime_type       = 5;
+}
+
+// Receiver response to a file transfer request.
+message FileTransferResponse {
+  string                 transfer_id = 1;
+  TransferResponseStatus status      = 2;
+  string                 reason      = 3;
+}
+
+enum TransferResponseStatus {
+  TRANSFER_RESPONSE_STATUS_UNSPECIFIED = 0;
+  TRANSFER_RESPONSE_STATUS_ACCEPTED    = 1;
+  TRANSFER_RESPONSE_STATUS_REJECTED    = 2;
+  TRANSFER_RESPONSE_STATUS_BUSY        = 3;
+  TRANSFER_RESPONSE_STATUS_ERROR       = 4;
+}
+
+// Sent by receiver after raw file data stream finishes and SHA-256 is verified.
+message FileTransferAck {
+  string transfer_id    = 1;
+  uint64 bytes_received = 2;
+  bool   verified       = 3;
+}

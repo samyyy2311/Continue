@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Supported clipboard data formats.
+enum ClipboardFormat {
+  CLIPBOARD_FORMAT_UNSPECIFIED = 0;
+  CLIPBOARD_FORMAT_TEXT_PLAIN  = 1;
+  CLIPBOARD_FORMAT_TEXT_HTML   = 2;
+  CLIPBOARD_FORMAT_IMAGE_PNG   = 3;
+}
+
+// Transmitted when the local clipboard changes and synchronization is authorized.
+message ClipboardUpdate {
+  uint64          sequence_number = 1;
+  uint64          timestamp       = 2;
+  ClipboardFormat format          = 3;
+  bytes           payload         = 4;
+}
+
+// Acknowledgment sent after a clipboard update is evaluated and applied.
+message ClipboardAck {
+  uint64 sequence_number = 1;
+  bool   applied         = 2;
+  string error_message   = 3;
+}

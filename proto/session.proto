@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Outer envelope for application-layer session messages.
+// All post-pairing messages are wrapped in a SessionEnvelope on the
+// control QUIC stream.
+message SessionEnvelope {
+  oneof body {
+    Ping       ping       = 1;
+    Pong       pong       = 2;
+    Disconnect disconnect = 3;
+  }
+}
+
+message Ping {
+  uint64 seq = 1;
+}
+
+message Pong {
+  uint64 seq = 1; // echoes the Ping seq
+}
+
+message Disconnect {
+  DisconnectReason reason  = 1;
+  string           message = 2; // human-readable; not shown to end users
+}
+
+enum DisconnectReason {
+  DISCONNECT_REASON_UNSPECIFIED    = 0;
+  DISCONNECT_REASON_NORMAL         = 1;
+  DISCONNECT_REASON_ERROR          = 2;
+  DISCONNECT_REASON_PROTOCOL       = 3;
+  DISCONNECT_REASON_UNAUTHORIZED   = 4;
+}

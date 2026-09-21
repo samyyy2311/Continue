@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Sent by a peer requesting use of a specific capability.
+message PermissionRequest {
+  uint32 capability_id      = 1;
+  uint32 capability_version = 2;
+}
+
+// Sent in response to a PermissionRequest.
+message PermissionResponse {
+  uint32          capability_id = 1;
+  PermissionGrant grant         = 2;
+}
+
+// Sent when a previously granted permission is revoked.
+// The receiving peer must stop any active use of the revoked capability immediately.
+message PermissionRevoke {
+  uint32 capability_id = 1;
+}
+
+// Wire representation of permission grants.
+// AllowOnce is deliberately absent: it is an in-memory runtime state only
+// and is never transmitted or persisted.
+enum PermissionGrant {
+  PERMISSION_GRANT_UNSPECIFIED = 0;
+  PERMISSION_GRANT_ALLOW       = 1;
+  PERMISSION_GRANT_DENY        = 2;
+  PERMISSION_GRANT_ASK         = 3;
+}

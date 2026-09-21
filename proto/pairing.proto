@@ -1,0 +1,84 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Sent by the initiator as part of the QR pairing flow.
+//
+// All fields are also present in the QR payload binary encoding.
+// The Ed25519 signature covers the canonical pairing transcript (see protocol.md).
+//
+// Transcript field layout (must match crypto::pairing::build_initiator_transcript):
+//   "PAIRING_V1_INIT" || qr_format_version(u8) || protocol_version(LE32)
+//   || 0x01 || identity_pubkey(32) || x25519_ephemeral(32)
+//   || session_token(16) || transport_spki_hash(32)
+message KeyExchangeInit {
+  // QR payload binary format version (u8 in the transcript).
+  uint32 qr_format_version  = 1;
+
+  // Application protocol version (u32 LE in the transcript).
+  uint32 protocol_version   = 2;
+
+  // Initiator's persistent Ed25519 public key (32 bytes).
+  bytes identity_pubkey     = 3;
+
+  // Initiator's ephemeral X25519 public key (32 bytes).
+  bytes x25519_ephemeral    = 4;
+
+  // SHA-256 of the initiator's TLS transport certificate SPKI (32 bytes).
+  bytes transport_spki_hash = 5;
+
+  // Cryptographically random single-use session token (16 bytes).
+  bytes session_token       = 6;
+
+  // Ed25519 signature over the initiator transcript (64 bytes).
+  bytes signature           = 7;
+}
+
+// Sent by the responder after verifying the initiator's transcript and SPKI binding.
+//
+// The initiator must verify this signature, then verify:
+//   SHA-256(actual responder TLS cert SPKI) == resp_transport_spki_hash
+// before proceeding to PairConfirm. A mismatch aborts pairing.
+//
+// Transcript field layout (must match crypto::pairing::build_responder_transcript):
+//   "PAIRING_V1_RESP" || qr_format_version(u8) || protocol_version(LE32)
+//   || 0x02 || identity_pubkey(32) || x25519_ephemeral(32)
+//   || session_token(16) || transport_spki_hash(32)
+message KeyExchangeResponse {
+  uint32 qr_format_version      = 1;
+  uint32 protocol_version       = 2;
+  bytes  identity_pubkey        = 3;
+  bytes  x25519_ephemeral       = 4;
+  bytes  resp_transport_spki_hash = 5;
+
+  // Echoed initiator session token. Must match exactly.
+  bytes  session_token          = 6;
+
+  // Ed25519 signature over the responder transcript (64 bytes).
+  bytes  signature              = 7;
+}
+
+// Key-confirmation MAC exchanged after X25519 ECDH and HKDF key derivation.
+//
+// Each peer computes HMAC-SHA256(confirmation_key, role_label || full_transcript)
+// and sends their MAC. Trust is persisted locally only after the peer's MAC
+// verifies successfully.
+message PairConfirm {
+  // 32-byte HMAC-SHA256 key-confirmation MAC.
+  bytes mac = 1;
+}
+
+// Sent when pairing is explicitly rejected by the user or the protocol.
+message PairReject {
+  PairRejectReason reason = 1;
+}
+
+enum PairRejectReason {
+  PAIR_REJECT_REASON_UNSPECIFIED   = 0;
+  PAIR_REJECT_REASON_USER_DECLINED = 1;
+  PAIR_REJECT_REASON_ALREADY_PAIRED = 2;
+  PAIR_REJECT_REASON_BLOCKED       = 3;
+  PAIR_REJECT_REASON_SESSION_EXPIRED = 4;
+}

@@ -1,0 +1,27 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+import "device.proto";
+
+// Sent by a device advertising itself over mDNS or a direct connection.
+// The ephemeral_id rotates every 24 hours and must never be the device fingerprint.
+message DiscoveryHello {
+  // Random 128-bit ephemeral identifier for this discovery period.
+  // Not stable across rotations; must not be used for trust decisions.
+  bytes ephemeral_id = 1;
+
+  // QUIC port the device is listening on.
+  uint32 quic_port = 2;
+
+  // Protocol version so peers can quickly detect incompatibility.
+  uint32 protocol_version = 3;
+}
+
+// Sent in response to DiscoveryHello to confirm reachability.
+message HelloAck {
+  bytes ephemeral_id     = 1;
+  uint32 protocol_version = 2;
+}

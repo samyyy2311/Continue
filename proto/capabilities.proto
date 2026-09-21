@@ -1,0 +1,24 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Sent by each peer after session establishment to advertise its supported capabilities.
+// The intersection of both peers' sets forms the negotiated capability set.
+message CapabilityAdvertisement {
+  repeated CapabilityEntry supported = 1;
+}
+
+// A single capability entry. `id` maps to the CapabilityId Rust newtype (u32).
+// Unknown id values received from a peer are represented as CapabilityId(n)
+// and are silently excluded from local matching — they are never rejected.
+message CapabilityEntry {
+  uint32 id      = 1;
+  uint32 version = 2;
+}
+
+// Sent by a peer after computing the negotiated intersection.
+message NegotiationResult {
+  repeated CapabilityEntry negotiated = 1;
+}

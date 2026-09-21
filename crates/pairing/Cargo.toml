@@ -1,0 +1,21 @@
+[package]
+name = "pairing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+limits = { path = "../limits" }
+crypto = { path = "../crypto" }
+identity = { path = "../identity" }
+protocol = { path = "../protocol" }
+transport = { path = "../transport" }
+rusqlite = { workspace = true }
+base64 = { workspace = true }
+prost = { workspace = true }
+bytes = { workspace = true }
+zeroize = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }

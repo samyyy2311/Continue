@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Operating system/platform running on the device.
+// PLATFORM_UNSPECIFIED (0) is the safe proto3 default and must remain zero.
+enum Platform {
+  PLATFORM_UNSPECIFIED = 0;
+  PLATFORM_ANDROID     = 1;
+  PLATFORM_WINDOWS     = 2;
+  PLATFORM_LINUX       = 3;
+  PLATFORM_MACOS       = 4;
+  PLATFORM_IOS         = 5;
+}
+
+// Stable device descriptor exchanged during discovery and pairing.
+message DeviceInfo {
+  // Base64Url-no-padding SHA-256 fingerprint of the Ed25519 identity public key.
+  // 43 characters. Never transmitted in mDNS advertisements.
+  string fingerprint = 1;
+
+  // Human-readable name, max 64 UTF-8 bytes. May be empty during discovery.
+  string display_name = 2;
+
+  Platform platform = 3;
+
+  // Application protocol version. Incremented on wire-incompatible changes.
+  uint32 protocol_version = 4;
+
+  // Ed25519 identity public key bytes (32 bytes).
+  // Used by the peer to recompute and verify the fingerprint.
+  bytes ed25519_public_key = 5;
+}
