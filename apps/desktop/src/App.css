@@ -22,7 +22,7 @@
   --silver-dim: #6e6c68;
   --text-muted: #6e6c68;
 
-  /* Warm Terracotta / Coral Accent from CassetteCat */
+  /* Terracotta / Coral Accent from CassetteCat */
   --accent: #e55b3c;
   --accent-hover: #f06a4c;
   --accent-active: #c23b30;
@@ -96,6 +96,7 @@ body {
   flex-shrink: 0;
   height: 100vh;
   user-select: none;
+  z-index: 10;
 }
 
 .sidebar-header {
@@ -129,7 +130,14 @@ body {
   color: var(--text-primary);
 }
 
-/* Sidebar Nav Groups */
+.brand-version {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--silver-dim);
+  margin-left: auto;
+}
+
+/* Sidebar Nav */
 .sidebar-nav {
   padding: 10px 8px;
   display: flex;
@@ -154,7 +162,7 @@ body {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
   width: 100%;
   text-align: left;
 }
@@ -282,13 +290,14 @@ body {
 /* Top Header Bar */
 .main-header {
   height: 52px;
-  padding: 0 32px;
+  padding: 0 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border-subtle);
   background-color: var(--surface-base);
   flex-shrink: 0;
+  user-select: none;
 }
 
 .main-header-left {
@@ -299,7 +308,7 @@ body {
 
 .page-title {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
   letter-spacing: -0.3px;
   color: var(--text-primary);
@@ -311,7 +320,7 @@ body {
   gap: 6px;
   font-size: 11px;
   color: var(--text-secondary);
-  padding: 3px 8px;
+  padding: 3px 9px;
   border-radius: 6px;
   background-color: var(--surface-card);
   border: 1px solid var(--border-subtle);
@@ -322,22 +331,56 @@ body {
   height: 6px;
   border-radius: 50%;
   background-color: var(--green);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
 }
 
 .main-header-right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+}
+
+/* Window Control Buttons */
+.window-controls {
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+  border-left: 1px solid var(--border-subtle);
+  padding-left: 12px;
+}
+
+.win-btn {
+  width: 30px;
+  height: 28px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--silver-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.win-btn:hover {
+  background-color: var(--surface-card-hover);
+  color: var(--text-primary);
+}
+
+.win-btn-close:hover {
+  background-color: #c23b30;
+  color: #ffffff;
 }
 
 /* Content Area */
 .page-body {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 32px 40px;
+  padding: 24px 28px 48px;
 }
 
-/* CassetteCat SectionLabel */
+/* SectionLabel matching CassetteCat */
 .section-label {
   display: block;
   font-size: 11px;
@@ -351,7 +394,7 @@ body {
 /* Responsive Device Card Grid */
 .device-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 14px;
   margin-bottom: 28px;
 }
@@ -378,8 +421,8 @@ body {
 }
 
 .device-card-avatar {
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: 8px;
   background-color: var(--surface-input);
   border: 1px solid var(--border-subtle);
@@ -434,7 +477,7 @@ body {
   background-color: var(--surface-card);
   border: 1px dashed var(--border-variant);
   border-radius: 10px;
-  padding: 24px;
+  padding: 22px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -443,7 +486,8 @@ body {
   transition: border-color 0.12s ease, background-color 0.12s ease;
 }
 
-.dropzone-container:hover {
+.dropzone-container:hover,
+.dropzone-container.dragging-over {
   border-color: var(--accent);
   background-color: var(--surface-card-hover);
 }
@@ -479,7 +523,25 @@ body {
   color: var(--text-secondary);
 }
 
-/* Full Width Data Table matching CassetteCat Data Density */
+.dropzone-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.peer-select {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-variant);
+  background-color: var(--surface-input);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+
+/* Full Width Data Table */
 .table-card {
   background-color: var(--surface-card);
   border: 1px solid var(--border-subtle);
@@ -553,7 +615,7 @@ body {
   color: #f87171;
 }
 
-/* SettingCard & SettingRow from CassetteCat */
+/* CassetteCat SettingCard & SettingRow */
 .setting-card {
   background-color: var(--surface-card);
   border: 1px solid var(--border-subtle);
@@ -606,7 +668,7 @@ body {
   color: var(--text-secondary);
 }
 
-/* CassetteCat Compact SettingSwitch.qml */
+/* Compact SettingSwitch.qml */
 .setting-switch {
   position: relative;
   display: inline-block;
@@ -695,7 +757,7 @@ input:checked + .switch-track:before {
 }
 
 .btn-sm {
-  padding: 3px 8px;
+  padding: 4px 9px;
   font-size: 11px;
   border-radius: 5px;
 }
@@ -792,6 +854,46 @@ input:checked + .switch-track:before {
   margin-top: 2px;
 }
 
+/* CassetteCat Style Empty State */
+.empty-state-box {
+  padding: 48px 24px;
+  text-align: center;
+  background-color: var(--surface-card);
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background-color: var(--surface-input);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--silver-dim);
+  margin-bottom: 4px;
+}
+
+.empty-state-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.empty-state-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-width: 380px;
+  line-height: 1.5;
+}
+
 /* Modal */
 .modal-backdrop {
   position: fixed;
@@ -847,11 +949,11 @@ input:checked + .switch-track:before {
 /* Toast */
 .floating-toast {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
+  bottom: 24px;
+  right: 28px;
   background-color: var(--surface-card);
   border: 1px solid var(--border-variant);
-  padding: 9px 14px;
+  padding: 10px 16px;
   border-radius: 8px;
   font-size: 12px;
   color: var(--text-primary);
