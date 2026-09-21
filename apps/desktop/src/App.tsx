@@ -3,28 +3,27 @@
 
 import React, { useEffect, useState } from "react";
 import {
+  Share2,
   Smartphone,
   Tablet,
-  Send,
-  Upload,
+  ArrowDownUp,
   Clipboard,
   Bell,
-  Shield,
-  Key,
+  Settings,
   Plus,
-  X,
+  Key,
   Check,
   Copy,
+  Upload,
   FileText,
-  Share2,
-  ExternalLink,
-  Search,
   ArrowDownLeft,
   ArrowUpRight,
-  SlidersHorizontal,
+  ExternalLink,
+  X,
   RefreshCw,
-  Lock,
   ShieldCheck,
+  Lock,
+  SlidersHorizontal,
 } from "lucide-react";
 import "./App.css";
 import type { DeviceIdentity, TrustedPeer, TransferHistoryItem, NotificationItem } from "./types.ts";
@@ -66,10 +65,10 @@ async function fetchPeers(): Promise<TrustedPeer[]> {
   }
 }
 
-export function App() {
-  const [selectedPeerId, setSelectedPeerId] = useState<string>("cont1q9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a");
-  const [activeTab, setActiveTab] = useState<"transfers" | "clipboard" | "notifications" | "permissions">("transfers");
+type AppPage = "devices" | "transfers" | "clipboard" | "notifications" | "settings";
 
+export function App() {
+  const [activePage, setActivePage] = useState<AppPage>("devices");
   const [identity, setIdentity] = useState<DeviceIdentity>({
     deviceName: "Desktop PC",
     fingerprint: "cont1q8f7e2a9d4c6b8a1e3f5a7b9c1d3e5f7a9b1c3d",
@@ -148,12 +147,7 @@ export function App() {
 
   useEffect(() => {
     fetchIdentity().then(setIdentity);
-    fetchPeers().then((loaded) => {
-      setPeers(loaded);
-      if (loaded.length > 0) {
-        setSelectedPeerId(loaded[0].fingerprint);
-      }
-    });
+    fetchPeers().then(setPeers);
   }, []);
 
   const showToast = (msg: string) => {
@@ -175,11 +169,7 @@ export function App() {
     } catch {
       // Fallback
     }
-    const updated = peers.filter((p) => p.fingerprint !== fingerprint);
-    setPeers(updated);
-    if (updated.length > 0) {
-      setSelectedPeerId(updated[0].fingerprint);
-    }
+    setPeers((prev) => prev.filter((p) => p.fingerprint !== fingerprint));
     showToast("Device unshared");
   };
 
@@ -191,19 +181,17 @@ export function App() {
       const { invoke } = await import("@tauri-apps/api/core");
       const peer = await invoke<TrustedPeer>("pair_from_qr", { qrPayload: pairingPayload.trim() });
       setPeers((prev) => [...prev, peer]);
-      setSelectedPeerId(peer.fingerprint);
       showToast(`Connected to ${peer.displayName}`);
     } catch {
       const dummy: TrustedPeer = {
         fingerprint: "cont1q" + Math.random().toString(36).substring(2, 14),
-        displayName: "Pixel 8 Pro",
+        displayName: "New Mobile Device",
         pairedAt: Math.floor(Date.now() / 1000),
         isConnected: true,
-        endpoint: "192.168.1.105:4433",
+        endpoint: "192.168.1.115:4433",
       };
       setPeers((prev) => [...prev, dummy]);
-      setSelectedPeerId(dummy.fingerprint);
-      showToast("Connected to Pixel 8 Pro via QUIC");
+      showToast("Connected via QUIC");
     }
 
     setPairingPayload("");
@@ -212,11 +200,12 @@ export function App() {
 
   const handleSendClipboard = async () => {
     if (!clipboardInput.trim()) return;
+    const targetPeer = peers[0];
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      if (currentPeer) {
+      if (targetPeer) {
         await invoke("send_clipboard_text", {
-          peerFingerprint: currentPeer.fingerprint,
+          peerFingerprint: targetPeer.fingerprint,
           text: clipboardInput,
         });
       }
@@ -230,22 +219,22 @@ export function App() {
       device: "Desktop PC",
     };
     setSyncedClips((prev) => [newClip, ...prev]);
-    showToast(`Clip sent to ${currentPeer ? currentPeer.displayName : "peer"}`);
+    showToast("Clip synced to devices");
     setClipboardInput("");
   };
 
-  const handleTriggerSendFile = () => {
+  const handleTriggerSendFile = (targetDeviceName?: string) => {
     const newTx: TransferHistoryItem = {
       id: "tx-" + Date.now(),
       fileName: "presentation_deck.pdf",
       fileSize: 3145728,
       direction: "outgoing",
-      peerFingerprint: currentPeer ? currentPeer.fingerprint : "cont1q9a8b",
+      peerFingerprint: peers[0]?.fingerprint || "cont1q9a8b",
       status: "completed",
       timestamp: Date.now(),
     };
     setTransfers((prev) => [newTx, ...prev]);
-    showToast("Streaming presentation_deck.pdf over QUIC");
+    showToast(`Streaming presentation_deck.pdf to ${targetDeviceName || "peer"}`);
   };
 
   const handleDismissNotification = (id: string) => {
@@ -253,492 +242,597 @@ export function App() {
     showToast("Notification dismissed");
   };
 
-  const currentPeer = peers.find((p) => p.fingerprint === selectedPeerId) || peers[0];
+  const pageTitleMap: Record<AppPage, string> = {
+    devices: "Connected Devices",
+    transfers: "File Transfers",
+    clipboard: "Clipboard Sync",
+    notifications: "Notification Feed",
+    settings: "System Settings",
+  };
 
   return (
-    <div className="app-container">
-      {/* Sleek Integrated Titlebar */}
-      <header className="titlebar">
-        <div className="titlebar-left">
-          <div className="brand-badge">
-            <div className="brand-symbol">
-              <Share2 size={13} />
-            </div>
-            <span className="brand-name">Continue</span>
+    <div className="app-shell">
+      {/* Sidebar matching CassetteCat (200px width) */}
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <div className="brand-icon-box">
+            <Share2 size={16} />
           </div>
+          <span className="brand-title">Continue</span>
         </div>
 
-        <div className="titlebar-center">
-          <div className="quick-search-trigger" onClick={() => setShowPairDialog(true)}>
-            <Search size={13} />
-            <span>Quick search devices or actions...</span>
-            <span className="kbd-shortcut">Ctrl+K</span>
-          </div>
-        </div>
+        <nav className="sidebar-nav">
+          <button
+            className={`nav-item ${activePage === "devices" ? "active" : ""}`}
+            onClick={() => setActivePage("devices")}
+          >
+            <Smartphone size={16} className="nav-item-icon" />
+            <span className="nav-item-label">Devices</span>
+            <span className="nav-item-badge">{peers.length}</span>
+          </button>
 
-        <div className="titlebar-right">
-          <div className="mesh-status-indicator">
-            <span className="status-dot" />
-            <span>QUIC :4433</span>
-          </div>
+          <button
+            className={`nav-item ${activePage === "transfers" ? "active" : ""}`}
+            onClick={() => setActivePage("transfers")}
+          >
+            <ArrowDownUp size={16} className="nav-item-icon" />
+            <span className="nav-item-label">Transfers</span>
+          </button>
 
-          <button className="btn btn-sm btn-primary" onClick={() => setShowPairDialog(true)}>
-            <Plus size={13} />
-            <span>Pair</span>
+          <button
+            className={`nav-item ${activePage === "clipboard" ? "active" : ""}`}
+            onClick={() => setActivePage("clipboard")}
+          >
+            <Clipboard size={16} className="nav-item-icon" />
+            <span className="nav-item-label">Clipboard</span>
+          </button>
+
+          <button
+            className={`nav-item ${activePage === "notifications" ? "active" : ""}`}
+            onClick={() => setActivePage("notifications")}
+          >
+            <Bell size={16} className="nav-item-icon" />
+            <span className="nav-item-label">Notifications</span>
+            {notifications.length > 0 && (
+              <span className="nav-item-badge" style={{ color: "var(--accent)" }}>
+                {notifications.length}
+              </span>
+            )}
+          </button>
+
+          <div className="sidebar-divider" />
+
+          <button
+            className={`nav-item ${activePage === "settings" ? "active" : ""}`}
+            onClick={() => setActivePage("settings")}
+          >
+            <Settings size={16} className="nav-item-icon" />
+            <span className="nav-item-label">Settings</span>
+          </button>
+        </nav>
+
+        <div className="sidebar-footer">
+          <div className="host-name-row">
+            <span className="host-label">{identity.deviceName}</span>
+            <span className="host-tag">Host</span>
+          </div>
+          <button
+            className="host-fingerprint-btn"
+            title="Copy Ed25519 identity key"
+            onClick={handleCopyFingerprint}
+          >
+            <Key size={11} />
+            <span>{identity.fingerprint.substring(0, 14)}...</span>
+            {copiedFingerprint ? <Check size={11} color="var(--green)" /> : <Copy size={11} />}
           </button>
         </div>
-      </header>
+      </aside>
 
-      {/* Workspace Master-Detail Split */}
-      <div className="workspace-split">
-        {/* Master Rail: Device Mesh (260px) */}
-        <aside className="device-mesh-pane">
-          <div className="pane-header-row">
-            <span className="pane-section-label">Mesh Devices ({peers.length})</span>
-          </div>
-
-          <div className="device-list">
-            {peers.map((peer) => {
-              const isSelected = peer.fingerprint === selectedPeerId;
-              return (
-                <div
-                  key={peer.fingerprint}
-                  className={`device-list-item ${isSelected ? "selected" : ""}`}
-                  onClick={() => setSelectedPeerId(peer.fingerprint)}
-                >
-                  <div className="device-avatar">
-                    {peer.displayName.toLowerCase().includes("tablet") ? (
-                      <Tablet size={16} />
-                    ) : (
-                      <Smartphone size={16} />
-                    )}
-                  </div>
-
-                  <div className="device-item-info">
-                    <span className="device-item-name">{peer.displayName}</span>
-                    <span className="device-item-sub">{peer.endpoint}</span>
-                  </div>
-
-                  <div className="device-item-right">
-                    <span className="device-status-badge" />
-                    <span className="device-battery-text">100%</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="pair-action-box">
-            <button className="btn-pair-device" onClick={() => setShowPairDialog(true)}>
-              <Plus size={14} />
-              <span>Pair New Device</span>
-            </button>
-          </div>
-
-          <div className="rail-bottom-card">
-            <div className="local-node-row">
-              <span className="local-node-name">{identity.deviceName}</span>
-              <span style={{ fontSize: 11, color: "var(--green)" }}>Host</span>
+      {/* Main Workspace Stage */}
+      <main className="main-stage">
+        {/* Top Header Bar */}
+        <header className="main-header">
+          <div className="main-header-left">
+            <h1 className="page-title">{pageTitleMap[activePage]}</h1>
+            <div className="header-status-chip">
+              <span className="status-dot" />
+              <span>QUIC :4433 Active</span>
             </div>
-            <button
-              className="local-node-hash-btn"
-              title="Copy Ed25519 node key"
-              onClick={handleCopyFingerprint}
-            >
-              <Key size={11} />
-              <span>{identity.fingerprint.substring(0, 14)}...</span>
-              {copiedFingerprint ? <Check size={11} color="var(--green)" /> : <Copy size={11} />}
+          </div>
+
+          <div className="main-header-right">
+            <button className="btn btn-primary" onClick={() => setShowPairDialog(true)}>
+              <Plus size={13} />
+              <span>Pair Device</span>
             </button>
           </div>
-        </aside>
+        </header>
 
-        {/* Detail Workspace for Selected Device */}
-        <main className="device-detail-pane">
-          {currentPeer ? (
-            <>
-              {/* Detail Header Bar */}
-              <div className="detail-header">
-                <div className="detail-header-left">
-                  <h2 className="detail-header-title">{currentPeer.displayName}</h2>
-                  <span className="detail-header-status">
-                    <span className="status-dot" />
-                    Connected via QUIC
-                  </span>
-                  <span className="detail-header-endpoint">{currentPeer.endpoint}</span>
-                </div>
-
-                {/* Segmented Control */}
-                <div className="segmented-nav">
-                  <button
-                    className={`segment-btn ${activeTab === "transfers" ? "active" : ""}`}
-                    onClick={() => setActiveTab("transfers")}
-                  >
-                    <Send size={13} />
-                    <span>Transfers</span>
-                  </button>
-
-                  <button
-                    className={`segment-btn ${activeTab === "clipboard" ? "active" : ""}`}
-                    onClick={() => setActiveTab("clipboard")}
-                  >
-                    <Clipboard size={13} />
-                    <span>Clipboard</span>
-                  </button>
-
-                  <button
-                    className={`segment-btn ${activeTab === "notifications" ? "active" : ""}`}
-                    onClick={() => setActiveTab("notifications")}
-                  >
-                    <Bell size={13} />
-                    <span>Notifications</span>
-                    {notifications.length > 0 && (
-                      <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 4, backgroundColor: "var(--amber)", color: "#000", fontWeight: 700 }}>
-                        {notifications.length}
-                      </span>
-                    )}
-                  </button>
-
-                  <button
-                    className={`segment-btn ${activeTab === "permissions" ? "active" : ""}`}
-                    onClick={() => setActiveTab("permissions")}
-                  >
-                    <Shield size={13} />
-                    <span>Permissions</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Detail Content */}
-              <div className="detail-content">
-                {/* TAB 1: TRANSFERS */}
-                {activeTab === "transfers" && (
-                  <div className="settings-section">
-                    <div>
-                      <span className="section-label">Fast Send</span>
-                      {/* Compact Dropzone */}
-                      <div className="compact-dropzone" onClick={handleTriggerSendFile}>
-                        <div className="dropzone-left-content">
-                          <div className="dropzone-icon-box">
-                            <Upload size={18} />
-                          </div>
-                          <div>
-                            <div className="dropzone-title">Drop files here to send to {currentPeer.displayName}</div>
-                            <div className="dropzone-desc">Chunked 64 KB QUIC streaming with SHA-256 verification</div>
-                          </div>
-                        </div>
-                        <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); handleTriggerSendFile(); }}>
-                          Browse Files
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <span className="section-label">Recent Activity</span>
-                      <div className="data-table-wrap">
-                        <div className="data-table-header">
-                          <span>File Name</span>
-                          <span>Size</span>
-                          <span>Direction</span>
-                          <span>Status</span>
-                          <span style={{ textAlign: "right" }}>Actions</span>
-                        </div>
-
-                        {transfers.map((tx) => (
-                          <div key={tx.id} className="data-table-row">
-                            <div className="table-file-cell">
-                              <FileText size={16} color="var(--accent-cyan)" />
-                              <span className="table-file-name">{tx.fileName}</span>
-                            </div>
-
-                            <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
-                              {(tx.fileSize / 1024 / 1024).toFixed(2)} MB
-                            </span>
-
-                            <div>
-                              <span className={`badge-direction ${tx.direction === "incoming" ? "badge-incoming" : "badge-outgoing"}`}>
-                                {tx.direction === "incoming" ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}
-                                {tx.direction}
-                              </span>
-                            </div>
-
-                            <div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--green)" }}>
-                              <Check size={13} />
-                              <span>Verified</span>
-                            </div>
-
-                            <div style={{ textAlign: "right" }}>
-                              <button
-                                className="btn btn-sm"
-                                onClick={() => showToast(`Opened ${tx.fileName}`)}
-                              >
-                                <ExternalLink size={12} />
-                                <span>Reveal</span>
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* TAB 2: CLIPBOARD */}
-                {activeTab === "clipboard" && (
-                  <div className="settings-section">
-                    <div>
-                      <span className="section-label">Sync Preferences</span>
-                      <div className="settings-card">
-                        <div className="settings-row">
-                          <div className="settings-row-lead">
-                            <RefreshCw size={18} className="settings-row-icon" />
-                            <div className="settings-row-text">
-                              <span className="settings-row-title">Bidirectional Sync</span>
-                              <span className="settings-row-desc">Automatically mirror copied text and media to {currentPeer.displayName}</span>
-                            </div>
-                          </div>
-                          <label className="sleek-switch">
-                            <input
-                              type="checkbox"
-                              checked={allowClipboardSync}
-                              onChange={(e) => setAllowClipboardSync(e.target.checked)}
-                            />
-                            <span className="sleek-slider" />
-                          </label>
-                        </div>
-
-                        <div className="setting-divider" />
-
-                        <div className="settings-row">
-                          <div className="settings-row-lead">
-                            <ShieldCheck size={18} className="settings-row-icon" />
-                            <div className="settings-row-text">
-                              <span className="settings-row-title">Echo Suppression Protection</span>
-                              <span className="settings-row-desc">Rolling 16-entry hash ring eliminates recursive paste loops</span>
-                            </div>
-                          </div>
-                          <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>Active</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <span className="section-label">Send Clip to Device</span>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <input
-                          type="text"
-                          className="sleek-input"
-                          placeholder="Type or paste text to blast to device..."
-                          value={clipboardInput}
-                          onChange={(e) => setClipboardInput(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") handleSendClipboard(); }}
-                        />
-                        <button className="btn btn-primary" onClick={handleSendClipboard}>
-                          Send
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <span className="section-label">Synchronized History</span>
-                      <div className="data-table-wrap">
-                        <div className="data-table-header" style={{ gridTemplateColumns: "3fr 1fr 1fr" }}>
-                          <span>Text Content</span>
-                          <span>Source</span>
-                          <span style={{ textAlign: "right" }}>Action</span>
-                        </div>
-
-                        {syncedClips.map((clip) => (
-                          <div key={clip.id} className="data-table-row" style={{ gridTemplateColumns: "3fr 1fr 1fr" }}>
-                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {clip.text}
-                            </span>
-                            <span style={{ color: "var(--silver-dim)", fontSize: 11 }}>{clip.device}</span>
-                            <div style={{ textAlign: "right" }}>
-                              <button
-                                className="btn btn-sm"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(clip.text);
-                                  showToast("Copied to clipboard");
-                                }}
-                              >
-                                <Copy size={11} />
-                                <span>Copy</span>
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* TAB 3: NOTIFICATIONS */}
-                {activeTab === "notifications" && (
-                  <div className="settings-section">
-                    <div>
-                      <span className="section-label">Incoming Alerts ({notifications.length})</span>
-                      <div className="notification-feed">
-                        {notifications.length === 0 ? (
-                          <div style={{ padding: 40, textAlign: "center", color: "var(--silver-dim)" }}>
-                            No incoming notifications from {currentPeer.displayName}
-                          </div>
+        {/* Content Body */}
+        <div className="page-body">
+          {/* PAGE 1: DEVICES */}
+          {activePage === "devices" && (
+            <div>
+              <span className="section-label">Paired Devices ({peers.length})</span>
+              <div className="device-grid">
+                {peers.map((peer) => (
+                  <div key={peer.fingerprint} className="device-card">
+                    <div className="device-card-header">
+                      <div className="device-card-avatar">
+                        {peer.displayName.toLowerCase().includes("tablet") ? (
+                          <Tablet size={18} />
                         ) : (
-                          notifications.map((notif) => (
-                            <div key={notif.id} className="notification-card-item">
-                              <div className="notif-app-badge">
-                                <Bell size={14} />
-                              </div>
-
-                              <div className="notif-main-wrap">
-                                <div className="notif-title-row">
-                                  <span className="notif-author">
-                                    {notif.title} &bull; <span style={{ color: "var(--silver-dim)", fontWeight: 400 }}>{notif.appName}</span>
-                                  </span>
-                                  <span className="notif-timestamp">2m ago</span>
-                                </div>
-                                <span className="notif-body-message">{notif.body}</span>
-                              </div>
-
-                              <button
-                                className="btn btn-sm"
-                                onClick={() => handleDismissNotification(notif.id)}
-                              >
-                                Dismiss
-                              </button>
-                            </div>
-                          ))
+                          <Smartphone size={18} />
                         )}
                       </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* TAB 4: PERMISSIONS */}
-                {activeTab === "permissions" && (
-                  <div className="settings-section">
-                    <div>
-                      <span className="section-label">Device Capabilities</span>
-                      <div className="settings-card">
-                        <div className="settings-row">
-                          <div className="settings-row-lead">
-                            <Upload size={18} className="settings-row-icon" />
-                            <div className="settings-row-text">
-                              <span className="settings-row-title">File Transfer Permission</span>
-                              <span className="settings-row-desc">Allow receiving and streaming files over QUIC</span>
-                            </div>
-                          </div>
-                          <label className="sleek-switch">
-                            <input
-                              type="checkbox"
-                              checked={allowFileTransfer}
-                              onChange={(e) => setAllowFileTransfer(e.target.checked)}
-                            />
-                            <span className="sleek-slider" />
-                          </label>
-                        </div>
-
-                        <div className="setting-divider" />
-
-                        <div className="settings-row">
-                          <div className="settings-row-lead">
-                            <Bell size={18} className="settings-row-icon" />
-                            <div className="settings-row-text">
-                              <span className="settings-row-title">Notification Mirroring</span>
-                              <span className="settings-row-desc">Forward push alerts with remote dismiss sync</span>
-                            </div>
-                          </div>
-                          <label className="sleek-switch">
-                            <input
-                              type="checkbox"
-                              checked={allowNotifications}
-                              onChange={(e) => setAllowNotifications(e.target.checked)}
-                            />
-                            <span className="sleek-slider" />
-                          </label>
-                        </div>
-
-                        <div className="setting-divider" />
-
-                        <div className="settings-row">
-                          <div className="settings-row-lead">
-                            <SlidersHorizontal size={18} className="settings-row-icon" />
-                            <div className="settings-row-text">
-                              <span className="settings-row-title">Auto-Accept Small Transfers</span>
-                              <span className="settings-row-desc">Automatically accept payloads under 10 MB without manual prompt</span>
-                            </div>
-                          </div>
-                          <label className="sleek-switch">
-                            <input
-                              type="checkbox"
-                              checked={autoAcceptSmall}
-                              onChange={(e) => setAutoAcceptSmall(e.target.checked)}
-                            />
-                            <span className="sleek-slider" />
-                          </label>
-                        </div>
-
-                        <div className="setting-divider" />
-
-                        <div className="settings-row">
-                          <div className="settings-row-lead">
-                            <Lock size={18} className="settings-row-icon" />
-                            <div className="settings-row-text">
-                              <span className="settings-row-title">Mutual TLS 1.3 Certificate Pinning</span>
-                              <span className="settings-row-desc">SPKI transport certificate pinned to Ed25519 identity</span>
-                            </div>
-                          </div>
-                          <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>Enforced</span>
-                        </div>
+                      <div className="device-card-meta">
+                        <div className="device-card-title">{peer.displayName}</div>
+                        <div className="device-card-endpoint">{peer.endpoint}</div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--green)" }}>
+                        <span className="status-dot" />
+                        <span>Online</span>
                       </div>
                     </div>
 
-                    <div>
-                      <span className="section-label" style={{ color: "var(--red)" }}>Danger Zone</span>
-                      <div className="settings-card" style={{ borderColor: "rgba(239, 68, 68, 0.25)" }}>
-                        <div className="settings-row">
-                          <div className="settings-row-text">
-                            <span className="settings-row-title">Unpair Device</span>
-                            <span className="settings-row-desc">Revoke mutual authentication keys and terminate active session</span>
-                          </div>
-                          <button
-                            className="btn btn-danger"
-                            onClick={() => handleDisconnectPeer(currentPeer.fingerprint)}
-                          >
-                            Unpair
-                          </button>
-                        </div>
-                      </div>
+                    <div className="device-card-stats">
+                      <span>Battery: 100%</span>
+                      <span>mTLS 1.3 Pinned</span>
+                      <span>Latency: 2ms</span>
+                    </div>
+
+                    <div className="device-card-actions">
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => handleTriggerSendFile(peer.displayName)}
+                      >
+                        <Upload size={12} />
+                        <span>Send File</span>
+                      </button>
+                      <button
+                        className="btn btn-sm btn-danger"
+                        onClick={() => handleDisconnectPeer(peer.fingerprint)}
+                      >
+                        Unpair
+                      </button>
                     </div>
                   </div>
-                )}
+                ))}
               </div>
-            </>
-          ) : (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, color: "var(--text-muted)" }}>
-              No device selected. Pair a device from the left rail to begin.
+
+              <span className="section-label">This Machine</span>
+              <div className="setting-card">
+                <div className="setting-row">
+                  <div className="setting-lead">
+                    <Key size={18} className="setting-icon" />
+                    <div className="setting-text">
+                      <span className="setting-title">{identity.deviceName} (Ed25519 Local Node)</span>
+                      <span className="setting-subtitle" style={{ fontFamily: "var(--font-mono)" }}>
+                        {identity.fingerprint}
+                      </span>
+                    </div>
+                  </div>
+                  <button className="btn btn-sm" onClick={handleCopyFingerprint}>
+                    <Copy size={12} />
+                    <span>Copy Key</span>
+                  </button>
+                </div>
+                <div className="setting-divider" />
+                <div className="setting-row">
+                  <div className="setting-lead">
+                    <Lock size={18} className="setting-icon" />
+                    <div className="setting-text">
+                      <span className="setting-title">SPKI Transport Certificate Hash</span>
+                      <span className="setting-subtitle" style={{ fontFamily: "var(--font-mono)" }}>
+                        {identity.spkiHash}
+                      </span>
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>Active</span>
+                </div>
+              </div>
             </div>
           )}
-        </main>
-      </div>
+
+          {/* PAGE 2: TRANSFERS */}
+          {activePage === "transfers" && (
+            <div>
+              <span className="section-label">Fast File Share</span>
+              <div className="dropzone-container" onClick={() => handleTriggerSendFile()}>
+                <div className="dropzone-lead">
+                  <div className="dropzone-icon">
+                    <Upload size={20} />
+                  </div>
+                  <div>
+                    <div className="dropzone-title">Drop files to stream over encrypted QUIC</div>
+                    <div className="dropzone-subtitle">
+                      64 KB chunking with SHA-256 integrity verification
+                    </div>
+                  </div>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTriggerSendFile();
+                  }}
+                >
+                  Browse Files
+                </button>
+              </div>
+
+              <span className="section-label">Transfer History</span>
+              <div className="table-card">
+                <div
+                  className="table-head-row"
+                  style={{ gridTemplateColumns: "3fr 1.5fr 1fr 1fr 1fr 1fr" }}
+                >
+                  <span>File Name</span>
+                  <span>Peer</span>
+                  <span>Size</span>
+                  <span>Direction</span>
+                  <span>Status</span>
+                  <span style={{ textAlign: "right" }}>Actions</span>
+                </div>
+
+                {transfers.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="table-body-row"
+                    style={{ gridTemplateColumns: "3fr 1.5fr 1fr 1fr 1fr 1fr" }}
+                  >
+                    <div className="file-name-cell">
+                      <FileText size={16} color="var(--accent)" />
+                      <span className="file-name-text">{tx.fileName}</span>
+                    </div>
+
+                    <span style={{ color: "var(--text-secondary)" }}>Pixel 8 Pro</span>
+
+                    <span style={{ color: "var(--silver-dim)", fontFamily: "var(--font-mono)" }}>
+                      {(tx.fileSize / 1024 / 1024).toFixed(2)} MB
+                    </span>
+
+                    <div>
+                      <span
+                        className={`badge-dir ${tx.direction === "incoming" ? "badge-in" : "badge-out"}`}
+                      >
+                        {tx.direction === "incoming" ? (
+                          <ArrowDownLeft size={12} />
+                        ) : (
+                          <ArrowUpRight size={12} />
+                        )}
+                        {tx.direction}
+                      </span>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--green)" }}>
+                      <Check size={13} />
+                      <span>Verified</span>
+                    </div>
+
+                    <div style={{ textAlign: "right" }}>
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => showToast(`Opened ${tx.fileName}`)}
+                      >
+                        <ExternalLink size={12} />
+                        <span>Reveal</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* PAGE 3: CLIPBOARD */}
+          {activePage === "clipboard" && (
+            <div>
+              <span className="section-label">Sync Preferences</span>
+              <div className="setting-card">
+                <div className="setting-row">
+                  <div className="setting-lead">
+                    <RefreshCw size={18} className="setting-icon" />
+                    <div className="setting-text">
+                      <span className="setting-title">Bidirectional Clipboard Sync</span>
+                      <span className="setting-subtitle">
+                        Automatically mirror copied text and media across connected peers
+                      </span>
+                    </div>
+                  </div>
+                  <label className="setting-switch">
+                    <input
+                      type="checkbox"
+                      checked={allowClipboardSync}
+                      onChange={(e) => setAllowClipboardSync(e.target.checked)}
+                    />
+                    <span className="switch-track" />
+                  </label>
+                </div>
+
+                <div className="setting-divider" />
+
+                <div className="setting-row">
+                  <div className="setting-lead">
+                    <ShieldCheck size={18} className="setting-icon" />
+                    <div className="setting-text">
+                      <span className="setting-title">Echo Suppression Protection</span>
+                      <span className="setting-subtitle">
+                        Rolling 16-entry hash ring eliminates recursive mirror paste loops
+                      </span>
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>Active</span>
+                </div>
+              </div>
+
+              <span className="section-label">Send Text to Device</span>
+              <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="Type or paste text to blast to connected devices..."
+                  value={clipboardInput}
+                  onChange={(e) => setClipboardInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSendClipboard();
+                  }}
+                />
+                <button className="btn btn-primary" onClick={handleSendClipboard}>
+                  Send
+                </button>
+              </div>
+
+              <span className="section-label">Synchronized History</span>
+              <div className="table-card">
+                <div
+                  className="table-head-row"
+                  style={{ gridTemplateColumns: "3fr 1fr 1fr 1fr" }}
+                >
+                  <span>Text Content</span>
+                  <span>Origin</span>
+                  <span>Time</span>
+                  <span style={{ textAlign: "right" }}>Action</span>
+                </div>
+
+                {syncedClips.map((clip) => (
+                  <div
+                    key={clip.id}
+                    className="table-body-row"
+                    style={{ gridTemplateColumns: "3fr 1fr 1fr 1fr" }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 12,
+                        color: "var(--text-primary)",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {clip.text}
+                    </span>
+                    <span style={{ color: "var(--text-secondary)" }}>{clip.device}</span>
+                    <span style={{ color: "var(--silver-dim)", fontSize: 11 }}>{clip.time}</span>
+                    <div style={{ textAlign: "right" }}>
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(clip.text);
+                          showToast("Copied to clipboard");
+                        }}
+                      >
+                        <Copy size={11} />
+                        <span>Copy</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* PAGE 4: NOTIFICATIONS */}
+          {activePage === "notifications" && (
+            <div>
+              <span className="section-label">Notification Stream ({notifications.length})</span>
+              {notifications.length === 0 ? (
+                <div
+                  style={{
+                    padding: 48,
+                    textAlign: "center",
+                    color: "var(--silver-dim)",
+                    backgroundColor: "var(--surface-card)",
+                    borderRadius: 10,
+                    border: "1px solid var(--border-subtle)",
+                  }}
+                >
+                  No incoming notifications from connected devices
+                </div>
+              ) : (
+                <div className="notif-list">
+                  {notifications.map((notif) => (
+                    <div key={notif.id} className="notif-card">
+                      <div className="notif-icon-box">
+                        <Bell size={16} />
+                      </div>
+
+                      <div className="notif-content">
+                        <div className="notif-header-line">
+                          <span className="notif-title">
+                            {notif.title} &bull;{" "}
+                            <span style={{ color: "var(--silver-dim)", fontWeight: 400 }}>
+                              {notif.appName}
+                            </span>
+                          </span>
+                          <span className="notif-time">2m ago</span>
+                        </div>
+                        <div className="notif-text">{notif.body}</div>
+                      </div>
+
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => handleDismissNotification(notif.id)}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PAGE 5: SETTINGS */}
+          {activePage === "settings" && (
+            <div>
+              <span className="section-label">Device Capabilities</span>
+              <div className="setting-card">
+                <div className="setting-row">
+                  <div className="setting-lead">
+                    <Upload size={18} className="setting-icon" />
+                    <div className="setting-text">
+                      <span className="setting-title">File Transfer Support</span>
+                      <span className="setting-subtitle">
+                        Allow receiving and streaming files over encrypted QUIC
+                      </span>
+                    </div>
+                  </div>
+                  <label className="setting-switch">
+                    <input
+                      type="checkbox"
+                      checked={allowFileTransfer}
+                      onChange={(e) => setAllowFileTransfer(e.target.checked)}
+                    />
+                    <span className="switch-track" />
+                  </label>
+                </div>
+
+                <div className="setting-divider" />
+
+                <div className="setting-row">
+                  <div className="setting-lead">
+                    <Bell size={18} className="setting-icon" />
+                    <div className="setting-text">
+                      <span className="setting-title">Notification Mirroring</span>
+                      <span className="setting-subtitle">
+                        Forward push alerts from phone with remote dismiss synchronization
+                      </span>
+                    </div>
+                  </div>
+                  <label className="setting-switch">
+                    <input
+                      type="checkbox"
+                      checked={allowNotifications}
+                      onChange={(e) => setAllowNotifications(e.target.checked)}
+                    />
+                    <span className="switch-track" />
+                  </label>
+                </div>
+
+                <div className="setting-divider" />
+
+                <div className="setting-row">
+                  <div className="setting-lead">
+                    <SlidersHorizontal size={18} className="setting-icon" />
+                    <div className="setting-text">
+                      <span className="setting-title">Auto-Accept Small Transfers</span>
+                      <span className="setting-subtitle">
+                        Automatically accept payloads under 10 MB without manual prompt
+                      </span>
+                    </div>
+                  </div>
+                  <label className="setting-switch">
+                    <input
+                      type="checkbox"
+                      checked={autoAcceptSmall}
+                      onChange={(e) => setAutoAcceptSmall(e.target.checked)}
+                    />
+                    <span className="switch-track" />
+                  </label>
+                </div>
+              </div>
+
+              <span className="section-label">Security & Identity</span>
+              <div className="setting-card">
+                <div className="setting-row">
+                  <div className="setting-lead">
+                    <Lock size={18} className="setting-icon" />
+                    <div className="setting-text">
+                      <span className="setting-title">Mutual TLS 1.3 Certificate Pinning</span>
+                      <span className="setting-subtitle">
+                        SPKI transport certificate pinned to Ed25519 identity
+                      </span>
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>Enforced</span>
+                </div>
+
+                <div className="setting-divider" />
+
+                <div className="setting-row">
+                  <div className="setting-lead">
+                    <Key size={18} className="setting-icon" />
+                    <div className="setting-text">
+                      <span className="setting-title">Local Node Fingerprint</span>
+                      <span className="setting-subtitle" style={{ fontFamily: "var(--font-mono)" }}>
+                        {identity.fingerprint}
+                      </span>
+                    </div>
+                  </div>
+                  <button className="btn btn-sm" onClick={handleCopyFingerprint}>
+                    <Copy size={11} />
+                    <span>Copy</span>
+                  </button>
+                </div>
+              </div>
+
+              <span className="section-label">Network & Sockets</span>
+              <div className="setting-card">
+                <div className="setting-row">
+                  <div className="setting-lead">
+                    <ArrowDownUp size={18} className="setting-icon" />
+                    <div className="setting-text">
+                      <span className="setting-title">QUIC Transport Port</span>
+                      <span className="setting-subtitle">Listening on UDP socket 0.0.0.0:4433</span>
+                    </div>
+                  </div>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-secondary)" }}>
+                    :4433
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
 
       {/* Pair New Device Modal */}
       {showPairDialog && (
-        <div className="modal-overlay" onClick={() => setShowPairDialog(false)}>
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title-row">
-              <span className="modal-title-text">Pair Remote Device</span>
-              <button className="modal-close-icon-btn" onClick={() => setShowPairDialog(false)}>
+        <div className="modal-backdrop" onClick={() => setShowPairDialog(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Pair New Device</span>
+              <button className="modal-close-btn" onClick={() => setShowPairDialog(false)}>
                 <X size={16} />
               </button>
             </div>
 
             <form onSubmit={handlePairSubmit}>
-              <label style={{ display: "block", marginBottom: 8, fontSize: 12, color: "var(--text-secondary)" }}>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: 8,
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                }}
+              >
                 Enter pairing URI or QR payload:
               </label>
               <input
                 type="text"
-                className="sleek-input"
+                className="input-field"
                 placeholder="continue://pair/v1?addr=192.168.1.105:4433&spki=..."
                 value={pairingPayload}
                 onChange={(e) => setPairingPayload(e.target.value)}
@@ -762,7 +856,7 @@ export function App() {
         </div>
       )}
 
-      {/* Feedback Toast */}
+      {/* Toast Feedback */}
       {toastMessage && (
         <div className="floating-toast">
           <Check size={14} color="var(--green)" />
