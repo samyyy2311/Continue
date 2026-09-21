@@ -1,0 +1,25 @@
+[package]
+name = "continue-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2.0.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0.0", features = [] }
+tauri-plugin-shell = "2.0.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { workspace = true, features = ["sync", "time", "rt-multi-thread"] }
+identity = { path = "../../../crates/identity" }
+transport = { path = "../../../crates/transport" }
+pairing = { path = "../../../crates/pairing" }
+sessions = { path = "../../../crates/sessions" }
+capabilities = { path = "../../../crates/capabilities" }
+permissions = { path = "../../../crates/permissions" }
+transfer = { path = "../../../crates/transfer" }
+clipboard = { path = "../../../crates/clipboard" }
+notifications = { path = "../../../crates/notifications" }
