@@ -5,10 +5,9 @@ import React, { useEffect, useState } from "react";
 import "./App.css";
 import type { DeviceIdentity, TrustedPeer, TransferHistoryItem, NotificationItem } from "./types.ts";
 
-// Minimal SVG Icons
 function DevicesIcon() {
   return (
-    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="3" width="20" height="14" rx="2" />
       <line x1="8" y1="21" x2="16" y2="21" />
       <line x1="12" y1="17" x2="12" y2="21" />
@@ -18,7 +17,7 @@ function DevicesIcon() {
 
 function TransferIcon() {
   return (
-    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l4-4m-4 4l-4-4" />
     </svg>
   );
@@ -26,7 +25,7 @@ function TransferIcon() {
 
 function ClipboardIcon() {
   return (
-    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <rect x="9" y="2" width="6" height="4" rx="1" />
       <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
     </svg>
@@ -35,62 +34,17 @@ function ClipboardIcon() {
 
 function NotificationsIcon() {
   return (
-    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
       <path d="M13.73 21a2 2 0 0 1-3.46 0" />
     </svg>
   );
 }
 
-function ShieldIcon() {
+function SettingsIcon() {
   return (
-    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-    </svg>
-  );
-}
-
-function CopyIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
-function UploadCloudIcon() {
-  return (
-    <svg className="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M16 16l-4-4-4 4" />
-      <path d="M12 12v9" />
-      <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
-    </svg>
-  );
-}
-
-function LaptopIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="3" width="20" height="14" rx="2" />
-      <line x1="2" y1="20" x2="22" y2="20" />
-    </svg>
-  );
-}
-
-function PhoneIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-      <line x1="12" y1="18" x2="12.01" y2="18" />
     </svg>
   );
 }
@@ -121,13 +75,6 @@ async function fetchPeers(): Promise<TrustedPeer[]> {
         isConnected: true,
         endpoint: "192.168.1.105:4433",
       },
-      {
-        fingerprint: "cont1q4f2e8d9c1a5b7e3f6a2b8d0e1c4a9f3b5d2e7",
-        displayName: "MacBook Air",
-        pairedAt: 1726915000,
-        isConnected: true,
-        endpoint: "192.168.1.112:4433",
-      },
     ];
   }
 }
@@ -143,20 +90,20 @@ export function App() {
 
   const [peers, setPeers] = useState<TrustedPeer[]>([]);
   const [copiedFingerprint, setCopiedFingerprint] = useState(false);
-  const [qrInput, setQrInput] = useState("");
-  const [showPairModal, setShowPairModal] = useState(false);
+  const [showPairDialog, setShowPairDialog] = useState(false);
+  const [pairingPayload, setPairingPayload] = useState("");
 
-  // Capability Toggles
-  const [fileTransferEnabled, setFileTransferEnabled] = useState(true);
-  const [clipboardSyncEnabled, setClipboardSyncEnabled] = useState(true);
-  const [notificationSyncEnabled, setNotificationSyncEnabled] = useState(true);
-  const [autoAcceptSmallFiles, setAutoAcceptSmallFiles] = useState(true);
+  // Capabilities
+  const [allowFileTransfer, setAllowFileTransfer] = useState(true);
+  const [allowClipboardSync, setAllowClipboardSync] = useState(true);
+  const [allowNotifications, setAllowNotifications] = useState(true);
+  const [autoAcceptSmall, setAutoAcceptSmall] = useState(true);
 
   // Transfers
-  const [transfers, setTransfers] = useState<TransferHistoryItem[]>([
+  const [transfers] = useState<TransferHistoryItem[]>([
     {
       id: "tx-1",
-      fileName: "financial_quarterly_report.pdf",
+      fileName: "financial_report_q3.pdf",
       fileSize: 4194304,
       direction: "incoming",
       peerFingerprint: "cont1q9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a",
@@ -165,12 +112,12 @@ export function App() {
     },
     {
       id: "tx-2",
-      fileName: "presentation_deck_v2.key",
-      fileSize: 18874368,
+      fileName: "architecture_diagram.png",
+      fileSize: 1048576,
       direction: "outgoing",
-      peerFingerprint: "cont1q4f2e8d9c1a5b7e3f6a2b8d0e1c4a9f3b5d2e7",
+      peerFingerprint: "cont1q9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a",
       status: "completed",
-      timestamp: Date.now() - 1800000,
+      timestamp: Date.now() - 1200000,
     },
   ]);
 
@@ -179,143 +126,113 @@ export function App() {
     {
       id: "notif-1",
       appName: "Messages",
-      title: "Sarah Connor",
-      body: "Sent you the project update document and specs.",
-      timestamp: Date.now() - 120000,
-      peerFingerprint: "cont1q9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a",
-    },
-    {
-      id: "notif-2",
-      appName: "Calendar",
-      title: "Engineering Sync",
-      body: "Meeting starting in 10 minutes in Room B.",
-      timestamp: Date.now() - 480000,
+      title: "Sarah",
+      body: "Sent you the project update document.",
+      timestamp: Date.now() - 180000,
       peerFingerprint: "cont1q9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a",
     },
   ]);
 
-  // Quick Clipboard Send input
-  const [quickClipboardText, setQuickClipboardText] = useState("");
-  const [clipboardFeedback, setClipboardFeedback] = useState("");
+  const [clipboardText, setClipboardText] = useState("");
+  const [clipboardStatus, setClipboardStatus] = useState("");
 
   useEffect(() => {
     fetchIdentity().then(setIdentity);
     fetchPeers().then(setPeers);
   }, []);
 
-  const copyFingerprintToClipboard = () => {
+  const handleCopyFingerprint = () => {
     navigator.clipboard.writeText(identity.fingerprint);
     setCopiedFingerprint(true);
     setTimeout(() => setCopiedFingerprint(false), 2000);
   };
 
-  const handleRemovePeer = async (fingerprint: string) => {
+  const handleDisconnectPeer = async (fingerprint: string) => {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("remove_trusted_peer", { fingerprint });
     } catch {
-      // Fallback for browser testing
+      // Fallback in browser context
     }
     setPeers((prev) => prev.filter((p) => p.fingerprint !== fingerprint));
   };
 
-  const handlePairFromQr = async (e: React.FormEvent) => {
+  const handlePairSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = qrInput.trim();
-    if (!payload) return;
+    if (!pairingPayload.trim()) return;
 
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      const newPeer = await invoke<TrustedPeer>("pair_from_qr", { qrPayload: payload });
-      setPeers((prev) => [...prev, newPeer]);
+      const peer = await invoke<TrustedPeer>("pair_from_qr", { qrPayload: pairingPayload.trim() });
+      setPeers((prev) => [...prev, peer]);
     } catch {
-      const fallbackPeer: TrustedPeer = {
-        fingerprint: "cont1q" + Math.random().toString(36).substring(2, 15),
-        displayName: "New Device",
+      const dummy: TrustedPeer = {
+        fingerprint: "cont1q" + Math.random().toString(36).substring(2, 12),
+        displayName: "Pixel 8 Pro",
         pairedAt: Math.floor(Date.now() / 1000),
         isConnected: true,
-        endpoint: "192.168.1.125:4433",
+        endpoint: "192.168.1.105:4433",
       };
-      setPeers((prev) => [...prev, fallbackPeer]);
+      setPeers((prev) => [...prev, dummy]);
     }
 
-    setQrInput("");
-    setShowPairModal(false);
+    setPairingPayload("");
+    setShowPairDialog(false);
   };
 
-  const handleSendClipboard = async () => {
-    if (!quickClipboardText.trim()) return;
+  const handleBroadcastClipboard = async () => {
+    if (!clipboardText.trim()) return;
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       if (peers.length > 0) {
         await invoke("send_clipboard_text", {
           peerFingerprint: peers[0].fingerprint,
-          text: quickClipboardText,
+          text: clipboardText,
         });
       }
     } catch {
-      // Fallback in browser preview
+      // Fallback
     }
-    setClipboardFeedback("Clipboard broadcasted to connected peers!");
-    setTimeout(() => setClipboardFeedback(""), 2500);
-    setQuickClipboardText("");
+    setClipboardStatus("Dispatched to peers");
+    setTimeout(() => setClipboardStatus(""), 2000);
+    setClipboardText("");
   };
 
   const handleDismissNotification = (id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
   };
 
-  const handleSimulateTransfer = () => {
-    const newItem: TransferHistoryItem = {
-      id: `tx-${Date.now()}`,
-      fileName: "backup_archive.tar.gz",
-      fileSize: 14680064,
-      direction: "incoming",
-      peerFingerprint: peers[0]?.fingerprint || identity.fingerprint,
-      status: "completed",
-      timestamp: Date.now(),
-    };
-    setTransfers((prev) => [newItem, ...prev]);
-  };
-
   return (
-    <div className="app-container">
+    <div className="app-layout">
       {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <div className="sidebar-logo">C</div>
-          <div className="sidebar-title-group">
-            <span className="sidebar-title">Continue</span>
-            <span className="sidebar-subtitle">
-              <span className="status-dot-mini" /> Mesh Active
-            </span>
-          </div>
+      <aside className="app-sidebar">
+        <div className="sidebar-brand">
+          <span className="brand-title">Continue</span>
+          <span className="brand-version">v0.1.0</span>
         </div>
 
-        <ul className="nav-list">
+        <ul className="nav-menu">
           <li>
             <button
-              className={`nav-item ${activeTab === "devices" ? "active" : ""}`}
+              className={`nav-link ${activeTab === "devices" ? "active" : ""}`}
               onClick={() => setActiveTab("devices")}
             >
               <DevicesIcon />
               <span>Devices</span>
-              <span className="nav-badge">{peers.length}</span>
             </button>
           </li>
           <li>
             <button
-              className={`nav-item ${activeTab === "transfers" ? "active" : ""}`}
+              className={`nav-link ${activeTab === "transfers" ? "active" : ""}`}
               onClick={() => setActiveTab("transfers")}
             >
               <TransferIcon />
-              <span>File Transfer</span>
-              <span className="nav-badge">{transfers.length}</span>
+              <span>Transfers</span>
             </button>
           </li>
           <li>
             <button
-              className={`nav-item ${activeTab === "clipboard" ? "active" : ""}`}
+              className={`nav-link ${activeTab === "clipboard" ? "active" : ""}`}
               onClick={() => setActiveTab("clipboard")}
             >
               <ClipboardIcon />
@@ -324,189 +241,176 @@ export function App() {
           </li>
           <li>
             <button
-              className={`nav-item ${activeTab === "notifications" ? "active" : ""}`}
+              className={`nav-link ${activeTab === "notifications" ? "active" : ""}`}
               onClick={() => setActiveTab("notifications")}
             >
               <NotificationsIcon />
               <span>Notifications</span>
-              {notifications.length > 0 && <span className="nav-badge">{notifications.length}</span>}
             </button>
           </li>
           <li>
             <button
-              className={`nav-item ${activeTab === "permissions" ? "active" : ""}`}
+              className={`nav-link ${activeTab === "permissions" ? "active" : ""}`}
               onClick={() => setActiveTab("permissions")}
             >
-              <ShieldIcon />
+              <SettingsIcon />
               <span>Permissions</span>
             </button>
           </li>
         </ul>
 
-        <div className="sidebar-footer">
-          <div className="device-badge-mini">
-            <span className="device-badge-label">This Device Node</span>
-            <span className="device-badge-hash" title={identity.fingerprint}>
-              {identity.fingerprint}
-            </span>
+        <div className="sidebar-bottom">
+          <div className="mesh-status-indicator">
+            <span className="dot-green" />
+            <span>Local Mesh</span>
           </div>
+          <span>QUIC :4433</span>
         </div>
       </aside>
 
-      {/* Main Panel */}
-      <main className="main-content">
-        <header className="header">
-          <div className="header-text">
-            <h1 className="header-title">
-              {activeTab === "devices" && "Connected Devices"}
+      {/* Main Content */}
+      <main className="app-main">
+        <header className="page-header">
+          <div>
+            <h1 className="page-title">
+              {activeTab === "devices" && "Devices"}
               {activeTab === "transfers" && "File Transfers"}
               {activeTab === "clipboard" && "Clipboard Synchronization"}
-              {activeTab === "notifications" && "Notification Mirroring"}
-              {activeTab === "permissions" && "Security & Permissions"}
+              {activeTab === "notifications" && "Notifications"}
+              {activeTab === "permissions" && "Permissions & Security"}
             </h1>
-            <span className="header-desc">
-              {activeTab === "devices" && "Manage paired peers, local cryptographic identity, and discovery."}
-              {activeTab === "transfers" && "Stream files peer-to-peer over encrypted QUIC streams with SHA-256 verification."}
-              {activeTab === "clipboard" && "Real-time bidirectional clipboard sync with echo loop suppression."}
-              {activeTab === "notifications" && "Receive, inspect, and dismiss mobile notifications securely on desktop."}
-              {activeTab === "permissions" && "Four-layer capability controls and per-device access grants."}
-            </span>
+            <div className="page-subtitle">
+              {activeTab === "devices" && "Local cryptographic identity and trusted peer devices"}
+              {activeTab === "transfers" && "Chunked peer-to-peer file transfers with SHA-256 verification"}
+              {activeTab === "clipboard" && "Real-time clipboard synchronization with echo suppression"}
+              {activeTab === "notifications" && "Forwarded notifications from connected devices"}
+              {activeTab === "permissions" && "Four-layer capability authorization and trust rules"}
+            </div>
           </div>
 
           {activeTab === "devices" && (
-            <button className="btn btn-primary" onClick={() => setShowPairModal(true)}>
-              + Pair New Device
+            <button className="btn btn-primary" onClick={() => setShowPairDialog(true)}>
+              Pair Device
             </button>
           )}
 
           {activeTab === "transfers" && (
-            <button className="btn btn-primary" onClick={handleSimulateTransfer}>
-              + Simulate Inbound Transfer
+            <button className="btn btn-primary">
+              Send File
             </button>
           )}
         </header>
 
-        <div className="content-pane">
+        <div className="page-body">
           {/* TAB 1: DEVICES */}
           {activeTab === "devices" && (
             <div>
-              <div className="hero-card">
-                <div className="card-header">
-                  <div className="card-title">
-                    <LaptopIcon />
-                    <span>{identity.deviceName} (Local Host)</span>
+              {showPairDialog && (
+                <div className="section">
+                  <div className="section-title">Pair Remote Device</div>
+                  <div className="panel" style={{ padding: 16 }}>
+                    <form onSubmit={handlePairSubmit}>
+                      <label style={{ display: "block", marginBottom: 6, color: "var(--text-secondary)", fontSize: 12 }}>
+                        Paste pairing payload from mobile or remote client:
+                      </label>
+                      <input
+                        type="text"
+                        className="text-input"
+                        placeholder="continue://pair/v1?addr=192.168.1.105:4433&spki=..."
+                        value={pairingPayload}
+                        onChange={(e) => setPairingPayload(e.target.value)}
+                        autoFocus
+                      />
+                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+                        <button type="button" className="btn" onClick={() => setShowPairDialog(false)}>
+                          Cancel
+                        </button>
+                        <button type="submit" className="btn btn-primary">
+                          Connect
+                        </button>
+                      </div>
+                    </form>
                   </div>
-                  <span className="status-badge online">
-                    <span className="status-dot online" />
-                    Listening on QUIC :4433
-                  </span>
                 </div>
+              )}
 
-                <div className="info-grid">
-                  <div className="info-item">
-                    <span className="info-item-label">Cryptographic Fingerprint</span>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                      <span className="mono-tag" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {identity.fingerprint.substring(0, 24)}...
-                      </span>
-                      <button className="btn btn-sm" onClick={copyFingerprintToClipboard} title="Copy Fingerprint">
-                        {copiedFingerprint ? <CheckIcon /> : <CopyIcon />}
+              <div className="section">
+                <div className="section-title">This Device</div>
+                <div className="panel">
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">{identity.deviceName}</span>
+                      <span className="panel-row-desc">Local Node Host</span>
+                    </div>
+                    <span className="badge badge-green">Online</span>
+                  </div>
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">Identity Fingerprint</span>
+                      <span className="panel-row-desc">Long-term Ed25519 public key hash</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className="code-inline">{identity.fingerprint}</span>
+                      <button className="btn btn-sm" onClick={handleCopyFingerprint}>
+                        {copiedFingerprint ? "Copied" : "Copy"}
                       </button>
                     </div>
                   </div>
-
-                  <div className="info-item">
-                    <span className="info-item-label">TLS Transport SPKI Hash</span>
-                    <span className="mono-tag">
-                      {identity.spkiHash.substring(0, 20)}...
-                    </span>
-                  </div>
-
-                  <div className="info-item">
-                    <span className="info-item-label">Discovery Protocol</span>
-                    <span className="info-item-value">mDNS with Ephemeral Privacy IDs</span>
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">Transport Certificate</span>
+                      <span className="panel-row-desc">SPKI hash for QUIC TLS 1.3 pinning</span>
+                    </div>
+                    <span className="code-inline">{identity.spkiHash.substring(0, 24)}...</span>
                   </div>
                 </div>
               </div>
 
-              {showPairModal && (
-                <div className="card" style={{ borderColor: "var(--accent)" }}>
-                  <div className="card-header">
-                    <div>
-                      <div className="card-title">Pair a Remote Device</div>
-                      <div className="card-subtitle">
-                        Paste the pairing URI payload string displayed by your mobile or remote Continue app:
-                      </div>
+              <div className="section">
+                <div className="section-title">Trusted Peers ({peers.length})</div>
+                <div className="panel">
+                  {peers.length === 0 ? (
+                    <div className="empty-placeholder">
+                      No peer devices paired yet.
                     </div>
-                  </div>
-
-                  <form onSubmit={handlePairFromQr}>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="continue://pair/v1?addr=192.168.1.105:4433&spki=..."
-                      value={qrInput}
-                      onChange={(e) => setQrInput(e.target.value)}
-                    />
-                    <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 12 }}>
-                      <button type="button" className="btn" onClick={() => setShowPairModal(false)}>
-                        Cancel
-                      </button>
-                      <button type="submit" className="btn btn-primary">
-                        Confirm Handshake
-                      </button>
-                    </div>
-                  </form>
+                  ) : (
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Device Name</th>
+                          <th>Fingerprint</th>
+                          <th>Endpoint</th>
+                          <th>Status</th>
+                          <th style={{ textAlign: "right" }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {peers.map((peer) => (
+                          <tr key={peer.fingerprint}>
+                            <td style={{ fontWeight: 500 }}>{peer.displayName}</td>
+                            <td>
+                              <span className="code-inline">{peer.fingerprint.substring(0, 16)}...</span>
+                            </td>
+                            <td style={{ color: "var(--text-muted)" }}>{peer.endpoint}</td>
+                            <td>
+                              <span className={`badge ${peer.isConnected ? "badge-green" : ""}`}>
+                                {peer.isConnected ? "Connected" : "Offline"}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              <button
+                                className="btn btn-sm btn-danger"
+                                onClick={() => handleDisconnectPeer(peer.fingerprint)}
+                              >
+                                Disconnect
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
-              )}
-
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Trusted Devices ({peers.length})</div>
-                </div>
-
-                {peers.length === 0 ? (
-                  <div className="empty-state">
-                    <DevicesIcon />
-                    <div>No peers paired yet. Click "Pair New Device" to connect.</div>
-                  </div>
-                ) : (
-                  <div className="peer-list">
-                    {peers.map((peer) => (
-                      <div key={peer.fingerprint} className="peer-card">
-                        <div className="peer-identity">
-                          <div className="peer-avatar">
-                            {peer.displayName.toLowerCase().includes("pixel") || peer.displayName.toLowerCase().includes("phone") ? (
-                              <PhoneIcon />
-                            ) : (
-                              <LaptopIcon />
-                            )}
-                          </div>
-                          <div className="peer-meta">
-                            <span className="peer-name">{peer.displayName}</span>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <span className="mono-tag">{peer.fingerprint.substring(0, 18)}...</span>
-                              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{peer.endpoint}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                          <span className={`status-badge ${peer.isConnected ? "online" : "offline"}`}>
-                            <span className={`status-dot ${peer.isConnected ? "online" : "offline"}`} />
-                            {peer.isConnected ? "Online (<5ms)" : "Offline"}
-                          </span>
-                          <button
-                            className="btn btn-sm btn-danger"
-                            onClick={() => handleRemovePeer(peer.fingerprint)}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -514,61 +418,47 @@ export function App() {
           {/* TAB 2: TRANSFERS */}
           {activeTab === "transfers" && (
             <div>
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Send File</div>
-                </div>
-
-                <div className="dropzone" onClick={() => alert("Select file to send over QUIC session.")}>
-                  <UploadCloudIcon />
-                  <div>
-                    <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>
-                      Drop files here or click to browse
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
-                      Files stream over dedicated QUIC streams with SHA-256 integrity and automatic chunking
-                    </div>
-                  </div>
+              <div className="section">
+                <div className="section-title">Send Files</div>
+                <div className="file-upload-box">
+                  <span style={{ fontWeight: 500, color: "var(--text-primary)" }}>
+                    Select files to send over QUIC session
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    All transfers are streamed in 64 KB chunks and verified against SHA-256 digests.
+                  </span>
                 </div>
               </div>
 
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Transfer Activity & History</div>
-                </div>
-
-                <div className="peer-list">
-                  {transfers.map((tx) => (
-                    <div key={tx.id} className="peer-card">
-                      <div className="peer-identity">
-                        <div className="peer-avatar">
-                          <TransferIcon />
-                        </div>
-                        <div className="peer-meta">
-                          <span className="peer-name">{tx.fileName}</span>
-                          <div style={{ display: "flex", gap: 10, fontSize: 12, color: "var(--text-muted)" }}>
-                            <span>{(tx.fileSize / 1024 / 1024).toFixed(2)} MB</span>
-                            <span>&bull;</span>
-                            <span style={{ textTransform: "capitalize", color: tx.direction === "incoming" ? "#34d399" : "#60a5fa" }}>
+              <div className="section">
+                <div className="section-title">Transfer History</div>
+                <div className="panel">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>File Name</th>
+                        <th>Size</th>
+                        <th>Direction</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transfers.map((tx) => (
+                        <tr key={tx.id}>
+                          <td style={{ fontWeight: 500 }}>{tx.fileName}</td>
+                          <td>{(tx.fileSize / 1024 / 1024).toFixed(2)} MB</td>
+                          <td>
+                            <span style={{ textTransform: "capitalize", color: tx.direction === "incoming" ? "var(--success)" : "var(--accent)" }}>
                               {tx.direction}
                             </span>
-                            <span>&bull;</span>
-                            <span>Peer: {tx.peerFingerprint.substring(0, 12)}...</span>
-                          </div>
-                          <div className="progress-bar-bg">
-                            <div className="progress-bar-fill" style={{ width: "100%" }} />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        <span className="status-badge online">
-                          <span className="status-dot online" />
-                          Verified
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                          </td>
+                          <td>
+                            <span className="badge badge-green">Verified</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -577,63 +467,52 @@ export function App() {
           {/* TAB 3: CLIPBOARD */}
           {activeTab === "clipboard" && (
             <div>
-              <div className="card">
-                <div className="card-header">
-                  <div>
-                    <div className="card-title">Clipboard Settings</div>
-                    <div className="card-subtitle">
-                      Keep text and images in sync between devices with local echo loop suppression.
+              <div className="section">
+                <div className="section-title">Clipboard Preferences</div>
+                <div className="panel">
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">Bidirectional Clipboard Sync</span>
+                      <span className="panel-row-desc">
+                        Automatically synchronize text when copied to system clipboard
+                      </span>
                     </div>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={allowClipboardSync}
+                        onChange={(e) => setAllowClipboardSync(e.target.checked)}
+                      />
+                      <span className="slider" />
+                    </label>
                   </div>
-                </div>
 
-                <div className="switch-row">
-                  <div className="switch-info">
-                    <span className="switch-title">Bidirectional Clipboard Synchronization</span>
-                    <span className="switch-desc">
-                      Automatically transmit clipboard updates to connected peers when copied locally.
-                    </span>
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">Echo Suppression</span>
+                      <span className="panel-row-desc">
+                        Prevents recursive clipboard loops via rolling SHA-256 history
+                      </span>
+                    </div>
+                    <span className="badge badge-green">Enabled</span>
                   </div>
-                  <label className="switch-label">
-                    <input
-                      type="checkbox"
-                      checked={clipboardSyncEnabled}
-                      onChange={(e) => setClipboardSyncEnabled(e.target.checked)}
-                    />
-                    <span className="switch-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div className="switch-info">
-                    <span className="switch-title">Echo Suppression Cache</span>
-                    <span className="switch-desc">
-                      Keeps a SHA-256 rolling window to prevent recursive clipboard feedback loops.
-                    </span>
-                  </div>
-                  <span className="status-badge online">
-                    <span className="status-dot online" /> Active
-                  </span>
                 </div>
               </div>
 
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Send Text to Connected Peers</div>
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className="section">
+                <div className="section-title">Manual Broadcast</div>
+                <div className="panel" style={{ padding: 16 }}>
                   <textarea
-                    className="input-field"
+                    className="text-input"
                     rows={3}
-                    placeholder="Type or paste text to broadcast to paired devices..."
-                    value={quickClipboardText}
-                    onChange={(e) => setQuickClipboardText(e.target.value)}
+                    placeholder="Type text to send to paired peers..."
+                    value={clipboardText}
+                    onChange={(e) => setClipboardText(e.target.value)}
                   />
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 12, color: "#34d399" }}>{clipboardFeedback}</span>
-                    <button className="btn btn-primary" onClick={handleSendClipboard}>
-                      Broadcast to Mesh
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
+                    <span style={{ fontSize: 12, color: "var(--success)" }}>{clipboardStatus}</span>
+                    <button className="btn btn-primary" onClick={handleBroadcastClipboard}>
+                      Broadcast to Peers
                     </button>
                   </div>
                 </div>
@@ -644,196 +523,153 @@ export function App() {
           {/* TAB 4: NOTIFICATIONS */}
           {activeTab === "notifications" && (
             <div>
-              <div className="card">
-                <div className="card-header">
-                  <div>
-                    <div className="card-title">Notification Mirroring</div>
-                    <div className="card-subtitle">
-                      Forward notifications from Android and remote peers directly to your desktop.
+              <div className="section">
+                <div className="section-title">Notification Mirroring</div>
+                <div className="panel">
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">Receive Remote Notifications</span>
+                      <span className="panel-row-desc">
+                        Mirror incoming alerts and messages from connected mobile devices
+                      </span>
                     </div>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={allowNotifications}
+                        onChange={(e) => setAllowNotifications(e.target.checked)}
+                      />
+                      <span className="slider" />
+                    </label>
                   </div>
-                </div>
-
-                <div className="switch-row">
-                  <div className="switch-info">
-                    <span className="switch-title">Mirror Remote Notifications</span>
-                    <span className="switch-desc">
-                      Receive incoming push alerts, messages, and calls from authorized devices.
-                    </span>
-                  </div>
-                  <label className="switch-label">
-                    <input
-                      type="checkbox"
-                      checked={notificationSyncEnabled}
-                      onChange={(e) => setNotificationSyncEnabled(e.target.checked)}
-                    />
-                    <span className="switch-slider" />
-                  </label>
                 </div>
               </div>
 
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Forwarded Notifications ({notifications.length})</div>
-                </div>
-
-                {notifications.length === 0 ? (
-                  <div className="empty-state">
-                    <NotificationsIcon />
-                    <div>No active notifications right now.</div>
-                  </div>
-                ) : (
-                  <div className="peer-list">
-                    {notifications.map((n) => (
-                      <div key={n.id} className="peer-card">
-                        <div className="peer-identity">
-                          <div className="peer-avatar">
-                            <NotificationsIcon />
+              <div className="section">
+                <div className="section-title">Recent Notifications</div>
+                <div className="panel">
+                  {notifications.length === 0 ? (
+                    <div className="empty-placeholder">
+                      No notifications received.
+                    </div>
+                  ) : (
+                    notifications.map((n) => (
+                      <div key={n.id} className="panel-row">
+                        <div className="panel-row-main">
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span className="panel-row-title">{n.title}</span>
+                            <span className="code-inline">{n.appName}</span>
                           </div>
-                          <div className="peer-meta">
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <span className="peer-name">{n.title}</span>
-                              <span className="mono-tag">{n.appName}</span>
-                            </div>
-                            <span style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 2 }}>
-                              {n.body}
-                            </span>
-                          </div>
+                          <span className="panel-row-desc">{n.body}</span>
                         </div>
-
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <button
-                            className="btn btn-sm"
-                            onClick={() => handleDismissNotification(n.id)}
-                          >
-                            Dismiss
-                          </button>
-                        </div>
+                        <button
+                          className="btn btn-sm"
+                          onClick={() => handleDismissNotification(n.id)}
+                        >
+                          Dismiss
+                        </button>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           )}
 
-          {/* TAB 5: PERMISSIONS (Interactive Controls) */}
+          {/* TAB 5: PERMISSIONS */}
           {activeTab === "permissions" && (
             <div>
-              <div className="hero-card">
-                <div className="card-header">
-                  <div className="card-title">
-                    <ShieldIcon />
-                    <span>Four-Layer Capability Security Model</span>
-                  </div>
-                  <span className="status-badge online">
-                    <span className="status-dot online" /> Enforcing Active Security
-                  </span>
-                </div>
-                <div className="card-subtitle">
-                  Every capability invocation is verified across four independent gates: Platform OS API, Application permissions, Peer user trust, and Active session negotiation.
-                </div>
-              </div>
-
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Global Capability Grants</div>
-                </div>
-
-                <div className="switch-row">
-                  <div className="switch-info">
-                    <span className="switch-title">File Transfer Capability</span>
-                    <span className="switch-desc">
-                      Permit incoming and outgoing streaming file transfers with trusted peers.
-                    </span>
-                  </div>
-                  <label className="switch-label">
-                    <input
-                      type="checkbox"
-                      checked={fileTransferEnabled}
-                      onChange={(e) => setFileTransferEnabled(e.target.checked)}
-                    />
-                    <span className="switch-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div className="switch-info">
-                    <span className="switch-title">Clipboard Synchronization Capability</span>
-                    <span className="switch-desc">
-                      Permit remote peers to update and read clipboard contents.
-                    </span>
-                  </div>
-                  <label className="switch-label">
-                    <input
-                      type="checkbox"
-                      checked={clipboardSyncEnabled}
-                      onChange={(e) => setClipboardSyncEnabled(e.target.checked)}
-                    />
-                    <span className="switch-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div className="switch-info">
-                    <span className="switch-title">Notification Mirroring Capability</span>
-                    <span className="switch-desc">
-                      Permit receiving and dismissing notification events across peers.
-                    </span>
-                  </div>
-                  <label className="switch-label">
-                    <input
-                      type="checkbox"
-                      checked={notificationSyncEnabled}
-                      onChange={(e) => setNotificationSyncEnabled(e.target.checked)}
-                    />
-                    <span className="switch-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div className="switch-info">
-                    <span className="switch-title">Automatic Acceptance for Files Under 10 MB</span>
-                    <span className="switch-desc">
-                      Receive small files immediately without prompting for individual confirmation.
-                    </span>
-                  </div>
-                  <label className="switch-label">
-                    <input
-                      type="checkbox"
-                      checked={autoAcceptSmallFiles}
-                      onChange={(e) => setAutoAcceptSmallFiles(e.target.checked)}
-                    />
-                    <span className="switch-slider" />
-                  </label>
-                </div>
-              </div>
-
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Per-Device Authorization Matrix</div>
-                </div>
-
-                <div className="peer-list">
-                  {peers.map((peer) => (
-                    <div key={peer.fingerprint} className="peer-card">
-                      <div className="peer-identity">
-                        <div className="peer-avatar">
-                          {peer.displayName.toLowerCase().includes("pixel") ? <PhoneIcon /> : <LaptopIcon />}
-                        </div>
-                        <div className="peer-meta">
-                          <span className="peer-name">{peer.displayName}</span>
-                          <span className="mono-tag">{peer.fingerprint.substring(0, 16)}...</span>
-                        </div>
-                      </div>
-
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <span className="status-badge online" style={{ fontSize: 11 }}>Files: Granted</span>
-                        <span className="status-badge online" style={{ fontSize: 11 }}>Clipboard: Granted</span>
-                        <span className="status-badge online" style={{ fontSize: 11 }}>Notifs: Granted</span>
-                      </div>
+              <div className="section">
+                <div className="section-title">Capability Access Controls</div>
+                <div className="panel">
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">File Transfer</span>
+                      <span className="panel-row-desc">Allow authorized peers to send and receive files</span>
                     </div>
-                  ))}
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={allowFileTransfer}
+                        onChange={(e) => setAllowFileTransfer(e.target.checked)}
+                      />
+                      <span className="slider" />
+                    </label>
+                  </div>
+
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">Clipboard Synchronization</span>
+                      <span className="panel-row-desc">Allow sharing clipboard contents with paired peers</span>
+                    </div>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={allowClipboardSync}
+                        onChange={(e) => setAllowClipboardSync(e.target.checked)}
+                      />
+                      <span className="slider" />
+                    </label>
+                  </div>
+
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">Notification Mirroring</span>
+                      <span className="panel-row-desc">Allow receiving and dismissing notification events</span>
+                    </div>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={allowNotifications}
+                        onChange={(e) => setAllowNotifications(e.target.checked)}
+                      />
+                      <span className="slider" />
+                    </label>
+                  </div>
+
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">Auto-Accept Small Transfers</span>
+                      <span className="panel-row-desc">Automatically accept incoming files under 10 MB</span>
+                    </div>
+                    <label className="toggle-switch">
+                      <input
+                        type="checkbox"
+                        checked={autoAcceptSmall}
+                        onChange={(e) => setAutoAcceptSmall(e.target.checked)}
+                      />
+                      <span className="slider" />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="section">
+                <div className="section-title">Security Invariants</div>
+                <div className="panel">
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">Mutual TLS 1.3 Pinning</span>
+                      <span className="panel-row-desc">Self-signed certificates pinned to long-term Ed25519 identity</span>
+                    </div>
+                    <span className="badge badge-green">Enforced</span>
+                  </div>
+
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">Four-Layer Authorization</span>
+                      <span className="panel-row-desc">Evaluates OS availability, app permissions, peer trust, and session state</span>
+                    </div>
+                    <span className="badge badge-green">Enforced</span>
+                  </div>
+
+                  <div className="panel-row">
+                    <div className="panel-row-main">
+                      <span className="panel-row-title">Replay Defense</span>
+                      <span className="panel-row-desc">Anti-replay cache tracks ephemeral QR pairing tokens</span>
+                    </div>
+                    <span className="badge badge-green">Active</span>
+                  </div>
                 </div>
               </div>
             </div>
