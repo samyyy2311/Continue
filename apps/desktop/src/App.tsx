@@ -29,6 +29,8 @@ import {
   Square,
   Search,
   Trash2,
+  BatteryCharging,
+  Wifi,
 } from "lucide-react";
 import "./App.css";
 import type { DeviceIdentity, TrustedPeer, TransferHistoryItem, NotificationItem } from "./types.ts";
@@ -312,22 +314,24 @@ export function App() {
 
   return (
     <div className="app-shell">
-      {/* Sidebar matching CassetteCat (200px width) */}
+      {/* Sidebar (210px) */}
       <aside className="sidebar">
         <div className="sidebar-header">
           <div className="brand-icon-box">
-            <Share2 size={16} />
+            <Share2 size={15} />
           </div>
           <span className="brand-title">Continue</span>
           <span className="brand-version">v0.1</span>
         </div>
 
         <nav className="sidebar-nav">
+          <div className="nav-section-label">Continuity</div>
+
           <button
             className={`nav-item ${activePage === "devices" ? "active" : ""}`}
             onClick={() => setActivePage("devices")}
           >
-            <Smartphone size={16} className="nav-item-icon" />
+            <Smartphone size={15} className="nav-item-icon" />
             <span className="nav-item-label">Devices</span>
             <span className="nav-item-badge">{peers.length}</span>
           </button>
@@ -336,7 +340,7 @@ export function App() {
             className={`nav-item ${activePage === "transfers" ? "active" : ""}`}
             onClick={() => setActivePage("transfers")}
           >
-            <ArrowDownUp size={16} className="nav-item-icon" />
+            <ArrowDownUp size={15} className="nav-item-icon" />
             <span className="nav-item-label">Transfers</span>
             {transfers.length > 0 && (
               <span className="nav-item-badge">{transfers.length}</span>
@@ -347,7 +351,7 @@ export function App() {
             className={`nav-item ${activePage === "clipboard" ? "active" : ""}`}
             onClick={() => setActivePage("clipboard")}
           >
-            <Clipboard size={16} className="nav-item-icon" />
+            <Clipboard size={15} className="nav-item-icon" />
             <span className="nav-item-label">Clipboard</span>
           </button>
 
@@ -355,7 +359,7 @@ export function App() {
             className={`nav-item ${activePage === "notifications" ? "active" : ""}`}
             onClick={() => setActivePage("notifications")}
           >
-            <Bell size={16} className="nav-item-icon" />
+            <Bell size={15} className="nav-item-icon" />
             <span className="nav-item-label">Notifications</span>
             {notifications.length > 0 && (
               <span className="nav-item-badge" style={{ color: "var(--accent)" }}>
@@ -365,12 +369,13 @@ export function App() {
           </button>
 
           <div className="sidebar-divider" />
+          <div className="nav-section-label">Preferences</div>
 
           <button
             className={`nav-item ${activePage === "settings" ? "active" : ""}`}
             onClick={() => setActivePage("settings")}
           >
-            <Settings size={16} className="nav-item-icon" />
+            <Settings size={15} className="nav-item-icon" />
             <span className="nav-item-label">Settings</span>
           </button>
         </nav>
@@ -378,7 +383,7 @@ export function App() {
         <div className="sidebar-footer">
           <div className="host-name-row">
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <Laptop size={13} color="var(--silver-dim)" />
+              <Laptop size={13} color="var(--text-muted)" />
               <span className="host-label">{identity.deviceName}</span>
             </div>
             <span className="host-tag">Host</span>
@@ -445,15 +450,15 @@ export function App() {
           {/* PAGE 1: DEVICES */}
           {activePage === "devices" && (
             <div>
-              <span className="section-label">Paired Peers ({peers.length})</span>
+              <span className="section-label">Connected Peers ({peers.length})</span>
               {peers.length === 0 ? (
                 <div className="empty-state-box">
                   <div className="empty-state-icon">
-                    <Smartphone size={22} />
+                    <Smartphone size={20} />
                   </div>
-                  <div className="empty-state-title">No paired devices</div>
+                  <div className="empty-state-title">No connected devices</div>
                   <div className="empty-state-subtitle">
-                    Connect an Android phone or tablet on the same local network using a pairing code.
+                    Pair an Android phone or tablet on your local network to stream files and sync clips.
                   </div>
                   <button className="btn btn-primary" onClick={() => setShowPairDialog(true)}>
                     <Plus size={13} />
@@ -476,16 +481,25 @@ export function App() {
                           <div className="device-card-title">{peer.displayName}</div>
                           <div className="device-card-endpoint">{peer.endpoint}</div>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--green)" }}>
+                        <div className="device-connection-badge">
                           <span className="status-dot" />
-                          <span>Connected</span>
+                          <span>Direct QUIC</span>
                         </div>
                       </div>
 
                       <div className="device-card-stats">
-                        <span>Battery: 100%</span>
-                        <span>mTLS 1.3 Pinned</span>
-                        <span>Latency: 2ms</span>
+                        <div className="stat-item">
+                          <BatteryCharging size={12} color="var(--green)" />
+                          <span>100% Battery</span>
+                        </div>
+                        <div className="stat-item">
+                          <ShieldCheck size={12} color="var(--accent)" />
+                          <span>mTLS 1.3</span>
+                        </div>
+                        <div className="stat-item">
+                          <Wifi size={12} color="var(--text-secondary)" />
+                          <span>2 ms Latency</span>
+                        </div>
                       </div>
 
                       <div className="device-card-actions">
@@ -515,7 +529,8 @@ export function App() {
                           className="btn btn-sm btn-danger"
                           onClick={() => handleDisconnectPeer(peer.fingerprint)}
                         >
-                          Unpair
+                          <Trash2 size={11} />
+                          <span>Unpair</span>
                         </button>
                       </div>
                     </div>
@@ -523,50 +538,43 @@ export function App() {
                 </div>
               )}
 
-              <span className="section-label">Local Host Machine</span>
-              <div className="setting-card">
-                <div className="setting-row">
-                  <div className="setting-lead">
-                    <Laptop size={18} className="setting-icon" />
-                    <div className="setting-text">
-                      <span className="setting-title">{identity.deviceName} (Ed25519 Local Node)</span>
-                      <span className="setting-subtitle" style={{ fontFamily: "var(--font-mono)" }}>
-                        {identity.fingerprint}
-                      </span>
-                    </div>
+              <span className="section-label">Local Transport Node (This Machine)</span>
+              <div className="host-node-grid">
+                {/* Tile 1: Node Identity */}
+                <div className="host-tile">
+                  <div className="host-tile-head">
+                    <span className="host-tile-label">Node Identity</span>
+                    <button className="btn btn-sm" onClick={handleCopyFingerprint}>
+                      <Copy size={11} />
+                      <span>Copy</span>
+                    </button>
                   </div>
-                  <button className="btn btn-sm" onClick={handleCopyFingerprint}>
-                    <Copy size={12} />
-                    <span>Copy Key</span>
-                  </button>
+                  <div className="host-tile-val">{identity.fingerprint}</div>
+                  <div className="host-tile-sub">Ed25519 Curve25519 Pair</div>
                 </div>
 
-                <div className="setting-divider" />
-
-                <div className="setting-row">
-                  <div className="setting-lead">
-                    <Lock size={18} className="setting-icon" />
-                    <div className="setting-text">
-                      <span className="setting-title">SPKI Transport Certificate Hash</span>
-                      <span className="setting-subtitle" style={{ fontFamily: "var(--font-mono)" }}>
-                        {identity.spkiHash}
-                      </span>
-                    </div>
+                {/* Tile 2: Security & SPKI */}
+                <div className="host-tile">
+                  <div className="host-tile-head">
+                    <span className="host-tile-label">mTLS 1.3 Certificate</span>
+                    <span style={{ fontSize: 10, color: "var(--green)", fontWeight: 600, textTransform: "uppercase" }}>
+                      Enforced
+                    </span>
                   </div>
-                  <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>Enforced</span>
+                  <div className="host-tile-val">{identity.spkiHash.substring(0, 36)}...</div>
+                  <div className="host-tile-sub">Pinned SPKI SHA-256 Hash</div>
                 </div>
 
-                <div className="setting-divider" />
-
-                <div className="setting-row">
-                  <div className="setting-lead">
-                    <ArrowDownUp size={18} className="setting-icon" />
-                    <div className="setting-text">
-                      <span className="setting-title">QUIC Listening Socket</span>
-                      <span className="setting-subtitle">0.0.0.0:4433 &bull; UDP Datagram Buffer: 2 MB</span>
-                    </div>
+                {/* Tile 3: Socket & Network */}
+                <div className="host-tile">
+                  <div className="host-tile-head">
+                    <span className="host-tile-label">QUIC Socket</span>
+                    <span style={{ fontSize: 10, color: "var(--green)", fontWeight: 600, textTransform: "uppercase" }}>
+                      Online
+                    </span>
                   </div>
-                  <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>Active</span>
+                  <div className="host-tile-val">0.0.0.0:4433 (UDP)</div>
+                  <div className="host-tile-sub">2 MB Buffer &bull; RFC 9000</div>
                 </div>
               </div>
             </div>
@@ -592,12 +600,12 @@ export function App() {
               >
                 <div className="dropzone-lead">
                   <div className="dropzone-icon">
-                    <Upload size={20} />
+                    <Upload size={18} />
                   </div>
                   <div>
                     <div className="dropzone-title">Drag and drop files to stream over encrypted QUIC</div>
                     <div className="dropzone-subtitle">
-                      64 KB chunking with SHA-256 integrity verification across peers
+                      Chunked 64 KB streaming with SHA-256 integrity verification across peers
                     </div>
                   </div>
                 </div>
@@ -626,7 +634,7 @@ export function App() {
               {transfers.length === 0 ? (
                 <div className="empty-state-box">
                   <div className="empty-state-icon">
-                    <FileText size={22} />
+                    <FileText size={20} />
                   </div>
                   <div className="empty-state-title">No transfers yet</div>
                   <div className="empty-state-subtitle">
@@ -654,7 +662,7 @@ export function App() {
                       style={{ gridTemplateColumns: "3fr 1.5fr 1fr 1fr 1fr 1fr" }}
                     >
                       <div className="file-name-cell">
-                        <FileText size={16} color="var(--accent)" />
+                        <FileText size={15} color="var(--accent)" />
                         <span className="file-name-text">{tx.fileName}</span>
                       </div>
 
@@ -662,7 +670,7 @@ export function App() {
                         {selectedTargetPeer || "Pixel 8 Pro"}
                       </span>
 
-                      <span style={{ color: "var(--silver-dim)", fontFamily: "var(--font-mono)" }}>
+                      <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
                         {(tx.fileSize / 1024 / 1024).toFixed(2)} MB
                       </span>
 
@@ -707,7 +715,7 @@ export function App() {
               <div className="setting-card">
                 <div className="setting-row">
                   <div className="setting-lead">
-                    <RefreshCw size={18} className="setting-icon" />
+                    <RefreshCw size={17} className="setting-icon" />
                     <div className="setting-text">
                       <span className="setting-title">Bidirectional Clipboard Sync</span>
                       <span className="setting-subtitle">
@@ -729,7 +737,7 @@ export function App() {
 
                 <div className="setting-row">
                   <div className="setting-lead">
-                    <ShieldCheck size={18} className="setting-icon" />
+                    <ShieldCheck size={17} className="setting-icon" />
                     <div className="setting-text">
                       <span className="setting-title">Echo Suppression Protection</span>
                       <span className="setting-subtitle">
@@ -742,7 +750,7 @@ export function App() {
               </div>
 
               <span className="section-label">Send Text to Device</span>
-              <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
+              <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
                 <input
                   type="text"
                   className="input-field"
@@ -758,7 +766,7 @@ export function App() {
                 </button>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                 <span className="section-label" style={{ marginBottom: 0 }}>
                   Synchronized Clips ({filteredClips.length})
                 </span>
@@ -766,19 +774,19 @@ export function App() {
                   <input
                     type="text"
                     className="input-field"
-                    style={{ padding: "5px 10px 5px 28px", fontSize: 12 }}
+                    style={{ padding: "4px 8px 4px 26px", fontSize: 11.5 }}
                     placeholder="Search clips..."
                     value={clipFilterQuery}
                     onChange={(e) => setClipFilterQuery(e.target.value)}
                   />
-                  <Search size={12} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--silver-dim)" }} />
+                  <Search size={11} style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
                 </div>
               </div>
 
               {filteredClips.length === 0 ? (
                 <div className="empty-state-box">
                   <div className="empty-state-icon">
-                    <Clipboard size={22} />
+                    <Clipboard size={20} />
                   </div>
                   <div className="empty-state-title">No clips matched</div>
                   <div className="empty-state-subtitle">
@@ -816,7 +824,7 @@ export function App() {
                         {clip.text}
                       </span>
                       <span style={{ color: "var(--text-secondary)" }}>{clip.device}</span>
-                      <span style={{ color: "var(--silver-dim)", fontSize: 11 }}>{clip.time}</span>
+                      <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{clip.time}</span>
                       <div style={{ textAlign: "right" }}>
                         <button
                           className="btn btn-sm"
@@ -845,9 +853,9 @@ export function App() {
           {/* PAGE 4: NOTIFICATIONS */}
           {activePage === "notifications" && (
             <div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                 <span className="section-label" style={{ marginBottom: 0 }}>
-                  Incoming Stream ({notifications.length})
+                  Incoming Alerts ({notifications.length})
                 </span>
                 {notifications.length > 0 && (
                   <button className="btn btn-sm" onClick={handleClearAllNotifications}>
@@ -860,11 +868,11 @@ export function App() {
               {notifications.length === 0 ? (
                 <div className="empty-state-box">
                   <div className="empty-state-icon">
-                    <Bell size={22} />
+                    <Bell size={20} />
                   </div>
                   <div className="empty-state-title">No incoming notifications</div>
                   <div className="empty-state-subtitle">
-                    Push alerts from your connected mobile devices will be mirrored here in real time.
+                    Push alerts from your connected mobile devices will appear here in real time.
                   </div>
                 </div>
               ) : (
@@ -872,14 +880,14 @@ export function App() {
                   {notifications.map((notif) => (
                     <div key={notif.id} className="notif-card">
                       <div className="notif-icon-box">
-                        <Bell size={16} />
+                        <Bell size={15} />
                       </div>
 
                       <div className="notif-content">
                         <div className="notif-header-line">
                           <span className="notif-title">
                             {notif.title} &bull;{" "}
-                            <span style={{ color: "var(--silver-dim)", fontWeight: 400 }}>
+                            <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>
                               {notif.appName}
                             </span>
                           </span>
@@ -904,11 +912,11 @@ export function App() {
           {/* PAGE 5: SETTINGS */}
           {activePage === "settings" && (
             <div>
-              <span className="section-label">Continuity & Transfer Capabilities</span>
+              <span className="section-label">Continuity Capabilities</span>
               <div className="setting-card">
                 <div className="setting-row">
                   <div className="setting-lead">
-                    <Upload size={18} className="setting-icon" />
+                    <Upload size={17} className="setting-icon" />
                     <div className="setting-text">
                       <span className="setting-title">File Transfer Support</span>
                       <span className="setting-subtitle">
@@ -930,7 +938,7 @@ export function App() {
 
                 <div className="setting-row">
                   <div className="setting-lead">
-                    <Bell size={18} className="setting-icon" />
+                    <Bell size={17} className="setting-icon" />
                     <div className="setting-text">
                       <span className="setting-title">Notification Mirroring</span>
                       <span className="setting-subtitle">
@@ -952,7 +960,7 @@ export function App() {
 
                 <div className="setting-row">
                   <div className="setting-lead">
-                    <SlidersHorizontal size={18} className="setting-icon" />
+                    <SlidersHorizontal size={17} className="setting-icon" />
                     <div className="setting-text">
                       <span className="setting-title">Auto-Accept Small Transfers</span>
                       <span className="setting-subtitle">
@@ -975,7 +983,7 @@ export function App() {
               <div className="setting-card">
                 <div className="setting-row">
                   <div className="setting-lead">
-                    <Lock size={18} className="setting-icon" />
+                    <Lock size={17} className="setting-icon" />
                     <div className="setting-text">
                       <span className="setting-title">Mutual TLS 1.3 Certificate Pinning</span>
                       <span className="setting-subtitle">
@@ -990,7 +998,7 @@ export function App() {
 
                 <div className="setting-row">
                   <div className="setting-lead">
-                    <Key size={18} className="setting-icon" />
+                    <Key size={17} className="setting-icon" />
                     <div className="setting-text">
                       <span className="setting-title">Ed25519 Node Fingerprint</span>
                       <span className="setting-subtitle" style={{ fontFamily: "var(--font-mono)" }}>
@@ -1009,7 +1017,7 @@ export function App() {
               <div className="setting-card">
                 <div className="setting-row">
                   <div className="setting-lead">
-                    <ArrowDownUp size={18} className="setting-icon" />
+                    <ArrowDownUp size={17} className="setting-icon" />
                     <div className="setting-text">
                       <span className="setting-title">QUIC Transport Port</span>
                       <span className="setting-subtitle">Listening on UDP socket 0.0.0.0:4433</span>
@@ -1024,7 +1032,7 @@ export function App() {
 
                 <div className="setting-row">
                   <div className="setting-lead">
-                    <SlidersHorizontal size={18} className="setting-icon" />
+                    <SlidersHorizontal size={17} className="setting-icon" />
                     <div className="setting-text">
                       <span className="setting-title">UDP Datagram Buffer</span>
                       <span className="setting-subtitle">Kernel socket buffer optimized for low latency streams</span>
@@ -1040,7 +1048,7 @@ export function App() {
               <div className="setting-card">
                 <div className="setting-row">
                   <div className="setting-lead">
-                    <Share2 size={18} className="setting-icon" />
+                    <Share2 size={17} className="setting-icon" />
                     <div className="setting-text">
                       <span className="setting-title">Continue Desktop Client</span>
                       <span className="setting-subtitle">
@@ -1048,7 +1056,7 @@ export function App() {
                       </span>
                     </div>
                   </div>
-                  <span style={{ fontSize: 11, color: "var(--silver-dim)", fontFamily: "var(--font-mono)" }}>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
                     Up to date
                   </span>
                 </div>
@@ -1071,7 +1079,7 @@ export function App() {
             <div className="modal-header">
               <span className="modal-title">Pair New Device</span>
               <button className="modal-close-btn" onClick={() => setShowPairDialog(false)}>
-                <X size={16} />
+                <X size={15} />
               </button>
             </div>
 
@@ -1095,7 +1103,7 @@ export function App() {
                 autoFocus
               />
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
                 <button
                   type="button"
                   className="btn"
