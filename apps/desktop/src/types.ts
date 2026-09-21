@@ -33,3 +33,12 @@ export interface NotificationItem {
   timestamp: number;
   peerFingerprint: string;
 }
+
+export interface RemoteFileItem {
+  id: string;
+  name: string;
+  folder: "DCIM" | "Download" | "Documents" | "Movies" | "Music";
+  category: "images" | "videos" | "documents" | "audio" | "other";
+  size: number;
+  modifiedAt: number;
+}
