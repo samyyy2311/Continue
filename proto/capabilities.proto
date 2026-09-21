@@ -12,7 +12,7 @@ message CapabilityAdvertisement {
 
 // A single capability entry. `id` maps to the CapabilityId Rust newtype (u32).
 // Unknown id values received from a peer are represented as CapabilityId(n)
-// and are silently excluded from local matching — they are never rejected.
+// and are silently excluded from local matching, they are never rejected.
 message CapabilityEntry {
   uint32 id      = 1;
   uint32 version = 2;

@@ -92,16 +92,16 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build core-bridge
-        run: ./gradlew :core-bridge:assembleDebug
+      - name: Build Android modules
+        run: ./gradlew :core-bridge:assembleDebug :app:assembleDebug
         working-directory: apps/android
 
       - name: Unit tests
-        run: ./gradlew :core-bridge:testDebugUnitTest
+        run: ./gradlew :core-bridge:testDebugUnitTest :app:testDebugUnitTest
         working-directory: apps/android
 
       - name: Lint
-        run: ./gradlew :core-bridge:lintDebug :core-bridge:ktlintCheck :core-bridge:detekt
+        run: ./gradlew :core-bridge:lintDebug :core-bridge:ktlintCheck :core-bridge:detekt :app:lintDebug :app:ktlintCheck :app:detekt
         working-directory: apps/android
 
       - name: Android instrumentation tests (emulator)

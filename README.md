@@ -43,6 +43,8 @@ The core logic is written in Rust and split into small, focused crates:
 | `crates/notifications` | Notification event dispatching, dismissal, and action handling |
 | `crates/ffi` | UniFFI layer generating language bindings for desktop and mobile |
 | `tests/peer` | Headless test peer and automated fault injection suite |
+| `apps/desktop` | Tauri v2 desktop application (React, TypeScript, SQLite, QUIC) |
+| `apps/android` | Android application (Jetpack Compose `:app` and UniFFI `:core-bridge`) |
 
 ## Getting Started
 
@@ -50,10 +52,12 @@ The core logic is written in Rust and split into small, focused crates:
 
 * Rust 1.80 or newer
 * Protocol Buffers compiler (`protoc`)
+* Node.js 20+ and pnpm 9+ (for Desktop client)
+* JDK 17+ and Android SDK API 26+ (for Android client)
 
-### Building
+### Building Core Rust Crates
 
-Clone the repository and build the workspace:
+Clone the repository and build the core workspace:
 
 ```bash
 git clone https://github.com/samyyy2311/Continue.git
@@ -61,18 +65,49 @@ cd Continue
 cargo build --workspace
 ```
 
+### Building Desktop Application
+
+```bash
+cd apps/desktop
+pnpm install
+pnpm build
+pnpm tauri build
+```
+
+### Building Android Application
+
+```bash
+cd apps/android
+./gradlew :core-bridge:assembleDebug :app:assembleDebug
+```
+
 ### Running Tests
 
-Run the workspace unit and integration tests:
+Run the Rust workspace unit and integration tests:
 
 ```bash
 cargo test --workspace
 ```
 
-Run the automated fault-injection and pairing verification suite:
+Run the automated fault-injection and multi-node capability simulation suite:
 
 ```bash
 cargo run -p peer -- --test-suite
+```
+
+Run Desktop frontend tests:
+
+```bash
+cd apps/desktop
+pnpm vitest run
+```
+
+Run Android unit and lint tests:
+
+```bash
+cd apps/android
+./gradlew :core-bridge:testDebugUnitTest :app:testDebugUnitTest
+./gradlew :core-bridge:ktlintCheck :core-bridge:detekt :app:ktlintCheck :app:detekt
 ```
 
 ## License

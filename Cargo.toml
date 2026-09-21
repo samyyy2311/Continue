@@ -27,7 +27,7 @@ authors = []
 publish = false
 
 [workspace.dependencies]
-# Async runtime — individual crates declare only the features they need
+# Async runtime: individual crates declare only the features they need
 tokio = "1"
 tokio-util = "0.7"
 

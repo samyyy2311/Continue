@@ -19,7 +19,7 @@ default = "deny"
 [bans]
 multiple-versions = "warn"
 deny = [
-    # Disallow OpenSSL — use rustls
+    # Disallow OpenSSL: use rustls
     { name = "openssl" },
     { name = "openssl-sys" },
     # Disallow native-tls
