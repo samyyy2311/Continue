@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "continue-android"
 include(":core-bridge")
+include(":app")

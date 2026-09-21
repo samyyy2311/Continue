@@ -1,0 +1,21 @@
+naming:
+  FunctionNaming:
+    ignoreAnnotated:
+      - 'Composable'
+  MatchingDeclarationName:
+    active: false
+
+complexity:
+  LongMethod:
+    ignoreAnnotated:
+      - 'Composable'
+  LongParameterList:
+    ignoreAnnotated:
+      - 'Composable'
+
+style:
+  MagicNumber:
+    ignorePropertyDeclaration: true
+    ignoreNamedArgument: true
+    ignoreEnums: true
+    ignoreConstantDeclaration: true
