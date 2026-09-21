@@ -501,7 +501,11 @@ pub fn connect_to_peer(peer_fingerprint: String, endpoint: String) -> Result<(),
 
         let mux = Arc::new(SessionMultiplexer::new(peer_fingerprint.clone(), connection));
         mux.spawn_keepalive_sender();
-        let _ = mux.spawn_router(16);
+
+        let download_dir = std::env::temp_dir().join("continue_downloads");
+        let _ = std::fs::create_dir_all(&download_dir);
+        let handlers = sessions::SessionCapabilityHandlers::new(download_dir);
+        sessions::spawn_capabilities_dispatcher(mux.clone(), handlers, 16);
 
         let mut lock = active_sessions.lock().unwrap();
         lock.insert(peer_fingerprint, mux);
@@ -545,6 +549,117 @@ pub fn disconnect(peer_fingerprint: String) -> Result<(), ContinueFfiError> {
     }
 
     Ok(())
+}
+
+pub fn send_file(peer_fingerprint: String, file_path: String) -> Result<u64, ContinueFfiError> {
+    let (runtime, mux) = {
+        let lock = CORE.lock().unwrap();
+        let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+        let sessions = state.active_sessions.lock().unwrap();
+        let m = sessions
+            .get(&peer_fingerprint)
+            .cloned()
+            .ok_or_else(|| ContinueFfiError::InternalError("Peer not connected".to_string()))?;
+        (state.runtime.clone(), m)
+    };
+
+    runtime.block_on(async move {
+        let path = std::path::Path::new(&file_path);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let transfer_id = format!("tx-{now}");
+        mux.send_file_to_peer(path, transfer_id)
+            .await
+            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))
+    })
+}
+
+pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(), ContinueFfiError> {
+    let (runtime, mux) = {
+        let lock = CORE.lock().unwrap();
+        let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+        let sessions = state.active_sessions.lock().unwrap();
+        let m = sessions
+            .get(&peer_fingerprint)
+            .cloned()
+            .ok_or_else(|| ContinueFfiError::InternalError("Peer not connected".to_string()))?;
+        (state.runtime.clone(), m)
+    };
+
+    runtime.block_on(async move {
+        let synchronizer = clipboard::ClipboardSynchronizer::new();
+        let query = capabilities::CapabilityQuery {
+            capability: capabilities::PlatformCapability::ClipboardWrite,
+            platform_available: true,
+            app_permitted: true,
+            peer_trusted: true,
+            session_negotiated: true,
+        };
+
+        mux.send_clipboard_to_peer(
+            &synchronizer,
+            clipboard::ClipboardFormat::PlainText,
+            text.into_bytes(),
+            &query,
+        )
+        .await
+        .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
+
+        Ok(())
+    })
+}
+
+pub fn send_notification(
+    peer_fingerprint: String,
+    title: String,
+    body: String,
+    app_name: String,
+) -> Result<(), ContinueFfiError> {
+    let (runtime, mux) = {
+        let lock = CORE.lock().unwrap();
+        let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+        let sessions = state.active_sessions.lock().unwrap();
+        let m = sessions
+            .get(&peer_fingerprint)
+            .cloned()
+            .ok_or_else(|| ContinueFfiError::InternalError("Peer not connected".to_string()))?;
+        (state.runtime.clone(), m)
+    };
+
+    runtime.block_on(async move {
+        let dispatcher = notifications::NotificationDispatcher::new();
+        let query = capabilities::CapabilityQuery {
+            capability: capabilities::PlatformCapability::NotificationSend,
+            platform_available: true,
+            app_permitted: true,
+            peer_trusted: true,
+            session_negotiated: true,
+        };
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        let post = notifications::NotificationPost {
+            notification_id: format!("notif-{now}"),
+            app_name,
+            title,
+            body,
+            icon_png: vec![],
+            actions: vec![],
+            posted_at: now,
+            urgency: 0,
+        };
+
+        mux.send_notification_to_peer(&dispatcher, post, &query)
+            .await
+            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
+
+        Ok(())
+    })
 }
 
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {

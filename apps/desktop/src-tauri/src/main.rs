@@ -358,7 +358,11 @@ async fn connect_to_peer(
 
     let mux = Arc::new(SessionMultiplexer::new(peer_fingerprint.clone(), connection));
     mux.spawn_keepalive_sender();
-    let _ = mux.spawn_router(16);
+
+    let download_dir = std::env::temp_dir().join("continue_desktop_downloads");
+    let _ = std::fs::create_dir_all(&download_dir);
+    let handlers = sessions::SessionCapabilityHandlers::new(download_dir);
+    sessions::spawn_capabilities_dispatcher(mux.clone(), handlers, 16);
 
     let mut sessions = state.active_sessions.lock();
     sessions.insert(peer_fingerprint, mux);
@@ -372,6 +376,115 @@ fn disconnect_peer(state: State<DesktopRuntimeState>, peer_fingerprint: String) 
     if let Some(session) = sessions.remove(&peer_fingerprint) {
         session.connection().close(0u32.into(), b"user_disconnect");
     }
+    Ok(())
+}
+
+#[tauri::command]
+async fn send_file_to_peer(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    file_path: String,
+) -> Result<u64, String> {
+    let mux = {
+        let sessions = state.active_sessions.lock();
+        sessions
+            .get(&peer_fingerprint)
+            .cloned()
+            .ok_or_else(|| "Peer is not connected".to_string())?
+    };
+
+    let path = std::path::PathBuf::from(file_path);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let transfer_id = format!("tx-{now}");
+
+    mux.send_file_to_peer(&path, transfer_id)
+        .await
+        .map_err(|e| format!("Failed to send file: {e}"))
+}
+
+#[tauri::command]
+async fn send_clipboard_text(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    text: String,
+) -> Result<(), String> {
+    let mux = {
+        let sessions = state.active_sessions.lock();
+        sessions
+            .get(&peer_fingerprint)
+            .cloned()
+            .ok_or_else(|| "Peer is not connected".to_string())?
+    };
+
+    let synchronizer = clipboard::ClipboardSynchronizer::new();
+    let query = capabilities::CapabilityQuery {
+        capability: capabilities::PlatformCapability::ClipboardWrite,
+        platform_available: true,
+        app_permitted: true,
+        peer_trusted: true,
+        session_negotiated: true,
+    };
+
+    mux.send_clipboard_to_peer(
+        &synchronizer,
+        clipboard::ClipboardFormat::PlainText,
+        text.into_bytes(),
+        &query,
+    )
+    .await
+    .map_err(|e| format!("Clipboard sync error: {e}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn send_notification(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    title: String,
+    body: String,
+    app_name: String,
+) -> Result<(), String> {
+    let mux = {
+        let sessions = state.active_sessions.lock();
+        sessions
+            .get(&peer_fingerprint)
+            .cloned()
+            .ok_or_else(|| "Peer is not connected".to_string())?
+    };
+
+    let dispatcher = notifications::NotificationDispatcher::new();
+    let query = capabilities::CapabilityQuery {
+        capability: capabilities::PlatformCapability::NotificationSend,
+        platform_available: true,
+        app_permitted: true,
+        peer_trusted: true,
+        session_negotiated: true,
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    let post = notifications::NotificationPost {
+        notification_id: format!("notif-{now}"),
+        app_name,
+        title,
+        body,
+        icon_png: vec![],
+        actions: vec![],
+        posted_at: now,
+        urgency: 0,
+    };
+
+    mux.send_notification_to_peer(&dispatcher, post, &query)
+        .await
+        .map_err(|e| format!("Notification error: {e}"))?;
+
     Ok(())
 }
 
@@ -423,7 +536,10 @@ fn main() {
             get_permissions,
             set_permission,
             connect_to_peer,
-            disconnect_peer
+            disconnect_peer,
+            send_file_to_peer,
+            send_clipboard_text,
+            send_notification
         ])
         .run(tauri::generate_context!())
         .expect("error while running Continue desktop application");

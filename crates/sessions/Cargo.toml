@@ -13,6 +13,9 @@ pairing = { path = "../pairing" }
 identity = { path = "../identity" }
 capabilities = { path = "../capabilities" }
 permissions = { path = "../permissions" }
+transfer = { path = "../transfer" }
+clipboard = { path = "../clipboard" }
+notifications = { path = "../notifications" }
 quinn = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "rt", "net"] }
 rand = { workspace = true }

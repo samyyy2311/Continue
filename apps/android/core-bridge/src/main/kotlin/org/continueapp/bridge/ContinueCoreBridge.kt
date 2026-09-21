@@ -64,6 +64,17 @@ interface ContinueCoreBridge {
 
     fun disconnect(peerFingerprint: String)
 
+    fun sendFile(peerFingerprint: String, filePath: String): Long
+
+    fun sendClipboardText(peerFingerprint: String, text: String)
+
+    fun sendNotification(
+        peerFingerprint: String,
+        title: String,
+        body: String,
+        appName: String,
+    )
+
     companion object {
         fun create(forceMock: Boolean = false): ContinueCoreBridge {
             if (forceMock) {
@@ -225,6 +236,24 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         connectedPeers.remove(peerFingerprint)
     }
 
+    override fun sendFile(peerFingerprint: String, filePath: String): Long {
+        checkInitialized()
+        return 0L
+    }
+
+    override fun sendClipboardText(peerFingerprint: String, text: String) {
+        checkInitialized()
+    }
+
+    override fun sendNotification(
+        peerFingerprint: String,
+        title: String,
+        body: String,
+        appName: String,
+    ) {
+        checkInitialized()
+    }
+
     private fun checkInitialized() {
         if (!initialized) {
             throw ContinueException.NotInitializedException("Core runtime engine is not initialized")
@@ -311,6 +340,22 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
         disconnectNative(peerFingerprint)
     }
 
+    override fun sendFile(peerFingerprint: String, filePath: String): Long =
+        sendFileNative(peerFingerprint, filePath)
+
+    override fun sendClipboardText(peerFingerprint: String, text: String) {
+        sendClipboardTextNative(peerFingerprint, text)
+    }
+
+    override fun sendNotification(
+        peerFingerprint: String,
+        title: String,
+        body: String,
+        appName: String,
+    ) {
+        sendNotificationNative(peerFingerprint, title, body, appName)
+    }
+
     private external fun initCoreNative(dbPath: String)
 
     private external fun getDeviceFingerprintNative(): String
@@ -367,4 +412,15 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
     private external fun isPeerConnectedNative(peerFingerprint: String): Boolean
 
     private external fun disconnectNative(peerFingerprint: String)
+
+    private external fun sendFileNative(peerFingerprint: String, filePath: String): Long
+
+    private external fun sendClipboardTextNative(peerFingerprint: String, text: String)
+
+    private external fun sendNotificationNative(
+        peerFingerprint: String,
+        title: String,
+        body: String,
+        appName: String,
+    )
 }

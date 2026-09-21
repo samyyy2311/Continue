@@ -98,4 +98,16 @@ class ContinueCoreBridgeTest {
         bridge.disconnect(peerFp)
         assertFalse(bridge.isPeerConnected(peerFp))
     }
+
+    @Test
+    fun capabilityMethodsExecution() {
+        bridge.initCore(":memory:")
+        val peerFp = "peer-test-caps"
+
+        val bytesSent = bridge.sendFile(peerFp, "/tmp/sample.txt")
+        assertEquals(0L, bytesSent)
+
+        bridge.sendClipboardText(peerFp, "Test clipboard payload")
+        bridge.sendNotification(peerFp, "Alert", "Incoming message", "Messages")
+    }
 }

@@ -58,6 +58,15 @@ namespace continue {
 
     [Throws=ContinueFfiError]
     void disconnect(string peer_fingerprint);
+
+    [Throws=ContinueFfiError]
+    u64 send_file(string peer_fingerprint, string file_path);
+
+    [Throws=ContinueFfiError]
+    void send_clipboard_text(string peer_fingerprint, string text);
+
+    [Throws=ContinueFfiError]
+    void send_notification(string peer_fingerprint, string title, string body, string app_name);
 };
 
 dictionary TrustedPeerFfi {
