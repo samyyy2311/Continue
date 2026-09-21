@@ -21,6 +21,10 @@ import {
   Search,
   ArrowDownLeft,
   ArrowUpRight,
+  SlidersHorizontal,
+  RefreshCw,
+  Lock,
+  ShieldCheck,
 } from "lucide-react";
 import "./App.css";
 import type { DeviceIdentity, TrustedPeer, TransferHistoryItem, NotificationItem } from "./types.ts";
@@ -408,67 +412,72 @@ export function App() {
               <div className="detail-content">
                 {/* TAB 1: TRANSFERS */}
                 {activeTab === "transfers" && (
-                  <div>
-                    {/* Compact Dropzone */}
-                    <div className="compact-dropzone" onClick={handleTriggerSendFile}>
-                      <div className="dropzone-left-content">
-                        <div className="dropzone-icon-box">
-                          <Upload size={18} />
+                  <div className="settings-section">
+                    <div>
+                      <span className="section-label">Fast Send</span>
+                      {/* Compact Dropzone */}
+                      <div className="compact-dropzone" onClick={handleTriggerSendFile}>
+                        <div className="dropzone-left-content">
+                          <div className="dropzone-icon-box">
+                            <Upload size={18} />
+                          </div>
+                          <div>
+                            <div className="dropzone-title">Drop files here to send to {currentPeer.displayName}</div>
+                            <div className="dropzone-desc">Chunked 64 KB QUIC streaming with SHA-256 verification</div>
+                          </div>
                         </div>
-                        <div>
-                          <div className="dropzone-title">Drop files here to send to {currentPeer.displayName}</div>
-                          <div className="dropzone-desc">Chunked 64 KB QUIC streaming with SHA-256 verification</div>
-                        </div>
+                        <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); handleTriggerSendFile(); }}>
+                          Browse Files
+                        </button>
                       </div>
-                      <button className="btn btn-primary" onClick={(e) => { e.stopPropagation(); handleTriggerSendFile(); }}>
-                        Browse Files
-                      </button>
                     </div>
 
-                    {/* Linear Style Data Table */}
-                    <div className="data-table-wrap">
-                      <div className="data-table-header">
-                        <span>File Name</span>
-                        <span>Size</span>
-                        <span>Direction</span>
-                        <span>Status</span>
-                        <span style={{ textAlign: "right" }}>Actions</span>
-                      </div>
-
-                      {transfers.map((tx) => (
-                        <div key={tx.id} className="data-table-row">
-                          <div className="table-file-cell">
-                            <FileText size={16} color="#60a5fa" />
-                            <span className="table-file-name">{tx.fileName}</span>
-                          </div>
-
-                          <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
-                            {(tx.fileSize / 1024 / 1024).toFixed(2)} MB
-                          </span>
-
-                          <div>
-                            <span className={`badge-direction ${tx.direction === "incoming" ? "badge-incoming" : "badge-outgoing"}`}>
-                              {tx.direction === "incoming" ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}
-                              {tx.direction}
-                            </span>
-                          </div>
-
-                          <div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--green)" }}>
-                            <Check size={13} />
-                            <span>Verified</span>
-                          </div>
-
-                          <div style={{ textAlign: "right" }}>
-                            <button
-                              className="btn btn-sm"
-                              onClick={() => showToast(`Opened ${tx.fileName}`)}
-                            >
-                              <ExternalLink size={12} />
-                              <span>Reveal</span>
-                            </button>
-                          </div>
+                    <div>
+                      <span className="section-label">Recent Activity</span>
+                      <div className="data-table-wrap">
+                        <div className="data-table-header">
+                          <span>File Name</span>
+                          <span>Size</span>
+                          <span>Direction</span>
+                          <span>Status</span>
+                          <span style={{ textAlign: "right" }}>Actions</span>
                         </div>
-                      ))}
+
+                        {transfers.map((tx) => (
+                          <div key={tx.id} className="data-table-row">
+                            <div className="table-file-cell">
+                              <FileText size={16} color="var(--accent-cyan)" />
+                              <span className="table-file-name">{tx.fileName}</span>
+                            </div>
+
+                            <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+                              {(tx.fileSize / 1024 / 1024).toFixed(2)} MB
+                            </span>
+
+                            <div>
+                              <span className={`badge-direction ${tx.direction === "incoming" ? "badge-incoming" : "badge-outgoing"}`}>
+                                {tx.direction === "incoming" ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}
+                                {tx.direction}
+                              </span>
+                            </div>
+
+                            <div style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--green)" }}>
+                              <Check size={13} />
+                              <span>Verified</span>
+                            </div>
+
+                            <div style={{ textAlign: "right" }}>
+                              <button
+                                className="btn btn-sm"
+                                onClick={() => showToast(`Opened ${tx.fileName}`)}
+                              >
+                                <ExternalLink size={12} />
+                                <span>Reveal</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -476,177 +485,229 @@ export function App() {
                 {/* TAB 2: CLIPBOARD */}
                 {activeTab === "clipboard" && (
                   <div className="settings-section">
-                    <div className="settings-card">
-                      <div className="settings-row">
-                        <div className="settings-row-text">
-                          <span className="settings-row-title">Bidirectional Sync</span>
-                          <span className="settings-row-desc">Automatically mirror copied text and media to {currentPeer.displayName}</span>
-                        </div>
-                        <label className="sleek-switch">
-                          <input
-                            type="checkbox"
-                            checked={allowClipboardSync}
-                            onChange={(e) => setAllowClipboardSync(e.target.checked)}
-                          />
-                          <span className="sleek-slider" />
-                        </label>
-                      </div>
-
-                      <div className="settings-row">
-                        <div className="settings-row-text">
-                          <span className="settings-row-title">Echo Suppression Protection</span>
-                          <span className="settings-row-desc">Rolling 16-entry hash ring eliminates recursive paste loops</span>
-                        </div>
-                        <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>Active</span>
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input
-                        type="text"
-                        className="sleek-input"
-                        placeholder="Type or paste text to blast to device..."
-                        value={clipboardInput}
-                        onChange={(e) => setClipboardInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleSendClipboard(); }}
-                      />
-                      <button className="btn btn-primary" onClick={handleSendClipboard}>
-                        Send
-                      </button>
-                    </div>
-
-                    <div className="data-table-wrap" style={{ marginTop: 8 }}>
-                      <div className="data-table-header" style={{ gridTemplateColumns: "3fr 1fr 1fr" }}>
-                        <span>Synchronized Text Clip</span>
-                        <span>Origin</span>
-                        <span style={{ textAlign: "right" }}>Copy</span>
-                      </div>
-
-                      {syncedClips.map((clip) => (
-                        <div key={clip.id} className="data-table-row" style={{ gridTemplateColumns: "3fr 1fr 1fr" }}>
-                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                            {clip.text}
-                          </span>
-                          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>{clip.device}</span>
-                          <div style={{ textAlign: "right" }}>
-                            <button
-                              className="btn btn-sm"
-                              onClick={() => {
-                                navigator.clipboard.writeText(clip.text);
-                                showToast("Copied to clipboard");
-                              }}
-                            >
-                              <Copy size={11} />
-                              <span>Copy</span>
-                            </button>
+                    <div>
+                      <span className="section-label">Sync Preferences</span>
+                      <div className="settings-card">
+                        <div className="settings-row">
+                          <div className="settings-row-lead">
+                            <RefreshCw size={18} className="settings-row-icon" />
+                            <div className="settings-row-text">
+                              <span className="settings-row-title">Bidirectional Sync</span>
+                              <span className="settings-row-desc">Automatically mirror copied text and media to {currentPeer.displayName}</span>
+                            </div>
                           </div>
+                          <label className="sleek-switch">
+                            <input
+                              type="checkbox"
+                              checked={allowClipboardSync}
+                              onChange={(e) => setAllowClipboardSync(e.target.checked)}
+                            />
+                            <span className="sleek-slider" />
+                          </label>
                         </div>
-                      ))}
+
+                        <div className="setting-divider" />
+
+                        <div className="settings-row">
+                          <div className="settings-row-lead">
+                            <ShieldCheck size={18} className="settings-row-icon" />
+                            <div className="settings-row-text">
+                              <span className="settings-row-title">Echo Suppression Protection</span>
+                              <span className="settings-row-desc">Rolling 16-entry hash ring eliminates recursive paste loops</span>
+                            </div>
+                          </div>
+                          <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>Active</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="section-label">Send Clip to Device</span>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input
+                          type="text"
+                          className="sleek-input"
+                          placeholder="Type or paste text to blast to device..."
+                          value={clipboardInput}
+                          onChange={(e) => setClipboardInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleSendClipboard(); }}
+                        />
+                        <button className="btn btn-primary" onClick={handleSendClipboard}>
+                          Send
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="section-label">Synchronized History</span>
+                      <div className="data-table-wrap">
+                        <div className="data-table-header" style={{ gridTemplateColumns: "3fr 1fr 1fr" }}>
+                          <span>Text Content</span>
+                          <span>Source</span>
+                          <span style={{ textAlign: "right" }}>Action</span>
+                        </div>
+
+                        {syncedClips.map((clip) => (
+                          <div key={clip.id} className="data-table-row" style={{ gridTemplateColumns: "3fr 1fr 1fr" }}>
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {clip.text}
+                            </span>
+                            <span style={{ color: "var(--silver-dim)", fontSize: 11 }}>{clip.device}</span>
+                            <div style={{ textAlign: "right" }}>
+                              <button
+                                className="btn btn-sm"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(clip.text);
+                                  showToast("Copied to clipboard");
+                                }}
+                              >
+                                <Copy size={11} />
+                                <span>Copy</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
 
                 {/* TAB 3: NOTIFICATIONS */}
                 {activeTab === "notifications" && (
-                  <div className="notification-feed">
-                    {notifications.length === 0 ? (
-                      <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-                        No incoming notifications from {currentPeer.displayName}
-                      </div>
-                    ) : (
-                      notifications.map((notif) => (
-                        <div key={notif.id} className="notification-card-item">
-                          <div className="notif-app-badge">
-                            <Bell size={14} />
+                  <div className="settings-section">
+                    <div>
+                      <span className="section-label">Incoming Alerts ({notifications.length})</span>
+                      <div className="notification-feed">
+                        {notifications.length === 0 ? (
+                          <div style={{ padding: 40, textAlign: "center", color: "var(--silver-dim)" }}>
+                            No incoming notifications from {currentPeer.displayName}
                           </div>
+                        ) : (
+                          notifications.map((notif) => (
+                            <div key={notif.id} className="notification-card-item">
+                              <div className="notif-app-badge">
+                                <Bell size={14} />
+                              </div>
 
-                          <div className="notif-main-wrap">
-                            <div className="notif-title-row">
-                              <span className="notif-author">
-                                {notif.title} &bull; <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>{notif.appName}</span>
-                              </span>
-                              <span className="notif-timestamp">2m ago</span>
+                              <div className="notif-main-wrap">
+                                <div className="notif-title-row">
+                                  <span className="notif-author">
+                                    {notif.title} &bull; <span style={{ color: "var(--silver-dim)", fontWeight: 400 }}>{notif.appName}</span>
+                                  </span>
+                                  <span className="notif-timestamp">2m ago</span>
+                                </div>
+                                <span className="notif-body-message">{notif.body}</span>
+                              </div>
+
+                              <button
+                                className="btn btn-sm"
+                                onClick={() => handleDismissNotification(notif.id)}
+                              >
+                                Dismiss
+                              </button>
                             </div>
-                            <span className="notif-body-message">{notif.body}</span>
-                          </div>
-
-                          <button
-                            className="btn btn-sm"
-                            onClick={() => handleDismissNotification(notif.id)}
-                          >
-                            Dismiss
-                          </button>
-                        </div>
-                      ))
-                    )}
+                          ))
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
 
                 {/* TAB 4: PERMISSIONS */}
                 {activeTab === "permissions" && (
                   <div className="settings-section">
-                    <div className="settings-card">
-                      <div className="settings-row">
-                        <div className="settings-row-text">
-                          <span className="settings-row-title">File Transfer Permission</span>
-                          <span className="settings-row-desc">Allow receiving and streaming files over QUIC</span>
+                    <div>
+                      <span className="section-label">Device Capabilities</span>
+                      <div className="settings-card">
+                        <div className="settings-row">
+                          <div className="settings-row-lead">
+                            <Upload size={18} className="settings-row-icon" />
+                            <div className="settings-row-text">
+                              <span className="settings-row-title">File Transfer Permission</span>
+                              <span className="settings-row-desc">Allow receiving and streaming files over QUIC</span>
+                            </div>
+                          </div>
+                          <label className="sleek-switch">
+                            <input
+                              type="checkbox"
+                              checked={allowFileTransfer}
+                              onChange={(e) => setAllowFileTransfer(e.target.checked)}
+                            />
+                            <span className="sleek-slider" />
+                          </label>
                         </div>
-                        <label className="sleek-switch">
-                          <input
-                            type="checkbox"
-                            checked={allowFileTransfer}
-                            onChange={(e) => setAllowFileTransfer(e.target.checked)}
-                          />
-                          <span className="sleek-slider" />
-                        </label>
-                      </div>
 
-                      <div className="settings-row">
-                        <div className="settings-row-text">
-                          <span className="settings-row-title">Notification Mirroring</span>
-                          <span className="settings-row-desc">Forward push alerts with remote dismiss sync</span>
-                        </div>
-                        <label className="sleek-switch">
-                          <input
-                            type="checkbox"
-                            checked={allowNotifications}
-                            onChange={(e) => setAllowNotifications(e.target.checked)}
-                          />
-                          <span className="sleek-slider" />
-                        </label>
-                      </div>
+                        <div className="setting-divider" />
 
-                      <div className="settings-row">
-                        <div className="settings-row-text">
-                          <span className="settings-row-title">Auto-Accept Small Transfers</span>
-                          <span className="settings-row-desc">Automatically accept payloads under 10 MB without manual prompt</span>
+                        <div className="settings-row">
+                          <div className="settings-row-lead">
+                            <Bell size={18} className="settings-row-icon" />
+                            <div className="settings-row-text">
+                              <span className="settings-row-title">Notification Mirroring</span>
+                              <span className="settings-row-desc">Forward push alerts with remote dismiss sync</span>
+                            </div>
+                          </div>
+                          <label className="sleek-switch">
+                            <input
+                              type="checkbox"
+                              checked={allowNotifications}
+                              onChange={(e) => setAllowNotifications(e.target.checked)}
+                            />
+                            <span className="sleek-slider" />
+                          </label>
                         </div>
-                        <label className="sleek-switch">
-                          <input
-                            type="checkbox"
-                            checked={autoAcceptSmall}
-                            onChange={(e) => setAutoAcceptSmall(e.target.checked)}
-                          />
-                          <span className="sleek-slider" />
-                        </label>
-                      </div>
 
-                      <div className="settings-row">
-                        <div className="settings-row-text">
-                          <span className="settings-row-title">Mutual TLS 1.3 Certificate Pinning</span>
-                          <span className="settings-row-desc">SPKI transport certificate pinned to Ed25519 identity</span>
+                        <div className="setting-divider" />
+
+                        <div className="settings-row">
+                          <div className="settings-row-lead">
+                            <SlidersHorizontal size={18} className="settings-row-icon" />
+                            <div className="settings-row-text">
+                              <span className="settings-row-title">Auto-Accept Small Transfers</span>
+                              <span className="settings-row-desc">Automatically accept payloads under 10 MB without manual prompt</span>
+                            </div>
+                          </div>
+                          <label className="sleek-switch">
+                            <input
+                              type="checkbox"
+                              checked={autoAcceptSmall}
+                              onChange={(e) => setAutoAcceptSmall(e.target.checked)}
+                            />
+                            <span className="sleek-slider" />
+                          </label>
                         </div>
-                        <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>Enforced</span>
+
+                        <div className="setting-divider" />
+
+                        <div className="settings-row">
+                          <div className="settings-row-lead">
+                            <Lock size={18} className="settings-row-icon" />
+                            <div className="settings-row-text">
+                              <span className="settings-row-title">Mutual TLS 1.3 Certificate Pinning</span>
+                              <span className="settings-row-desc">SPKI transport certificate pinned to Ed25519 identity</span>
+                            </div>
+                          </div>
+                          <span style={{ fontSize: 11, color: "var(--green)", fontWeight: 600 }}>Enforced</span>
+                        </div>
                       </div>
                     </div>
 
-                    <div style={{ marginTop: 8 }}>
-                      <button
-                        className="btn btn-danger"
-                        onClick={() => handleDisconnectPeer(currentPeer.fingerprint)}
-                      >
-                        Unpair {currentPeer.displayName}
-                      </button>
+                    <div>
+                      <span className="section-label" style={{ color: "var(--red)" }}>Danger Zone</span>
+                      <div className="settings-card" style={{ borderColor: "rgba(239, 68, 68, 0.25)" }}>
+                        <div className="settings-row">
+                          <div className="settings-row-text">
+                            <span className="settings-row-title">Unpair Device</span>
+                            <span className="settings-row-desc">Revoke mutual authentication keys and terminate active session</span>
+                          </div>
+                          <button
+                            className="btn btn-danger"
+                            onClick={() => handleDisconnectPeer(currentPeer.fingerprint)}
+                          >
+                            Unpair
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
