@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use identity::IdentitySigner;
 use pairing::{InitiatorPairing, ReplayCache, TrustStore};
@@ -57,7 +57,7 @@ pub struct DesktopRuntimeState {
     trust_store: Arc<Mutex<TrustStore>>,
     permission_store: Arc<Mutex<PermissionStore>>,
     replay_cache: Arc<ReplayCache>,
-    active_pairing: Arc<Mutex<Option<ActivePairingServer>>>,
+    active_pairing: Arc<Mutex<Option<Arc<ActivePairingServer>>>>,
     active_sessions: Arc<Mutex<HashMap<String, Arc<SessionMultiplexer>>>>,
 }
 
@@ -115,11 +115,25 @@ fn remove_trusted_peer(state: State<DesktopRuntimeState>, fingerprint: String) -
     store.remove_peer(&fingerprint).map_err(|e| format!("Database error: {e}"))
 }
 
+/// Finds the address other devices on the LAN can reach us at. Connecting a UDP
+/// socket only selects a route; no packet is sent, so this works offline as long
+/// as the machine has a default route.
+fn local_lan_ip() -> Result<std::net::IpAddr, String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0")
+        .map_err(|e| format!("Network unavailable: {e}"))?;
+    socket
+        .connect("192.0.2.1:9")
+        .map_err(|e| format!("No local network route: {e}"))?;
+    socket
+        .local_addr()
+        .map(|addr| addr.ip())
+        .map_err(|e| format!("Network unavailable: {e}"))
+}
+
 #[tauri::command]
 async fn start_pairing(
+    app: AppHandle,
     state: State<'_, DesktopRuntimeState>,
-    listen_port: u16,
-    advertised_endpoint: String,
 ) -> Result<String, String> {
     {
         let mut active = state.active_pairing.lock();
@@ -134,9 +148,15 @@ async fn start_pairing(
         .build_pairing_server_tls(recorded_spki.clone())
         .map_err(|e| format!("TLS configuration failed: {e}"))?;
 
-    let bind_addr = std::net::SocketAddr::from(([0, 0, 0, 0], listen_port));
+    let lan_ip = local_lan_ip()?;
+    let bind_addr = std::net::SocketAddr::from(([0, 0, 0, 0], 0));
     let server_endpoint = transport::create_server_endpoint(bind_addr, server_tls)
         .map_err(|e| format!("Failed to create server endpoint: {e}"))?;
+    let listen_port = server_endpoint
+        .local_addr()
+        .map_err(|e| format!("Failed to read listening port: {e}"))?
+        .port();
+    let advertised_endpoint = std::net::SocketAddr::new(lan_ip, listen_port).to_string();
 
     let mut initiator = InitiatorPairing::new(
         state.identity_signer.clone(),
@@ -149,12 +169,13 @@ async fn start_pairing(
         .generate_qr(advertised_endpoint)
         .map_err(|e| format!("Failed to generate pairing payload: {e}"))?;
 
-    let pairing_server = ActivePairingServer {
+    let pairing_server = Arc::new(ActivePairingServer {
         server_endpoint: server_endpoint.clone(),
-    };
-    *state.active_pairing.lock() = Some(pairing_server);
+    });
+    *state.active_pairing.lock() = Some(pairing_server.clone());
 
     let endpoint_for_worker = server_endpoint.clone();
+    let active_pairing = state.active_pairing.clone();
     tokio::spawn(async move {
         let incoming = match endpoint_for_worker.accept().await {
             Some(inc) => inc,
@@ -176,9 +197,34 @@ async fn start_pairing(
             None => return,
         };
 
-        let _ = initiator
+        let result = initiator
             .complete_handshake(&mut send_stream, &mut recv_stream, recorded_hash)
             .await;
+
+        endpoint_for_worker.close(0u32.into(), b"pairing_finished");
+
+        // A cancelled or superseded attempt must not report into the UI's current one.
+        {
+            let mut active = active_pairing.lock();
+            if !active.as_ref().is_some_and(|a| Arc::ptr_eq(a, &pairing_server)) {
+                return;
+            }
+            active.take();
+        }
+
+        let _ = match result {
+            Ok(peer) => app.emit(
+                "pairing-completed",
+                TrustedPeerDto {
+                    fingerprint: peer.fingerprint,
+                    display_name: peer.display_name,
+                    paired_at: peer.paired_at,
+                    is_connected: false,
+                    endpoint: None,
+                },
+            ),
+            Err(e) => app.emit("pairing-failed", format!("Pairing handshake failed: {e}")),
+        };
     });
 
     Ok(qr.encode())
@@ -242,12 +288,13 @@ async fn pair_from_qr(
         .await
         .map_err(|e| format!("Pairing handshake failed: {e}"))?;
 
+    // The pairing connection is dropped here; a session needs a separate connect_to_peer.
     Ok(TrustedPeerDto {
         fingerprint: trusted_peer.fingerprint,
         display_name: trusted_peer.display_name,
         paired_at: trusted_peer.paired_at,
-        is_connected: true,
-        endpoint: Some(qr.endpoint),
+        is_connected: false,
+        endpoint: None,
     })
 }
 
@@ -514,6 +561,7 @@ fn initialize_desktop_runtime(db_path: &str) -> Result<DesktopRuntimeState, Box<
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let db_dir = app
                 .path()
