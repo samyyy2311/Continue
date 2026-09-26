@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
+
+/** Paths come from the OS file dialog or drag-and-drop, so both separators occur. */
+export function fileNameFromPath(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+/** `pairedAt` is stored by the backend in Unix seconds. */
+export function formatPairedDate(pairedAt: number): string {
+  return new Date(pairedAt * 1000).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export function formatRelativeTime(timestamp: number, now = Date.now()): string {
+  const seconds = Math.round((now - timestamp) / 1000);
+  if (seconds < 45) return "Just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return new Date(timestamp).toLocaleDateString();
+}
+
+/** Shortened fingerprint for display; the full value stays available to copy. */
+export function shortFingerprint(fingerprint: string): string {
+  return fingerprint.length > 16 ? `${fingerprint.slice(0, 10)}…${fingerprint.slice(-6)}` : fingerprint;
+}
