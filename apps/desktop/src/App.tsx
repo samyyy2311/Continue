@@ -12,7 +12,6 @@ import {
   Folder,
   Shield,
   Settings,
-  PanelLeft,
   Search,
   X,
   Minus,
@@ -32,33 +31,19 @@ import {
   QrCode,
   Bell,
   Clipboard,
+  ChevronDown,
+  Trash2,
 } from "lucide-react";
 import "./App.css";
-import type {
-  DeviceIdentity,
-  TrustedPeer,
-  TransferHistoryItem,
-  NotificationItem,
-  RemoteFileItem,
+import {
+  type DeviceIdentity,
+  type TrustedPeer,
+  type TransferHistoryItem,
+  type NotificationItem,
+  type RemoteFileItem,
+  type AccentName,
+  ACCENT_PALETTE,
 } from "./types.ts";
-
-export type AccentName = "recordRed" | "amber" | "cyan" | "emerald" | "magenta" | "silver";
-
-export interface AccentColor {
-  id: AccentName;
-  label: string;
-  base: string;
-  hover: string;
-}
-
-export const ACCENT_PALETTE: AccentColor[] = [
-  { id: "recordRed", label: "Red", base: "#C23B30", hover: "#D64337" },
-  { id: "amber", label: "Amber", base: "#F59E0B", hover: "#FBBF24" },
-  { id: "cyan", label: "Cyan", base: "#06B6D4", hover: "#22D3EE" },
-  { id: "emerald", label: "Green", base: "#10B981", hover: "#34D399" },
-  { id: "magenta", label: "Pink", base: "#EC4899", hover: "#F472B6" },
-  { id: "silver", label: "Mono", base: "#C4C4C0", hover: "#E5E5E3" },
-];
 
 async function fetchIdentity(): Promise<DeviceIdentity> {
   try {
@@ -101,12 +86,167 @@ type PageDestination = "home" | "transfers" | "files" | "devices" | "settings";
 type TransferFilter = "all" | "outgoing" | "incoming";
 type FileCategoryFilter = "all" | "images" | "videos" | "documents" | "audio";
 
+function Odometer({ value }: { value: number | string }) {
+  const chars = String(value).split("");
+  return (
+    <span className="odometer-wrap">
+      {chars.map((char, i) => {
+        const isDigit = /\d/.test(char);
+        if (!isDigit) {
+          return <span key={i} className="odometer-char">{char}</span>;
+        }
+        const digit = parseInt(char, 10);
+        return (
+          <span key={i} className="odometer-col">
+            <span
+              className="odometer-track"
+              style={{ transform: `translateY(-${digit * 10}%)` }}
+            >
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+                <span key={n} className="odometer-num">{n}</span>
+              ))}
+            </span>
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+interface InlineConfirmButtonProps {
+  label: string;
+  confirmLabel?: string;
+  className?: string;
+  onConfirm: () => void;
+  icon?: React.ReactNode;
+}
+
+function InlineConfirmButton({
+  label,
+  confirmLabel = "Confirm?",
+  className = "cat-pill-btn danger cat-pill-btn-xs",
+  onConfirm,
+  icon,
+}: InlineConfirmButtonProps) {
+  const [confirming, setConfirming] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirming) {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+      setConfirming(false);
+      onConfirm();
+    } else {
+      setConfirming(true);
+      timerRef.current = window.setTimeout(() => {
+        setConfirming(false);
+      }, 3000);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  return (
+    <button
+      type="button"
+      className={`${className} ${confirming ? "confirming" : ""}`}
+      onClick={handleClick}
+      title={confirming ? "Click again to confirm" : label}
+    >
+      {icon}
+      <span>{confirming ? confirmLabel : label}</span>
+    </button>
+  );
+}
+
+interface SegmentedOtpInputProps {
+  length?: number;
+  value: string;
+  onChange: (val: string) => void;
+}
+
+function SegmentedOtpInput({ length = 6, value, onChange }: SegmentedOtpInputProps) {
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      const currentDigits = value.split("");
+      if (currentDigits[index]) {
+        currentDigits.splice(index, 1);
+      } else if (index > 0) {
+        currentDigits.splice(index - 1, 1);
+        inputRefs.current[index - 1]?.focus();
+      }
+      onChange(currentDigits.join(""));
+    } else if (e.key === "ArrowLeft" && index > 0) {
+      inputRefs.current[index - 1]?.focus();
+    } else if (e.key === "ArrowRight" && index < length - 1) {
+      inputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleChange = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const char = e.target.value.slice(-1);
+    if (!char) return;
+    const currentDigits = value.padEnd(length, " ").slice(0, length).split("");
+    currentDigits[index] = char;
+    const nextVal = currentDigits.join("").trim();
+    onChange(nextVal);
+    if (index < length - 1 && char) {
+      inputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData("text").trim();
+    if (pasted) {
+      onChange(pasted.slice(0, length));
+      const targetIndex = Math.min(pasted.length, length - 1);
+      inputRefs.current[targetIndex]?.focus();
+    }
+  };
+
+  return (
+    <div className="otp-container" onPaste={handlePaste}>
+      {Array.from({ length }).map((_, index) => {
+        const char = value[index] || "";
+        const isFilled = Boolean(char);
+        const isCurrent = value.length === index || (index === length - 1 && value.length >= length);
+        return (
+          <div
+            key={index}
+            className={`otp-slot ${isFilled ? "filled" : ""} ${isCurrent ? "current" : ""}`}
+            onClick={() => inputRefs.current[index]?.focus()}
+          >
+            <input
+              ref={(el) => { inputRefs.current[index] = el; }}
+              type="text"
+              inputMode="text"
+              maxLength={1}
+              value={char}
+              onChange={(e) => handleChange(index, e)}
+              onKeyDown={(e) => handleKeyDown(index, e)}
+              className="otp-hidden-input"
+            />
+            <span className="otp-slot-char">{char}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function App() {
   const [currentPage, setCurrentPage] = useState<PageDestination>("home");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [accentName, setAccentName] = useState<AccentName>("recordRed");
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchExpanded, setSearchExpanded] = useState(false);
   const [transferFilter, setTransferFilter] = useState<TransferFilter>("all");
   const [fileCategory, setFileCategory] = useState<FileCategoryFilter>("all");
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
@@ -122,7 +262,9 @@ export default function App() {
 
   const [peers, setPeers] = useState<TrustedPeer[]>([]);
   const [showPairDialog, setShowPairDialog] = useState(false);
+  const [showPeerDropdown, setShowPeerDropdown] = useState(false);
   const [pairingPayload, setPairingPayload] = useState("");
+  const [isUriMode, setIsUriMode] = useState(false);
   const [copiedFingerprint, setCopiedFingerprint] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -130,9 +272,9 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Transfer streaming progress
-  const [streamProgress, setStreamProgress] = useState(64.2);
+  const [streamProgress, setStreamProgress] = useState(0);
   const [isStreamPaused, setIsStreamPaused] = useState(false);
-  const [showActiveStream, setShowActiveStream] = useState(true);
+  const [showActiveStream, setShowActiveStream] = useState(false);
 
   // Settings state (CassetteCat style)
   const [allowFileTransfer, setAllowFileTransfer] = useState(true);
@@ -284,7 +426,7 @@ export default function App() {
     },
     {
       id: "rf-7",
-      name: "CassetteCat_Backup_2026.zip",
+      name: "Continue_Backup_2026.zip",
       folder: "Download",
       category: "other",
       size: 51700,
@@ -292,7 +434,7 @@ export default function App() {
     },
     {
       id: "rf-8",
-      name: "CassetteCat-v1.7.3.apk",
+      name: "Continue-v0.4.0.apk",
       folder: "Download",
       category: "documents",
       size: 6658457,
@@ -434,6 +576,8 @@ export default function App() {
       };
       setTransfers((prev) => [newTx, ...prev]);
     }
+    setShowActiveStream(true);
+    setStreamProgress(15);
     showToast(`Streaming ${files[0].name} to ${peerName}`);
   };
 
@@ -451,6 +595,27 @@ export default function App() {
   const handleClearAllNotifications = () => {
     setNotifications([]);
     showToast("All notifications cleared");
+  };
+
+  const handleDeleteClip = (id: string) => {
+    setSyncedClips((prev) => prev.filter((c) => c.id !== id));
+    showToast("Clip removed");
+  };
+
+  const getDeviceIcon = (name: string) => {
+    const lower = name.toLowerCase();
+    if (lower.includes("tablet") || lower.includes("ipad")) {
+      return <Tablet size={16} />;
+    }
+    if (
+      lower.includes("pc") ||
+      lower.includes("desktop") ||
+      lower.includes("mac") ||
+      lower.includes("laptop")
+    ) {
+      return <Laptop size={16} />;
+    }
+    return <Smartphone size={16} />;
   };
 
   const handleMinimizeWindow = async () => {
@@ -546,21 +711,6 @@ export default function App() {
     return <FileText size={18} className="file-icon-generic" />;
   };
 
-  const getPageTitle = (page: PageDestination) => {
-    switch (page) {
-      case "home":
-        return "Home";
-      case "transfers":
-        return "Transfers";
-      case "files":
-        return "Files";
-      case "devices":
-        return "Devices";
-      case "settings":
-        return "Settings";
-    }
-  };
-
   return (
     <div className="continue-app">
       <input
@@ -571,43 +721,74 @@ export default function App() {
         multiple
       />
 
-      {/* 1. Frameless Top Window Bar (Height 60px) */}
-      <header className="window-header-bar" data-tauri-drag-region>
-        {/* Left: Brand Header above sidebar */}
+      {/* Unified Frameless Topbar (Height 50px) */}
+      <header className="app-topbar" data-tauri-drag-region>
+        {/* Left: Brand Logo & Title */}
         <div
-          className={`header-brand-box ${sidebarCollapsed ? "collapsed" : ""}`}
+          className="topbar-brand"
           onClick={() => setCurrentPage("home")}
           title="Continue - Device Continuity"
         >
           <div className="brand-logo-mark">
-            <Share2 size={16} strokeWidth={2.4} />
+            <Share2 size={15} strokeWidth={2.4} />
           </div>
-          {!sidebarCollapsed && <span className="brand-title-label">Continue</span>}
+          <span className="brand-title-label">Continue</span>
         </div>
 
-        {/* Center: View Title & Expandable Search Bar */}
-        <div className="header-center-area">
-          <h1 className="header-view-title">{getPageTitle(currentPage)}</h1>
-
-          <div
-            className={`expandable-search-bar ${searchExpanded || searchQuery ? "expanded" : ""}`}
+        {/* Center: Horizontal Navigation Tabs */}
+        <nav className="topbar-nav-tabs">
+          <button
+            className={`nav-tab-btn ${currentPage === "home" ? "active" : ""}`}
+            onClick={() => setCurrentPage("home")}
+            title="Home"
           >
-            <div
-              className="search-icon-trigger"
-              onClick={() => setSearchExpanded((p) => !p)}
-            >
-              <Search size={15} />
-            </div>
+            <Home size={15} className="tab-icon" />
+            <span>Home</span>
+          </button>
+          <button
+            className={`nav-tab-btn ${currentPage === "transfers" ? "active" : ""}`}
+            onClick={() => setCurrentPage("transfers")}
+            title="Transfers"
+          >
+            <ArrowDownUp size={15} className="tab-icon" />
+            <span>Transfers</span>
+          </button>
+          <button
+            className={`nav-tab-btn ${currentPage === "files" ? "active" : ""}`}
+            onClick={() => setCurrentPage("files")}
+            title="Files"
+          >
+            <Folder size={15} className="tab-icon" />
+            <span>Files</span>
+          </button>
+          <button
+            className={`nav-tab-btn ${currentPage === "devices" ? "active" : ""}`}
+            onClick={() => setCurrentPage("devices")}
+            title="Devices"
+          >
+            <Shield size={15} className="tab-icon" />
+            <span>Devices</span>
+          </button>
+          <button
+            className={`nav-tab-btn ${currentPage === "settings" ? "active" : ""}`}
+            onClick={() => setCurrentPage("settings")}
+            title="Settings"
+          >
+            <Settings size={15} className="tab-icon" />
+            <span>Settings</span>
+          </button>
+        </nav>
+
+        {/* Right Area: Search + Connected Device Pill + Window Controls */}
+        <div className="topbar-right-area">
+          <div className={`modern-search-bar topbar-search ${searchQuery ? "has-value" : ""}`}>
+            <Search size={13} className="search-icon-trigger" />
             <input
               type="text"
               className="search-input-field"
-              placeholder="Search transfers, clips, or files..."
+              placeholder="Search..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => setSearchExpanded(true)}
-              onBlur={() => {
-                if (!searchQuery) setSearchExpanded(false);
-              }}
             />
             {searchQuery && (
               <button
@@ -619,19 +800,15 @@ export default function App() {
               </button>
             )}
           </div>
-        </div>
 
-        {/* Right: Active Peer Pill + Native Window Controls */}
-        <div className="header-right-area">
           <div
             className="header-peer-pill"
             onClick={() => setCurrentPage("devices")}
-            title="Connected Device: Pixel 8 Pro"
+            title={`Connected Device: ${currentPeer.displayName}`}
           >
             <span className="peer-live-indicator" />
             <Smartphone size={13} />
             <span className="peer-pill-name">{currentPeer.displayName}</span>
-            <span className="peer-pill-battery">100%</span>
           </div>
 
           <div className="window-action-buttons">
@@ -660,145 +837,73 @@ export default function App() {
         </div>
       </header>
 
-      {/* 2. Main Window Body: Collapsible Sidebar + Content Stage */}
-      <div className="window-body-layout">
-        {/* Left Sidebar (200px / 64px) */}
-        <aside className={`sidebar-panel ${sidebarCollapsed ? "collapsed" : ""}`}>
-          <div className="sidebar-nav-group top">
-            <button
-              className={`nav-item-btn ${currentPage === "home" ? "selected" : ""}`}
-              onClick={() => setCurrentPage("home")}
-              title="Home"
-            >
-              <div className="nav-indicator-bar" />
-              <Home size={19} className="nav-item-icon" />
-              {!sidebarCollapsed && <span className="nav-item-label">Home</span>}
-            </button>
-
-            <button
-              className={`nav-item-btn ${currentPage === "transfers" ? "selected" : ""}`}
-              onClick={() => setCurrentPage("transfers")}
-              title="Transfers"
-            >
-              <div className="nav-indicator-bar" />
-              <ArrowDownUp size={19} className="nav-item-icon" />
-              {!sidebarCollapsed && <span className="nav-item-label">Transfers</span>}
-            </button>
-
-            <button
-              className={`nav-item-btn ${currentPage === "files" ? "selected" : ""}`}
-              onClick={() => setCurrentPage("files")}
-              title="Files"
-            >
-              <div className="nav-indicator-bar" />
-              <Folder size={19} className="nav-item-icon" />
-              {!sidebarCollapsed && <span className="nav-item-label">Files</span>}
-            </button>
-
-            <button
-              className={`nav-item-btn ${currentPage === "devices" ? "selected" : ""}`}
-              onClick={() => setCurrentPage("devices")}
-              title="Devices"
-            >
-              <div className="nav-indicator-bar" />
-              <Shield size={19} className="nav-item-icon" />
-              {!sidebarCollapsed && <span className="nav-item-label">Devices</span>}
-            </button>
-          </div>
-
-          <div className="sidebar-nav-group bottom">
-            <div className="sidebar-divider" />
-
-            <button
-              className={`nav-item-btn ${currentPage === "settings" ? "selected" : ""}`}
-              onClick={() => setCurrentPage("settings")}
-              title="Settings"
-            >
-              <div className="nav-indicator-bar" />
-              <Settings size={19} className="nav-item-icon" />
-              {!sidebarCollapsed && <span className="nav-item-label">Settings</span>}
-            </button>
-
-            <button
-              className="sidebar-toggle-btn"
-              onClick={() => setSidebarCollapsed((p) => !p)}
-              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              <PanelLeft size={19} className="toggle-icon" />
-              {!sidebarCollapsed && <span className="toggle-label">Collapse</span>}
-            </button>
-          </div>
-        </aside>
-
-        {/* Content Viewport */}
-        <main className="content-stage-scroll">
+      {/* Main Full-Width Content Stage */}
+      <main className="content-stage-scroll">
           {/* VIEW 1: HOME PAGE */}
           {currentPage === "home" && (
-            <div className="page-content-stack">
-              {/* Eyebrow & Hero Header (CassetteCat style) */}
-              <div className="hero-greeting-block">
-                <span className="mono-eyebrow">DEVICE CONTINUITY ACTIVE • LOCAL P2P</span>
-                <h2 className="hero-greeting-title">Welcome back, {identity.deviceName}</h2>
-                <p className="hero-greeting-sub">
-                  Connected to {currentPeer.displayName} • Wi-Fi Direct • 100% Battery
-                </p>
-              </div>
-
-              {/* Hero Deck Card */}
-              <div className="setting-card hero-deck-card">
-                <div className="hero-deck-content">
-                  <div className="deck-lead-info">
-                    <div className="deck-device-badge">
-                      <Smartphone size={28} className="deck-icon" />
-                    </div>
-                    <div className="deck-text-meta">
-                      <div className="deck-title-line">
-                        <span className="deck-title">{currentPeer.displayName}</span>
-                        <span className="deck-online-pill">Mutual TLS 1.3</span>
+            <div className="home-studio-layout">
+              {/* Refined Page Header & Device Status */}
+              <div className="home-hero-header">
+                <div className="home-hero-titles">
+                  <h1 className="home-hero-title">Connected to {currentPeer.displayName}</h1>
+                  <p className="home-hero-subtitle">
+                    Send files, copy text across devices, and view phone alerts over your local network.
+                  </p>
+                </div>
+                <div className="home-device-selector">
+                  <button
+                    className="cat-pill-btn"
+                    onClick={() => setShowPeerDropdown((p) => !p)}
+                  >
+                    <span>Switch device</span>
+                    <ChevronDown size={11} />
+                  </button>
+                  {showPeerDropdown && (
+                    <>
+                      <div
+                        className="dropdown-backdrop"
+                        onClick={() => setShowPeerDropdown(false)}
+                      />
+                      <div className="peer-select-menu">
+                        {peers.map((peer) => (
+                          <button
+                            key={peer.fingerprint}
+                            className={`peer-select-item ${
+                              peer.fingerprint === selectedPeerId ? "active" : ""
+                            }`}
+                            onClick={() => {
+                              setSelectedPeerId(peer.fingerprint);
+                              setShowPeerDropdown(false);
+                              showToast(`Switched to ${peer.displayName}`);
+                            }}
+                          >
+                            <span className="peer-select-label">
+                              <span className="peer-select-icon">{getDeviceIcon(peer.displayName)}</span>
+                              <span>{peer.displayName}</span>
+                            </span>
+                            {peer.isConnected && <span className="peer-online-dot" />}
+                          </button>
+                        ))}
+                        <div className="peer-menu-divider" />
+                        <button
+                          className="peer-select-item action"
+                          onClick={() => {
+                            setShowPeerDropdown(false);
+                            setShowPairDialog(true);
+                          }}
+                        >
+                          <Plus size={12} />
+                          <span>Pair new device</span>
+                        </button>
                       </div>
-                      <div className="deck-sub-line">
-                        Endpoint: {currentPeer.endpoint || "192.168.1.105:4433"} • QUIC Pipeline
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="deck-action-buttons">
-                    <button
-                      className="cat-btn cat-btn-primary"
-                      onClick={handleTriggerSendFile}
-                    >
-                      <Upload size={14} />
-                      <span>Send Files</span>
-                    </button>
-                    <button
-                      className="cat-btn cat-btn-outline"
-                      onClick={() => setShowPairDialog(true)}
-                    >
-                      <Plus size={14} />
-                      <span>Pair Device</span>
-                    </button>
-                  </div>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Quick Transfers Section Header */}
-              <div className="cat-section-header">
-                <div className="header-titles">
-                  <h3 className="section-title">Active Transfer Stream</h3>
-                  <span className="section-subtitle">P2P chunked stream with SHA-256 integrity</span>
-                </div>
-                <button
-                  className="section-action-capsule"
-                  onClick={() => setCurrentPage("transfers")}
-                >
-                  <span>View All Transfers</span>
-                  <ArrowUpRight size={13} />
-                </button>
-              </div>
-
-              {/* Send Dropzone & Active Stream */}
+              {/* Frameless Hero Dropzone */}
               <div
-                className={`send-dropzone-box ${isDraggingOver ? "dragging" : ""}`}
+                className={`frameless-dropzone ${isDraggingOver ? "dragging" : ""}`}
                 onDragOver={(e) => {
                   e.preventDefault();
                   setIsDraggingOver(true);
@@ -807,188 +912,251 @@ export default function App() {
                 onDrop={(e) => {
                   e.preventDefault();
                   setIsDraggingOver(false);
-                  handleTriggerSendFile();
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    handleSendFilesPicked({
+                      target: { files: e.dataTransfer.files },
+                    } as unknown as React.ChangeEvent<HTMLInputElement>);
+                  } else {
+                    handleTriggerSendFile();
+                  }
+                }}
+                onMouseMove={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  e.currentTarget.style.setProperty("--spot-x", `${e.clientX - rect.left}px`);
+                  e.currentTarget.style.setProperty("--spot-y", `${e.clientY - rect.top}px`);
                 }}
                 onClick={handleTriggerSendFile}
               >
-                <div className="dropzone-circle-badge">
-                  <Upload size={22} />
+                <div className="dropzone-icon-well">
+                  <Upload size={20} />
                 </div>
-                <div className="dropzone-title">
-                  Drop files here to stream to {currentPeer.displayName}
+                <div className="dropzone-label">
+                  <span className="dropzone-title">
+                    Drop files to send to {currentPeer.displayName}
+                  </span>
+                  <span className="dropzone-hint">
+                    Fast Wi-Fi transfer for files of any size
+                  </span>
                 </div>
-                <div className="dropzone-hint">
-                  Direct encrypted local transfer up to 1.2 Gbps • Zero cloud servers
+                <div className="dropzone-actions-row">
+                  <button
+                    type="button"
+                    className="cat-btn cat-btn-primary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleTriggerSendFile();
+                    }}
+                  >
+                    <Upload size={13} />
+                    <span>Choose Files</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="cat-btn cat-btn-secondary"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCurrentPage("files");
+                    }}
+                  >
+                    <Folder size={13} />
+                    <span>Browse Phone Files</span>
+                  </button>
                 </div>
-                <button
-                  className="cat-btn cat-btn-primary"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleTriggerSendFile();
-                  }}
-                >
-                  Choose Files
-                </button>
               </div>
 
-              {/* Active Transfer Deck Progress */}
+              {/* Active Transfer Stream (only when a file is actually being transferred) */}
               {showActiveStream && (
-                <div className="setting-card telemetry-card">
-                  <div className="telemetry-top-row">
-                    <div className="telemetry-file-info">
-                      <FileText size={18} className="file-icon-doc" />
-                      <div className="telemetry-names">
-                        <span className="tx-name">recording_session_2025_4k.mov</span>
-                        <span className="tx-bytes-mono">1.42 GB of 2.80 GB transferred</span>
-                      </div>
+                <div className="active-transfer-strip">
+                  <div className="transfer-meta-row">
+                    <div className="transfer-file-title">
+                      <FileText size={14} className="transfer-file-icon" />
+                      <span className="file-name">recording_session_2025_4k.mov</span>
                     </div>
-
-                    <div className="telemetry-stats-group">
-                      <div className="telemetry-rate-block">
-                        <span className="tx-rate-speed">114 MB/s</span>
-                        <span className="tx-rate-eta">12s left</span>
-                      </div>
-                      <div className="telemetry-btn-row">
-                        <button
-                          className="press-depth-btn"
-                          onClick={() => {
-                            setIsStreamPaused((p) => !p);
-                            showToast(isStreamPaused ? "Resumed" : "Paused");
-                          }}
-                          title={isStreamPaused ? "Resume" : "Pause"}
-                        >
-                          {isStreamPaused ? <Play size={13} /> : <Pause size={13} />}
-                        </button>
-                        <button
-                          className="press-depth-btn danger"
-                          onClick={() => {
-                            setShowActiveStream(false);
-                            showToast("Transfer cancelled");
-                          }}
-                          title="Cancel"
-                        >
-                          <X size={13} />
-                        </button>
-                      </div>
+                    <div className="transfer-controls">
+                      <span className="transfer-speed">
+                        <Odometer value={114} /> MB/s
+                      </span>
+                      <span className="transfer-pct">
+                        <Odometer value={streamProgress} />%
+                      </span>
+                      <button
+                        className="ghost-icon-btn"
+                        onClick={() => setIsStreamPaused((p) => !p)}
+                        title={isStreamPaused ? "Resume" : "Pause"}
+                      >
+                        {isStreamPaused ? <Play size={11} /> : <Pause size={11} />}
+                      </button>
+                      <button
+                        className="ghost-icon-btn"
+                        onClick={() => setShowActiveStream(false)}
+                        title="Cancel"
+                      >
+                        <X size={11} />
+                      </button>
                     </div>
                   </div>
-
-                  <div className="telemetry-track">
+                  <div className="transfer-bar">
                     <div
-                      className="telemetry-fill"
+                      className="transfer-bar-fill"
                       style={{ width: `${streamProgress}%` }}
                     />
-                  </div>
-
-                  <div className="telemetry-footer-row">
-                    <span className="telemetry-hash">
-                      <Check size={12} className="hash-check-icon" />
-                      SHA-256 Verified
-                    </span>
-                    <span className="telemetry-percent">{streamProgress}% completed</span>
                   </div>
                 </div>
               )}
 
-              {/* Two-Column Hub: Shared Clipboard & Notifications */}
-              <div className="home-dual-columns">
-                {/* Column 1: Shared Clipboard */}
-                <div className="setting-card col-card">
-                  <div className="card-top-heading">
-                    <div className="heading-left">
-                      <Clipboard size={16} className="card-accent-icon" />
-                      <span className="heading-text">Shared Clipboard</span>
+              {/* Activity Section: Balanced Two-Card Dock */}
+              <div className="home-activity-grid">
+                {/* Left Card: Clipboard */}
+                <div className="activity-card">
+                  <div className="activity-card-header">
+                    <div className="stream-title-wrap">
+                      <Clipboard size={14} className="stream-icon" />
+                      <span className="stream-title">Clipboard</span>
+                      <span className="stream-count-pill">
+                        <Odometer value={filteredClips.length} />
+                      </span>
                     </div>
-                    <span className="card-live-pill">Live Sync</span>
                   </div>
 
-                  <div className="clipboard-entry-row">
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleSendClipboard();
+                    }}
+                    className="stream-input-wrap"
+                  >
                     <input
                       type="text"
-                      className="cat-text-input"
-                      placeholder="Type or paste text to push to phone..."
+                      className="stream-pill-input"
+                      placeholder="Type or paste to send to phone..."
                       value={clipboardInput}
                       onChange={(e) => setClipboardInput(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") handleSendClipboard();
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleSendClipboard();
+                        }
                       }}
                     />
                     <button
-                      className="cat-btn cat-btn-primary"
-                      onClick={handleSendClipboard}
+                      type="submit"
+                      className="stream-pill-submit"
+                      title="Send to phone (Enter)"
                     >
-                      Push
+                      <ArrowUpRight size={13} />
                     </button>
-                  </div>
+                  </form>
 
-                  <div className="clips-history-stack">
-                    {filteredClips.map((clip) => (
-                      <div key={clip.id} className="clip-tile-row">
-                        <div className="clip-tile-meta">
-                          <span className="clip-text-body">{clip.text}</span>
-                          <span className="clip-device-mono">
-                            {clip.device} • {clip.time}
-                          </span>
-                        </div>
-                        <button
-                          className={`clip-copy-action ${
-                            copiedClipId === clip.id ? "copied" : ""
-                          }`}
-                          onClick={() => handleCopyText(clip.text, clip.id)}
-                          title="Copy"
-                        >
-                          {copiedClipId === clip.id ? <Check size={13} /> : <Copy size={13} />}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                  {filteredClips.length === 0 ? (
+                    <div className="activity-empty-state">
+                      <Clipboard size={22} className="activity-empty-icon" />
+                      <span className="activity-empty-title">No copied items yet</span>
+                      <span className="activity-empty-desc">
+                        Text or links you copy on your phone or paste above will sync here.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="stream-feed-list">
+                      {filteredClips.map((clip) => {
+                        const isUrl =
+                          clip.text.startsWith("http://") ||
+                          clip.text.startsWith("https://");
+                        return (
+                          <div key={clip.id} className="stream-row clip-row">
+                            <div className="stream-row-content">
+                              <span className={`stream-text ${isUrl ? "url" : ""}`}>
+                                {clip.text}
+                              </span>
+                              <span className="stream-sub">
+                                {clip.device}, {clip.time}
+                              </span>
+                            </div>
+                            <div className="stream-row-actions">
+                              <button
+                                className={`row-copy-btn ${
+                                  copiedClipId === clip.id ? "copied" : ""
+                                }`}
+                                onClick={() => handleCopyText(clip.text, clip.id)}
+                                title="Copy"
+                              >
+                                {copiedClipId === clip.id ? (
+                                  <Check size={11} />
+                                ) : (
+                                  <Copy size={11} />
+                                )}
+                              </button>
+                              <button
+                                className="row-del-btn"
+                                onClick={() => handleDeleteClip(clip.id)}
+                                title="Delete"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
-                {/* Column 2: Notifications */}
-                <div className="setting-card col-card">
-                  <div className="card-top-heading">
-                    <div className="heading-left">
-                      <Bell size={16} className="card-accent-icon" />
-                      <span className="heading-text">Phone Notifications</span>
+                {/* Right Card: Phone Notifications */}
+                <div className="activity-card">
+                  <div className="activity-card-header">
+                    <div className="stream-title-wrap">
+                      <Bell
+                        size={14}
+                        className={`stream-icon ${
+                          notifications.length > 0 ? "bell-spring-alert" : ""
+                        }`}
+                      />
+                      <span className="stream-title">Notifications</span>
                       {notifications.length > 0 && (
-                        <span className="counter-badge">{notifications.length}</span>
+                        <span className="stream-count-pill">
+                          <Odometer value={notifications.length} />
+                        </span>
                       )}
                     </div>
                     {notifications.length > 0 && (
-                      <button
-                        className="cat-link-btn"
-                        onClick={handleClearAllNotifications}
-                      >
-                        Clear All
-                      </button>
+                      <InlineConfirmButton
+                        label="Clear"
+                        confirmLabel="Clear all?"
+                        onConfirm={handleClearAllNotifications}
+                      />
                     )}
                   </div>
 
-                  <div className="notifications-list-stack">
-                    {notifications.length === 0 ? (
-                      <div className="empty-state-card">
-                        <Bell size={24} className="empty-icon" />
-                        <span>No alerts from phone</span>
-                      </div>
-                    ) : (
-                      notifications.map((notif) => (
-                        <div key={notif.id} className="notif-card-tile">
-                          <div className="notif-lead-row">
-                            <span className="notif-app-tag">{notif.appName}</span>
-                            <span className="notif-timestamp-mono">Just now</span>
-                            <button
-                              className="notif-close-btn"
-                              onClick={() => handleDismissNotification(notif.id)}
-                            >
-                              <X size={12} />
-                            </button>
+                  {notifications.length === 0 ? (
+                    <div className="activity-empty-state">
+                      <Bell size={22} className="activity-empty-icon" />
+                      <span className="activity-empty-title">All caught up</span>
+                      <span className="activity-empty-desc">
+                        Incoming alerts from your phone will show up here in real time.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="stream-feed-list">
+                      {notifications.map((notif) => (
+                        <div key={notif.id} className="stream-row notif-row">
+                          <div className="stream-row-content">
+                            <div className="notif-meta">
+                              <span className="notif-app">{notif.appName}</span>
+                              <span className="notif-time">Just now</span>
+                            </div>
+                            <div className="notif-title">{notif.title}</div>
+                            <div className="notif-body">{notif.body}</div>
                           </div>
-                          <div className="notif-title-str">{notif.title}</div>
-                          <div className="notif-body-str">{notif.body}</div>
+                          <button
+                            className="row-del-btn"
+                            onClick={() => handleDismissNotification(notif.id)}
+                            title="Dismiss"
+                          >
+                            <X size={11} />
+                          </button>
                         </div>
-                      ))
-                    )}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1001,7 +1169,7 @@ export default function App() {
                 <div className="header-titles">
                   <h3 className="section-title">Transfer History</h3>
                   <span className="section-subtitle">
-                    Full record of files sent and received over local QUIC streams
+                    Files sent and received with your connected devices
                   </span>
                 </div>
                 <div className="segmented-filter-row">
@@ -1043,7 +1211,7 @@ export default function App() {
                           <div className="transfer-info-column">
                             <span className="transfer-filename">{tx.fileName}</span>
                             <span className="transfer-meta-mono">
-                              {formatBytes(tx.fileSize)} •{" "}
+                              {formatBytes(tx.fileSize)},{" "}
                               {tx.direction === "outgoing"
                                 ? `Sent to ${currentPeer.displayName}`
                                 : `Received from ${currentPeer.displayName}`}
@@ -1081,9 +1249,9 @@ export default function App() {
               {/* Phone Storage Folders */}
               <div className="cat-section-header">
                 <div className="header-titles">
-                  <h3 className="section-title">Phone Storage Folders</h3>
+                  <h3 className="section-title">Phone Storage</h3>
                   <span className="section-subtitle">
-                    Browse media, documents, and downloads on {currentPeer.displayName}
+                    Browse folders and files on {currentPeer.displayName}
                   </span>
                 </div>
                 {selectedFolder && (
@@ -1091,7 +1259,7 @@ export default function App() {
                     className="cat-link-btn"
                     onClick={() => setSelectedFolder(null)}
                   >
-                    Reset Filter (Showing {selectedFolder})
+                    Clear filter ({selectedFolder})
                   </button>
                 )}
               </div>
@@ -1113,7 +1281,13 @@ export default function App() {
                     }
                   >
                     <div className="folder-card-top">
-                      <Folder size={24} className="folder-lead-icon" />
+                      <div className="folder-interactive-stage">
+                        <div className="folder-papers-sheaf">
+                          <div className="sheaf-paper paper-left" />
+                          <div className="sheaf-paper paper-right" />
+                        </div>
+                        <Folder size={22} className="folder-front-icon" />
+                      </div>
                       <span className="folder-items-pill">{f.count} files</span>
                     </div>
                     <div className="folder-card-bottom">
@@ -1127,15 +1301,15 @@ export default function App() {
               {/* Documents & Files Grid */}
               <div className="cat-section-header" style={{ marginTop: "12px" }}>
                 <div className="header-titles">
-                  <h3 className="section-title">Synced Documents & Media</h3>
+                  <h3 className="section-title">Synced Files</h3>
                   <span className="section-subtitle">
-                    Files ready for peer transfer and download
+                    Files ready to download or open on this computer
                   </span>
                 </div>
                 <div className="segmented-filter-row">
                   {[
                     { key: "all", label: "All" },
-                    { key: "documents", label: "Docs" },
+                    { key: "documents", label: "Documents" },
                     { key: "images", label: "Images" },
                     { key: "audio", label: "Audio" },
                   ].map((cat) => (
@@ -1183,9 +1357,9 @@ export default function App() {
             <div className="page-content-stack">
               <div className="cat-section-header">
                 <div className="header-titles">
-                  <h3 className="section-title">Device Continuity</h3>
+                  <h3 className="section-title">Connected Devices</h3>
                   <span className="section-subtitle">
-                    Active peer mesh and cryptographic trust credentials
+                    Devices currently linked and trusted on your local network
                   </span>
                 </div>
                 <button
@@ -1203,14 +1377,14 @@ export default function App() {
                   <div className="device-node host">
                     <Laptop size={44} className="device-node-icon" />
                     <span className="device-node-name">{identity.deviceName}</span>
-                    <span className="device-node-role">This Host</span>
+                    <span className="device-node-role">This Computer</span>
                   </div>
 
                   <div className="device-link-channel">
                     <div className="channel-line" />
                     <div className="channel-badge">
                       <Shield size={13} />
-                      <span>TLS 1.3 Direct</span>
+                      <span>Encrypted Local Link</span>
                     </div>
                   </div>
 
@@ -1227,7 +1401,7 @@ export default function App() {
                 <div className="header-titles">
                   <h3 className="section-title">Trusted Devices</h3>
                   <span className="section-subtitle">
-                    Devices authenticated with mutual Ed25519 identity keys
+                    Devices you have verified and allowed to connect
                   </span>
                 </div>
               </div>
@@ -1256,18 +1430,17 @@ export default function App() {
                             </span>
                           </div>
                           <span className="peer-fingerprint-mono">
-                            Endpoint: {peer.endpoint || "mDNS local"} • Fingerprint:{" "}
-                            {peer.fingerprint.substring(0, 18)}...
+                            Local network, key {peer.fingerprint.substring(0, 16)}...
                           </span>
                         </div>
                       </div>
 
-                      <button
+                      <InlineConfirmButton
+                        label="Disconnect"
+                        confirmLabel="Disconnect?"
                         className="cat-btn cat-btn-sm cat-btn-outline danger"
-                        onClick={() => handleDisconnectPeer(peer.fingerprint)}
-                      >
-                        Disconnect
-                      </button>
+                        onConfirm={() => handleDisconnectPeer(peer.fingerprint)}
+                      />
                     </div>
                   ))}
                 </div>
@@ -1283,7 +1456,7 @@ export default function App() {
                 <div className="header-titles">
                   <h3 className="section-title">Appearance</h3>
                   <span className="section-subtitle">
-                    Theme accent applied to active navigation, controls, and telemetry
+                    Choose an accent color for active items and highlights
                   </span>
                 </div>
               </div>
@@ -1291,9 +1464,9 @@ export default function App() {
               <div className="setting-card">
                 <div className="setting-row">
                   <div className="setting-row-text">
-                    <span className="setting-title">Accent Colour</span>
+                    <span className="setting-title">Accent Color</span>
                     <span className="setting-subtitle">
-                      Choose your signature accent tone
+                      Used for buttons, badges, and active tabs
                     </span>
                   </div>
                 </div>
@@ -1320,9 +1493,9 @@ export default function App() {
               {/* General Preferences */}
               <div className="cat-section-header" style={{ marginTop: "12px" }}>
                 <div className="header-titles">
-                  <h3 className="section-title">General Preferences</h3>
+                  <h3 className="section-title">General</h3>
                   <span className="section-subtitle">
-                    Device naming, auto-accept thresholds, and storage
+                    Device name, download folder, and transfer behavior
                   </span>
                 </div>
               </div>
@@ -1330,9 +1503,9 @@ export default function App() {
               <div className="setting-card">
                 <div className="setting-row">
                   <div className="setting-row-text">
-                    <span className="setting-title">Device Display Name</span>
+                    <span className="setting-title">Computer Name</span>
                     <span className="setting-subtitle">
-                      Broadcast name visible to nearby devices on local Wi-Fi
+                      Visible to your other devices on the same Wi-Fi network
                     </span>
                   </div>
                   <input
@@ -1349,9 +1522,9 @@ export default function App() {
 
                 <div className="setting-row">
                   <div className="setting-row-text">
-                    <span className="setting-title">Download Directory</span>
+                    <span className="setting-title">Downloads Folder</span>
                     <span className="setting-subtitle">
-                      Default location for incoming file transfers
+                      Where received files are saved
                     </span>
                   </div>
                   <input
@@ -1366,9 +1539,9 @@ export default function App() {
 
                 <div className="setting-row">
                   <div className="setting-row-text">
-                    <span className="setting-title">Auto-accept Small Transfers</span>
+                    <span className="setting-title">Automatically Accept Small Files</span>
                     <span className="setting-subtitle">
-                      Instantly receive files under 50 MB without confirmation prompts
+                      Save files under 50 MB immediately without asking each time
                     </span>
                   </div>
                   <label className="cat-switch">
@@ -1385,9 +1558,9 @@ export default function App() {
               {/* Continuity Features */}
               <div className="cat-section-header" style={{ marginTop: "12px" }}>
                 <div className="header-titles">
-                  <h3 className="section-title">Continuity Services</h3>
+                  <h3 className="section-title">Features & Syncing</h3>
                   <span className="section-subtitle">
-                    Toggle individual device bridging pipelines
+                    Turn specific sharing features on or off
                   </span>
                 </div>
               </div>
@@ -1395,9 +1568,9 @@ export default function App() {
               <div className="setting-card">
                 <div className="setting-row">
                   <div className="setting-row-text">
-                    <span className="setting-title">Peer File Transfer</span>
+                    <span className="setting-title">File Sharing</span>
                     <span className="setting-subtitle">
-                      Allow incoming and outgoing streaming file transfers
+                      Send and receive files with your connected devices
                     </span>
                   </div>
                   <label className="cat-switch">
@@ -1414,9 +1587,9 @@ export default function App() {
 
                 <div className="setting-row">
                   <div className="setting-row-text">
-                    <span className="setting-title">Real-time Clipboard Sync</span>
+                    <span className="setting-title">Clipboard Sync</span>
                     <span className="setting-subtitle">
-                      Synchronize text and snippets bidirectionally with active peer
+                      Automatically copy and paste text between your devices
                     </span>
                   </div>
                   <label className="cat-switch">
@@ -1433,9 +1606,9 @@ export default function App() {
 
                 <div className="setting-row">
                   <div className="setting-row-text">
-                    <span className="setting-title">Phone Notification Mirroring</span>
+                    <span className="setting-title">Phone Notifications</span>
                     <span className="setting-subtitle">
-                      Forward incoming phone alerts to desktop
+                      See incoming notifications from your phone on this computer
                     </span>
                   </div>
                   <label className="cat-switch">
@@ -1452,9 +1625,9 @@ export default function App() {
               {/* Identity & Keys */}
               <div className="cat-section-header" style={{ marginTop: "12px" }}>
                 <div className="header-titles">
-                  <h3 className="section-title">Identity & Security Credentials</h3>
+                  <h3 className="section-title">Security & Keys</h3>
                   <span className="section-subtitle">
-                    Cryptographic Ed25519 identity key and TLS SPKI hash
+                    Unique device credentials used for secure local verification
                   </span>
                 </div>
               </div>
@@ -1462,7 +1635,7 @@ export default function App() {
               <div className="setting-card">
                 <div className="key-display-block">
                   <div className="key-top-row">
-                    <span className="key-name">Ed25519 Fingerprint</span>
+                    <span className="key-name">Device Fingerprint</span>
                     <button
                       className="cat-link-btn copy-btn"
                       onClick={handleCopyFingerprint}
@@ -1476,7 +1649,7 @@ export default function App() {
 
                 <div className="key-display-block" style={{ marginTop: "12px" }}>
                   <div className="key-top-row">
-                    <span className="key-name">SPKI Certificate SHA-256</span>
+                    <span className="key-name">Certificate Fingerprint</span>
                   </div>
                   <div className="key-string-mono">{identity.spkiHash}</div>
                 </div>
@@ -1484,7 +1657,6 @@ export default function App() {
             </div>
           )}
         </main>
-      </div>
 
       {/* 3. Pairing Dialog Modal (CassetteCat surfaceElevated style) */}
       {showPairDialog && (
@@ -1509,23 +1681,49 @@ export default function App() {
                   <QrCode size={124} strokeWidth={1.5} />
                 </div>
                 <p className="qr-scan-instruction">
-                  Scan this QR code with the Continue app on your mobile device to verify
-                  mutual TLS keys
+                  Scan this QR code with the Continue app on your phone or tablet to connect securely.
                 </p>
               </div>
 
               <div className="or-hairline-label">
-                <span>OR ENTER PAIRING CODE</span>
+                <span>Or enter a code</span>
               </div>
 
               <form onSubmit={handlePairSubmit} className="pair-code-form">
-                <input
-                  type="text"
-                  className="cat-text-input"
-                  placeholder="Paste pairing code or URI..."
-                  value={pairingPayload}
-                  onChange={(e) => setPairingPayload(e.target.value)}
-                />
+                {!isUriMode ? (
+                  <>
+                    <SegmentedOtpInput
+                      length={6}
+                      value={pairingPayload}
+                      onChange={setPairingPayload}
+                    />
+                    <button
+                      type="button"
+                      className="otp-mode-toggle"
+                      onClick={() => setIsUriMode(true)}
+                    >
+                      Enter network address instead
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      className="cat-text-input"
+                      placeholder="Paste address (e.g., continue://pair?ep=192.168.1.105:4433)..."
+                      value={pairingPayload}
+                      onChange={(e) => setPairingPayload(e.target.value)}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      className="otp-mode-toggle"
+                      onClick={() => setIsUriMode(false)}
+                    >
+                      Use 6-digit code instead
+                    </button>
+                  </>
+                )}
                 <div className="modal-bottom-actions">
                   <button
                     type="button"
@@ -1535,7 +1733,7 @@ export default function App() {
                     Cancel
                   </button>
                   <button type="submit" className="cat-btn cat-btn-primary">
-                    Connect Device
+                    Connect
                   </button>
                 </div>
               </form>

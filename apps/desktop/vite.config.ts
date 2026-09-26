@@ -8,6 +8,9 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    hmr: {
+      overlay: false,
+    },
   },
   test: {
     globals: true,
