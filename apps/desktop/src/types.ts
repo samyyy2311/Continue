@@ -33,13 +33,15 @@ export interface AccentColor {
   onBase: string;
 }
 
+// Mid-tone colours that hold up on both light and dark surfaces.
 export const ACCENT_PALETTE: AccentColor[] = [
-  { id: "blue", label: "Blue", base: "#2563EB", onBase: "#FFFFFF" },
-  { id: "recordRed", label: "Red", base: "#C23B30", onBase: "#FFFFFF" },
-  { id: "coral", label: "Coral", base: "#FF5C35", onBase: "#1A0A05" },
-  { id: "amber", label: "Amber", base: "#F59E0B", onBase: "#1A1204" },
-  { id: "cyan", label: "Cyan", base: "#06B6D4", onBase: "#03181C" },
-  { id: "emerald", label: "Green", base: "#10B981", onBase: "#03170F" },
-  { id: "magenta", label: "Pink", base: "#EC4899", onBase: "#FFFFFF" },
-  { id: "silver", label: "Mono", base: "#52525B", onBase: "#FFFFFF" },
+  { id: "blue", label: "Blue", base: "#3d63dd", onBase: "#ffffff" },
+  { id: "recordRed", label: "Red", base: "#d93d42", onBase: "#ffffff" },
+  { id: "coral", label: "Coral", base: "#d4532b", onBase: "#ffffff" },
+  { id: "amber", label: "Amber", base: "#f0b000", onBase: "#221a00" },
+  { id: "cyan", label: "Teal", base: "#0b7f95", onBase: "#ffffff" },
+  { id: "emerald", label: "Green", base: "#1e8a4c", onBase: "#ffffff" },
+  { id: "magenta", label: "Pink", base: "#c0317a", onBase: "#ffffff" },
+  // Follows the theme: dark on light, light on dark.
+  { id: "silver", label: "Mono", base: "var(--text)", onBase: "var(--bg)" },
 ];
