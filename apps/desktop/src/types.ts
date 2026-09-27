@@ -23,16 +23,6 @@ export interface PeerPermission {
   grant: Grant;
 }
 
-export interface TransferHistoryItem {
-  id: string;
-  fileName: string;
-  peerFingerprint: string;
-  status: "in_progress" | "completed" | "failed";
-  timestamp: number;
-  bytesSent?: number;
-  error?: string;
-}
-
 export type AccentName = "blue" | "recordRed" | "coral" | "amber" | "cyan" | "emerald" | "magenta" | "silver";
 
 export interface AccentColor {

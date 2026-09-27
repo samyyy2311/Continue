@@ -3,26 +3,21 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ArrowUpDown,
+  ArrowUp,
   Check,
+  ChevronDown,
   CircleAlert,
   Copy,
   File,
   FileText,
   Film,
-  Home,
   Image,
   Laptop,
   Loader,
-  Lock,
-  MonitorSmartphone,
   Music,
   Plus,
-  Send,
-  Settings,
   Smartphone,
   Tablet,
-  Upload,
 } from "lucide-react";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -40,7 +35,7 @@ import {
   sendFileToPeer,
   setPermission,
 } from "./api.ts";
-import { fileNameFromPath, formatBytes, formatPairedDate, formatRelativeTime, shortFingerprint } from "./format.ts";
+import { fileNameFromPath, formatBytes, formatPairedDate, formatRelativeTime } from "./format.ts";
 import { PairDialog } from "./PairDialog.tsx";
 import {
   ACCENT_PALETTE,
@@ -48,23 +43,32 @@ import {
   type DeviceIdentity,
   type Grant,
   type PeerPermission,
-  type TransferHistoryItem,
   type TrustedPeer,
 } from "./types.ts";
 
-type Page = "home" | "transfers" | "devices" | "settings";
+type Page = "send" | "devices" | "settings";
 
 interface Toast {
   message: string;
   tone: "info" | "error";
 }
 
-interface SentClip {
+interface Activity {
   id: string;
-  text: string;
+  kind: "file" | "text";
+  label: string;
   peerName: string;
+  status: "sending" | "sent" | "failed";
   timestamp: number;
+  bytesSent?: number;
+  error?: string;
 }
+
+const PAGES: { id: Page; label: string }[] = [
+  { id: "send", label: "Send" },
+  { id: "devices", label: "Devices" },
+  { id: "settings", label: "Settings" },
+];
 
 const ACCENT_KEY = "continue.accent";
 const ENDPOINTS_KEY = "continue.peerEndpoints";
@@ -103,61 +107,36 @@ function DeviceIcon({ name, size = 18 }: { name: string; size?: number }) {
   return <Smartphone size={size} />;
 }
 
-const FILE_KINDS = [
-  { tone: "image", icon: Image, extensions: ["png", "jpg", "jpeg", "gif", "webp", "heic", "dng"] },
-  { tone: "audio", icon: Music, extensions: ["mp3", "m4a", "wav", "flac", "ogg"] },
-  { tone: "video", icon: Film, extensions: ["mp4", "mov", "mkv", "webm"] },
-  { tone: "doc", icon: FileText, extensions: ["pdf", "doc", "docx", "txt", "md"] },
+const FILE_ICONS: { icon: typeof File; extensions: string[] }[] = [
+  { icon: Image, extensions: ["png", "jpg", "jpeg", "gif", "webp", "heic", "dng"] },
+  { icon: Music, extensions: ["mp3", "m4a", "wav", "flac", "ogg"] },
+  { icon: Film, extensions: ["mp4", "mov", "mkv", "webm"] },
+  { icon: FileText, extensions: ["pdf", "doc", "docx", "txt", "md"] },
 ];
 
-function FileTile({ fileName }: { fileName: string }) {
-  const ext = fileName.toLowerCase().split(".").pop() ?? "";
-  const kind = FILE_KINDS.find((k) => k.extensions.includes(ext));
-  const Icon = kind?.icon ?? File;
+function ActivityIcon({ item }: { item: Activity }) {
+  const ext = item.label.toLowerCase().split(".").pop() ?? "";
+  const Icon =
+    item.kind === "text" ? FileText : (FILE_ICONS.find((k) => k.extensions.includes(ext))?.icon ?? File);
   return (
-    <span className={`file-tile ${kind ? `tone-${kind.tone}` : ""}`}>
-      <Icon size={17} />
+    <span className="activity-icon">
+      <Icon size={16} />
     </span>
   );
 }
 
-function StatusDot({ connected }: { connected: boolean }) {
-  return <span className={`status-dot ${connected ? "online" : ""}`} aria-hidden="true" />;
-}
+// The backend names capabilities after the protocol; people think in terms of what gets shared.
+const PERMISSION_LABELS: Record<string, string> = {
+  "File Transfer": "Files",
+  "Clipboard Sync": "Clipboard",
+  "Notification Relay": "Notifications",
+};
 
-interface InlineConfirmButtonProps {
-  label: string;
-  confirmLabel: string;
-  onConfirm: () => void;
-}
-
-/** Destructive action that needs a second click within a few seconds. */
-function InlineConfirmButton({ label, confirmLabel, onConfirm }: InlineConfirmButtonProps) {
-  const [confirming, setConfirming] = useState(false);
-
-  useEffect(() => {
-    if (!confirming) return;
-    const timer = window.setTimeout(() => setConfirming(false), 3000);
-    return () => window.clearTimeout(timer);
-  }, [confirming]);
-
-  return (
-    <button
-      type="button"
-      className={`btn btn-sm ${confirming ? "btn-danger" : "btn-ghost-danger"}`}
-      onClick={() => {
-        if (confirming) {
-          setConfirming(false);
-          onConfirm();
-        } else {
-          setConfirming(true);
-        }
-      }}
-    >
-      {confirming ? confirmLabel : label}
-    </button>
-  );
-}
+const GRANT_OPTIONS: { value: Grant; label: string }[] = [
+  { value: "Allow", label: "Allow" },
+  { value: "Ask", label: "Ask" },
+  { value: "Deny", label: "Block" },
+];
 
 interface ConnectControlProps {
   peer: TrustedPeer;
@@ -185,7 +164,7 @@ function ConnectControl({ peer, onChanged, onError }: ConnectControlProps) {
     return (
       <button
         type="button"
-        className="btn btn-secondary btn-sm"
+        className="btn btn-quiet"
         disabled={pending}
         onClick={() => run(() => disconnectPeer(peer.fingerprint))}
       >
@@ -207,86 +186,30 @@ function ConnectControl({ peer, onChanged, onError }: ConnectControlProps) {
       }}
     >
       <input
-        className="input input-sm mono"
+        className="input"
         value={endpoint}
         onChange={(e) => setEndpoint(e.target.value)}
-        placeholder="192.168.1.20:4433"
-        aria-label={`Network address of ${peer.displayName}`}
+        placeholder="Address, like 192.168.1.20:4433"
+        aria-label={`Address of ${peer.displayName}`}
         spellCheck={false}
       />
-      <button type="submit" className="btn btn-primary btn-sm" disabled={pending || !endpoint.trim()}>
+      <button type="submit" className="btn btn-primary" disabled={pending || !endpoint.trim()}>
         {pending ? "Connecting…" : "Connect"}
       </button>
     </form>
   );
 }
 
-interface DeviceStageProps {
-  identity: DeviceIdentity | null;
-  peer: TrustedPeer | null;
-  children: React.ReactNode;
-}
-
-/** This computer and the selected device, with the link between them showing connection state. */
-function DeviceStage({ identity, peer, children }: DeviceStageProps) {
-  const connected = peer?.isConnected ?? false;
-  return (
-    <section className="stage" aria-label="Connection">
-      <div className="stage-devices">
-        <div className="stage-device">
-          <span className="stage-icon">
-            <Laptop size={26} strokeWidth={1.6} />
-          </span>
-          <span className="stage-name">{identity?.deviceName ?? "This computer"}</span>
-          <span className="stage-role">This computer</span>
-        </div>
-
-        <div className={`stage-link ${connected ? "connected" : ""}`}>
-          <span className="stage-link-line" aria-hidden="true" />
-          <span className="stage-link-label">
-            {connected ? <Lock size={12} /> : null}
-            {peer ? (connected ? "Encrypted link" : "Not connected") : "Not paired"}
-          </span>
-        </div>
-
-        <div className={`stage-device ${peer ? "" : "placeholder"}`}>
-          <span className="stage-icon">
-            {peer ? (
-              <DeviceIcon name={peer.displayName} size={26} />
-            ) : (
-              <Smartphone size={26} strokeWidth={1.6} />
-            )}
-          </span>
-          <span className="stage-name">{peer?.displayName ?? "Your phone"}</span>
-          <span className="stage-role">
-            {peer ? (
-              <>
-                <StatusDot connected={connected} />
-                {connected ? "Connected" : "Offline"}
-              </>
-            ) : (
-              "Waiting to pair"
-            )}
-          </span>
-        </div>
-      </div>
-      <div className="stage-footer">{children}</div>
-    </section>
-  );
-}
-
 export default function App() {
-  const [page, setPage] = useState<Page>("home");
+  const [page, setPage] = useState<Page>("send");
   const [accent, setAccent] = useState<AccentName>(loadAccent);
   const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
   const [peers, setPeers] = useState<TrustedPeer[] | null>(null);
   const [loadError, setLoadError] = useState("");
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
   const [showPairDialog, setShowPairDialog] = useState(false);
-  const [transfers, setTransfers] = useState<TransferHistoryItem[]>([]);
-  const [sentClips, setSentClips] = useState<SentClip[]>([]);
-  const [clipText, setClipText] = useState("");
-  const [sendingClip, setSendingClip] = useState(false);
+  const [activity, setActivity] = useState<Activity[]>([]);
+  const [note, setNote] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
 
@@ -299,7 +222,7 @@ export default function App() {
 
   useEffect(() => {
     if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), toast.tone === "error" ? 6000 : 3000);
+    const timer = window.setTimeout(() => setToast(null), toast.tone === "error" ? 6000 : 2500);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -332,31 +255,31 @@ export default function App() {
       .catch((error) => setLoadError(errorMessage(error)));
   }, []);
 
+  const track = async (item: Omit<Activity, "id" | "status" | "timestamp">, send: () => Promise<number | void>) => {
+    const id = crypto.randomUUID();
+    setActivity((prev) => [{ ...item, id, status: "sending", timestamp: Date.now() }, ...prev]);
+    const update = (patch: Partial<Activity>) =>
+      setActivity((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+    try {
+      const bytesSent = await send();
+      update({ status: "sent", bytesSent: bytesSent ?? undefined });
+      return true;
+    } catch (error) {
+      update({ status: "failed", error: errorMessage(error) });
+      return false;
+    }
+  };
+
   const sendFiles = async (paths: string[]) => {
     if (!selectedPeer?.isConnected) {
-      showError(selectedPeer ? `Connect to ${selectedPeer.displayName} to send files.` : "Pair a device first.");
+      showError(selectedPeer ? `Connect to ${selectedPeer.displayName} first.` : "Pair a device first.");
       return;
     }
     const peer = selectedPeer;
     for (const path of paths) {
-      const id = crypto.randomUUID();
-      setTransfers((prev) => [
-        {
-          id,
-          fileName: fileNameFromPath(path),
-          peerFingerprint: peer.fingerprint,
-          status: "in_progress",
-          timestamp: Date.now(),
-        },
-        ...prev,
-      ]);
-      const update = (patch: Partial<TransferHistoryItem>) =>
-        setTransfers((prev) => prev.map((tx) => (tx.id === id ? { ...tx, ...patch } : tx)));
-      try {
-        update({ status: "completed", bytesSent: await sendFileToPeer(peer.fingerprint, path) });
-      } catch (error) {
-        update({ status: "failed", error: errorMessage(error) });
-      }
+      await track({ kind: "file", label: fileNameFromPath(path), peerName: peer.displayName }, () =>
+        sendFileToPeer(peer.fingerprint, path),
+      );
     }
   };
 
@@ -368,6 +291,7 @@ export default function App() {
     if (!isTauri()) return;
     const unlisten = getCurrentWebview().onDragDropEvent(({ payload }) => {
       if (payload.type === "enter" || payload.type === "over") {
+        setPage("send");
         setDragActive(true);
         return;
       }
@@ -386,31 +310,21 @@ export default function App() {
     if (picked) sendFiles(picked);
   };
 
-  const sendClip = async (e: React.FormEvent) => {
+  const sendNote = async (e: React.FormEvent) => {
     e.preventDefault();
-    const text = clipText;
-    if (!selectedPeer || !text.trim()) return;
-    setSendingClip(true);
-    try {
-      await sendClipboardText(selectedPeer.fingerprint, text);
-      setSentClips((prev) =>
-        [{ id: crypto.randomUUID(), text, peerName: selectedPeer.displayName, timestamp: Date.now() }, ...prev].slice(
-          0,
-          5,
-        ),
-      );
-      setClipText("");
-    } catch (error) {
-      showError(errorMessage(error));
-    } finally {
-      setSendingClip(false);
-    }
+    const text = note.trim();
+    if (!selectedPeer || !text) return;
+    setNote("");
+    const sent = await track({ kind: "text", label: text, peerName: selectedPeer.displayName }, () =>
+      sendClipboardText(selectedPeer.fingerprint, text),
+    );
+    if (!sent) setNote(text);
   };
 
-  const copyText = async (text: string, confirmation: string) => {
+  const copyText = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      showToast(confirmation);
+      showToast("Copied");
     } catch (error) {
       showError(errorMessage(error));
     }
@@ -420,7 +334,7 @@ export default function App() {
     (peer: TrustedPeer) => {
       setShowPairDialog(false);
       setSelectedPeerId(peer.fingerprint);
-      setPage("home");
+      setPage("send");
       showToast(`Paired with ${peer.displayName}`);
       refreshPeers();
     },
@@ -439,230 +353,147 @@ export default function App() {
     }
   };
 
-  const peerName = (fingerprint: string) =>
-    peers?.find((p) => p.fingerprint === fingerprint)?.displayName ?? "removed device";
-  const activeTransfers = transfers.filter((tx) => tx.status === "in_progress").length;
-
-  const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
-    { id: "home", label: "Home", icon: <Home size={16} /> },
-    { id: "transfers", label: "Transfers", icon: <ArrowUpDown size={16} /> },
-    { id: "devices", label: "Devices", icon: <MonitorSmartphone size={16} /> },
-    { id: "settings", label: "Settings", icon: <Settings size={16} /> },
-  ];
-
-  const renderTransferRow = (tx: TransferHistoryItem) => (
-    <li key={tx.id} className="row">
-      <FileTile fileName={tx.fileName} />
-      <span className="row-main">
-        <span className="row-title" title={tx.fileName}>
-          {tx.fileName}
-        </span>
-        <span className={`row-sub ${tx.status === "failed" ? "danger-text" : ""}`}>
-          {tx.status === "in_progress" && `Sending to ${peerName(tx.peerFingerprint)}…`}
-          {tx.status === "completed" &&
-            `${formatBytes(tx.bytesSent ?? 0)} · to ${peerName(tx.peerFingerprint)} · ${formatRelativeTime(tx.timestamp)}`}
-          {tx.status === "failed" && tx.error}
-        </span>
-      </span>
-      {tx.status === "in_progress" && <Loader size={16} className="spin muted" aria-label="Sending" />}
-      {tx.status === "completed" && (
-        <span className="badge badge-success">
-          <Check size={12} />
-          Sent
-        </span>
-      )}
-      {tx.status === "failed" && <span className="badge badge-danger">Failed</span>}
-    </li>
-  );
-
-  const renderHome = () => {
+  const renderSend = () => {
     if (!selectedPeer) {
       return (
-        <div className="home">
-          <DeviceStage identity={identity} peer={null}>
-            <div className="onboarding">
-              <h1>Pair your first device</h1>
-              <p className="muted">
-                Continue links your phone and computer directly over your own network. Nothing passes through the
-                cloud.
-              </p>
-              <ol className="steps">
-                <li>Open Continue on your phone</li>
-                <li>Tap Pair a device</li>
-                <li>Scan the code this computer shows</li>
-              </ol>
-              <button type="button" className="btn btn-primary btn-lg" onClick={() => setShowPairDialog(true)}>
-                <Plus size={16} />
-                Pair a device
-              </button>
-            </div>
-          </DeviceStage>
-        </div>
+        <section className="welcome">
+          <h1>Connect your phone</h1>
+          <p className="lead">
+            Pair once, then send files and text between your devices. Everything stays on your own network.
+          </p>
+          <button type="button" className="btn btn-primary btn-large" onClick={() => setShowPairDialog(true)}>
+            Pair a device
+          </button>
+        </section>
       );
     }
 
     const connected = selectedPeer.isConnected;
     return (
-      <div className="home">
-        <DeviceStage identity={identity} peer={selectedPeer}>
-          {connected ? (
-            <p className="muted">Files and text you send go straight to {selectedPeer.displayName}.</p>
-          ) : (
-            <p className="muted">Enter the address shown in Continue on {selectedPeer.displayName} to connect.</p>
-          )}
-          <ConnectControl
-            key={selectedPeer.fingerprint}
-            peer={selectedPeer}
-            onChanged={refreshPeers}
-            onError={showError}
-          />
-        </DeviceStage>
-
-        <div className="send-grid">
-          <section className="card" aria-labelledby="send-files-title">
-            <header className="card-header">
-              <h2 id="send-files-title">Send files</h2>
-            </header>
-            <div className={`dropzone ${dragActive ? "active" : ""} ${connected ? "" : "disabled"}`}>
-              <span className="dropzone-icon">
-                <Upload size={20} />
-              </span>
-              <p className="dropzone-title">Drop files anywhere</p>
-              <p className="muted small">or pick them from this computer</p>
-              <button type="button" className="btn btn-secondary btn-sm" disabled={!connected} onClick={chooseFiles}>
-                Choose files
-              </button>
-            </div>
-          </section>
-
-          <section className="card" aria-labelledby="send-text-title">
-            <header className="card-header">
-              <h2 id="send-text-title">Send text</h2>
-              <span className="hint">⏎ to send · ⇧⏎ new line</span>
-            </header>
-            <form className="clip-form" onSubmit={sendClip}>
-              <textarea
-                className="input"
-                rows={4}
-                value={clipText}
-                onChange={(e) => setClipText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    e.currentTarget.form?.requestSubmit();
-                  }
-                }}
-                placeholder={`Put text or a link on ${selectedPeer.displayName}'s clipboard`}
-                aria-label="Text to send"
-                disabled={!connected}
-              />
-              <button
-                type="submit"
-                className="btn btn-primary btn-sm"
-                disabled={!connected || sendingClip || !clipText.trim()}
+      <>
+        <section className="target">
+          <p className="eyebrow">Sending to</p>
+          {peers && peers.length > 1 ? (
+            <h1 className="device-picker">
+              {selectedPeer.displayName}
+              <ChevronDown size={22} aria-hidden="true" />
+              <select
+                value={selectedPeer.fingerprint}
+                onChange={(e) => setSelectedPeerId(e.target.value)}
+                aria-label="Device to send to"
               >
-                <Send size={14} />
-                {sendingClip ? "Sending…" : "Send"}
-              </button>
-            </form>
-          </section>
-        </div>
+                {peers.map((peer) => (
+                  <option key={peer.fingerprint} value={peer.fingerprint}>
+                    {peer.displayName}
+                  </option>
+                ))}
+              </select>
+            </h1>
+          ) : (
+            <h1>{selectedPeer.displayName}</h1>
+          )}
+          <div className="target-status">
+            <span className={`status ${connected ? "online" : ""}`}>{connected ? "Connected" : "Not connected"}</span>
+            <ConnectControl
+              key={selectedPeer.fingerprint}
+              peer={selectedPeer}
+              onChanged={refreshPeers}
+              onError={showError}
+            />
+          </div>
+        </section>
 
-        {(sentClips.length > 0 || transfers.length > 0) && (
-          <section className="card" aria-labelledby="recent-title">
-            <header className="card-header">
-              <h2 id="recent-title">Recent</h2>
-              {transfers.length > 0 && (
-                <button type="button" className="link-btn" onClick={() => setPage("transfers")}>
-                  All transfers
+        <button
+          type="button"
+          className={`drop ${dragActive ? "active" : ""}`}
+          disabled={!connected}
+          onClick={chooseFiles}
+        >
+          <span className="drop-icon">
+            <ArrowUp size={20} />
+          </span>
+          <span className="drop-title">{connected ? "Drop files here" : "Connect to send files"}</span>
+          {connected && <span className="drop-sub">or click to choose</span>}
+        </button>
+
+        <form className="compose" onSubmit={sendNote}>
+          <input
+            className="compose-input"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Send a note or link"
+            aria-label="Note or link to send"
+            disabled={!connected}
+          />
+          <button
+            type="submit"
+            className="compose-send"
+            disabled={!connected || !note.trim()}
+            aria-label="Send"
+          >
+            <ArrowUp size={16} />
+          </button>
+        </form>
+
+        {activity.length > 0 && (
+          <section className="activity" aria-label="Recent">
+            <div className="section-head">
+              <h2>Recent</h2>
+              {activity.some((a) => a.status !== "sending") && (
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => setActivity((prev) => prev.filter((a) => a.status === "sending"))}
+                >
+                  Clear
                 </button>
               )}
-            </header>
-            <ul className="rows">
-              {transfers.slice(0, 3).map(renderTransferRow)}
-              {sentClips.map((clip) => (
-                <li key={clip.id} className="row">
-                  <span className="file-tile tone-text">
-                    <FileText size={17} />
-                  </span>
-                  <span className="row-main">
-                    <span className="row-title">{clip.text}</span>
-                    <span className="row-sub">
-                      Text · to {clip.peerName} · {formatRelativeTime(clip.timestamp)}
+            </div>
+            <ul>
+              {activity.map((item) => (
+                <li key={item.id} className="activity-row">
+                  <ActivityIcon item={item} />
+                  <span className="activity-main">
+                    <span className="activity-label" title={item.label}>
+                      {item.label}
+                    </span>
+                    <span className={`activity-meta ${item.status === "failed" ? "failed" : ""}`}>
+                      {item.status === "sending" && "Sending…"}
+                      {item.status === "sent" &&
+                        [item.bytesSent !== undefined && formatBytes(item.bytesSent), formatRelativeTime(item.timestamp)]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      {item.status === "failed" && `Didn't send: ${item.error}`}
                     </span>
                   </span>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={() => copyText(clip.text, "Copied to clipboard")}
-                    aria-label="Copy text"
-                  >
-                    <Copy size={15} />
-                  </button>
+                  {item.status === "sending" && <Loader size={15} className="spin faint" aria-label="Sending" />}
+                  {item.status === "sent" && item.kind === "text" && (
+                    <button type="button" className="icon-btn" onClick={() => copyText(item.label)} aria-label="Copy">
+                      <Copy size={15} />
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
           </section>
         )}
-      </div>
+      </>
     );
   };
 
-  const renderTransfers = () => (
-    <>
-      <header className="page-header">
-        <div>
-          <h1>Transfers</h1>
-          <p className="muted">Files sent from this computer since Continue was opened.</p>
-        </div>
-        {transfers.some((tx) => tx.status !== "in_progress") && (
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => setTransfers((prev) => prev.filter((tx) => tx.status === "in_progress"))}
-          >
-            Clear finished
-          </button>
-        )}
-      </header>
-      {transfers.length === 0 ? (
-        <div className="empty">
-          <span className="empty-icon">
-            <ArrowUpDown size={20} />
-          </span>
-          <p className="empty-title">No transfers yet</p>
-          <p className="muted">Drop files on this window to send them to a connected device.</p>
-        </div>
-      ) : (
-        <section className="card">
-          <ul className="rows">{transfers.map(renderTransferRow)}</ul>
-        </section>
-      )}
-    </>
-  );
-
   const renderDevices = () => (
     <>
-      <header className="page-header">
-        <div>
-          <h1>Devices</h1>
-          <p className="muted">Each paired device is verified by its own key.</p>
-        </div>
-        <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowPairDialog(true)}>
-          <Plus size={15} />
-          Pair a device
+      <div className="page-head">
+        <h1>Devices</h1>
+        <button type="button" className="btn btn-primary" onClick={() => setShowPairDialog(true)}>
+          <Plus size={16} />
+          Pair
         </button>
-      </header>
+      </div>
       {peers?.length === 0 ? (
-        <div className="empty">
-          <span className="empty-icon">
-            <MonitorSmartphone size={20} />
-          </span>
-          <p className="empty-title">No paired devices</p>
-          <p className="muted">Pair your phone to start sending files and text.</p>
-        </div>
+        <p className="lead">Nothing paired yet.</p>
       ) : (
-        <ul className="device-list">
+        <ul className="list">
           {peers?.map((peer) => (
             <DeviceRow
               key={peer.fingerprint}
@@ -679,21 +510,12 @@ export default function App() {
 
   const renderSettings = () => (
     <>
-      <header className="page-header">
-        <div>
-          <h1>Settings</h1>
-        </div>
-      </header>
-
-      <section className="card" aria-labelledby="appearance-title">
-        <header className="card-header">
-          <h2 id="appearance-title">Appearance</h2>
-        </header>
-        <div className="setting">
-          <div>
-            <p className="row-title">Accent color</p>
-            <p className="row-sub">Used for buttons and highlights.</p>
-          </div>
+      <div className="page-head">
+        <h1>Settings</h1>
+      </div>
+      <ul className="list">
+        <li className="setting">
+          <span className="setting-label">Accent color</span>
           <div className="swatches" role="radiogroup" aria-label="Accent color">
             {ACCENT_PALETTE.map((option) => (
               <button
@@ -706,167 +528,81 @@ export default function App() {
                 className="swatch"
                 style={{ backgroundColor: option.base }}
                 onClick={() => setAccent(option.id)}
-              >
-                {accent === option.id && <Check size={13} color={option.onBase} strokeWidth={3} />}
-              </button>
+              />
             ))}
           </div>
-        </div>
-      </section>
-
-      {identity && (
-        <section className="card" aria-labelledby="this-computer-title">
-          <header className="card-header">
-            <h2 id="this-computer-title">This computer</h2>
-          </header>
-          <div className="setting">
-            <div>
-              <p className="row-title">Name</p>
-              <p className="row-sub">Shown to devices you pair with.</p>
-            </div>
-            <span>{identity.deviceName}</span>
-          </div>
-          <div className="setting stacked">
-            <div className="setting-head">
-              <div>
-                <p className="row-title">Device fingerprint</p>
-                <p className="row-sub">Compare this with what your phone shows while pairing.</p>
+        </li>
+        {identity && (
+          <>
+            <li className="setting">
+              <span className="setting-label">Computer name</span>
+              <span className="muted">{identity.deviceName}</span>
+            </li>
+            <li className="setting setting-stacked">
+              <div className="setting-row">
+                <span>
+                  <span className="setting-label">Security code</span>
+                  <span className="setting-help">Check it matches on your phone when you pair.</span>
+                </span>
+                <button type="button" className="btn btn-quiet" onClick={() => copyText(identity.fingerprint)}>
+                  <Copy size={14} />
+                  Copy
+                </button>
               </div>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => copyText(identity.fingerprint, "Fingerprint copied")}
-              >
-                <Copy size={14} />
-                Copy
-              </button>
-            </div>
-            <code className="key-value">{identity.fingerprint}</code>
-          </div>
-          <div className="setting stacked">
-            <p className="row-title">Certificate hash</p>
-            <code className="key-value">{identity.spkiHash}</code>
-          </div>
-        </section>
-      )}
+              <code className="code">{identity.fingerprint}</code>
+            </li>
+          </>
+        )}
+      </ul>
     </>
   );
 
   const renderUnavailable = () => (
-    <div className="empty empty-page" role="alert">
-      <span className="empty-icon">
-        <CircleAlert size={20} />
-      </span>
-      <p className="empty-title">Continue's local service isn't running</p>
-      {isTauri() ? (
-        <p className="muted">{loadError}</p>
-      ) : (
-        <p className="muted">
-          This window is showing the interface on its own. Start the desktop app with <code>pnpm tauri dev</code>.
-        </p>
-      )}
-    </div>
+    <section className="welcome" role="alert">
+      <h1>Continue isn't running</h1>
+      <p className="lead">
+        {isTauri() ? loadError : "Open this window from the Continue app, or start it with pnpm tauri dev."}
+      </p>
+    </section>
   );
+
+  const ready = isTauri() && !loadError && peers !== null;
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <img src="/icon.svg" alt="" className="brand-mark" />
+      <header className="topbar">
+        <span className="brand">
+          <img src="/icon.svg" alt="" width={20} height={20} />
           Continue
-        </div>
-
-        <nav className="nav" aria-label="Main">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`nav-item ${page === item.id ? "active" : ""}`}
-              aria-current={page === item.id ? "page" : undefined}
-              aria-label={item.label}
-              title={item.label}
-              onClick={() => setPage(item.id)}
-            >
-              {item.icon}
-              <span>{item.label}</span>
-              {item.id === "transfers" && activeTransfers > 0 && (
-                <span className="nav-count" aria-label={`${activeTransfers} sending`}>
-                  {activeTransfers}
-                </span>
-              )}
-            </button>
-          ))}
-        </nav>
-
-        {peers && peers.length > 0 && (
-          <div className="sidebar-section">
-            <div className="sidebar-label">
-              <span>Send to</span>
+        </span>
+        {ready && (
+          <nav className="tabs" aria-label="Main">
+            {PAGES.map((item) => (
               <button
+                key={item.id}
                 type="button"
-                className="icon-btn icon-btn-sm"
-                onClick={() => setShowPairDialog(true)}
-                aria-label="Pair a device"
-                title="Pair a device"
+                className="tab"
+                aria-current={page === item.id ? "page" : undefined}
+                onClick={() => setPage(item.id)}
               >
-                <Plus size={14} />
-              </button>
-            </div>
-            {peers.map((peer) => (
-              <button
-                key={peer.fingerprint}
-                type="button"
-                className={`peer-item ${peer.fingerprint === selectedPeer?.fingerprint ? "active" : ""}`}
-                aria-pressed={peer.fingerprint === selectedPeer?.fingerprint}
-                onClick={() => {
-                  setSelectedPeerId(peer.fingerprint);
-                  setPage("home");
-                }}
-              >
-                <DeviceIcon name={peer.displayName} size={15} />
-                <span className="peer-item-name">{peer.displayName}</span>
-                <StatusDot connected={peer.isConnected} />
+                {item.label}
               </button>
             ))}
-          </div>
+          </nav>
         )}
-
-        {identity && (
-          <div className="this-device" title={identity.fingerprint}>
-            <span className="this-device-icon">
-              <Laptop size={15} />
-            </span>
-            <div>
-              <p className="row-title">{identity.deviceName}</p>
-              <p className="row-sub mono">{shortFingerprint(identity.fingerprint)}</p>
-            </div>
-          </div>
-        )}
-      </aside>
+      </header>
 
       <main className="content">
-        <div className="content-inner">
-          {!isTauri() || loadError ? (
-            renderUnavailable()
-          ) : peers === null ? null : (
-            <>
-              {page === "home" && renderHome()}
-              {page === "transfers" && renderTransfers()}
-              {page === "devices" && renderDevices()}
-              {page === "settings" && renderSettings()}
-            </>
-          )}
-        </div>
+        {!isTauri() || loadError
+          ? renderUnavailable()
+          : ready && (
+              <>
+                {page === "send" && renderSend()}
+                {page === "devices" && renderDevices()}
+                {page === "settings" && renderSettings()}
+              </>
+            )}
       </main>
-
-      {dragActive && selectedPeer?.isConnected && (
-        <div className="drop-overlay" aria-hidden="true">
-          <div className="drop-overlay-card">
-            <Upload size={22} />
-            Drop to send to {selectedPeer.displayName}
-          </div>
-        </div>
-      )}
 
       {showPairDialog && <PairDialog onPaired={handlePaired} onClose={closePairDialog} />}
 
@@ -887,15 +623,10 @@ interface DeviceRowProps {
   onError: (message: string) => void;
 }
 
-const GRANT_OPTIONS: { value: Grant; label: string }[] = [
-  { value: "Allow", label: "Allow" },
-  { value: "Ask", label: "Ask" },
-  { value: "Deny", label: "Block" },
-];
-
 function DeviceRow({ peer, onChanged, onRemove, onError }: DeviceRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [permissions, setPermissions] = useState<PeerPermission[] | null>(null);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
 
   useEffect(() => {
     if (!expanded) return;
@@ -903,6 +634,12 @@ function DeviceRow({ peer, onChanged, onRemove, onError }: DeviceRowProps) {
       .then(setPermissions)
       .catch((error) => onError(errorMessage(error)));
   }, [expanded, peer.fingerprint, onError]);
+
+  useEffect(() => {
+    if (!confirmingRemove) return;
+    const timer = window.setTimeout(() => setConfirmingRemove(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [confirmingRemove]);
 
   const changeGrant = async (permission: PeerPermission, grant: Grant) => {
     try {
@@ -918,47 +655,40 @@ function DeviceRow({ peer, onChanged, onRemove, onError }: DeviceRowProps) {
   const panelId = `permissions-${peer.fingerprint}`;
 
   return (
-    <li className="card device-card">
-      <div className="device-card-main">
-        <span className="device-avatar">
+    <li className="device">
+      <div className="device-row">
+        <span className="device-icon">
           <DeviceIcon name={peer.displayName} />
         </span>
-        <div className="row-main">
-          <span className="row-title">{peer.displayName}</span>
-          <span className="row-sub">
-            <StatusDot connected={peer.isConnected} />
-            {peer.isConnected ? "Connected" : "Offline"} · Paired {formatPairedDate(peer.pairedAt)}
+        <span className="device-main">
+          <span className="device-name">{peer.displayName}</span>
+          <span className={`status ${peer.isConnected ? "online" : ""}`}>
+            {peer.isConnected ? "Connected" : `Added ${formatPairedDate(peer.pairedAt)}`}
           </span>
-        </div>
-        <ConnectControl peer={peer} onChanged={onChanged} onError={onError} />
-      </div>
-      <div className="device-card-footer">
+        </span>
         <button
           type="button"
-          className="link-btn"
+          className="btn btn-quiet"
           aria-expanded={expanded}
           aria-controls={panelId}
           onClick={() => setExpanded((v) => !v)}
         >
-          {expanded ? "Hide permissions" : "Permissions"}
+          {expanded ? "Done" : "Manage"}
         </button>
-        <span className="mono muted small" title={peer.fingerprint}>
-          {shortFingerprint(peer.fingerprint)}
-        </span>
       </div>
       {expanded && (
-        <div id={panelId} className="permissions">
+        <div id={panelId} className="device-panel">
+          <ConnectControl peer={peer} onChanged={onChanged} onError={onError} />
           {permissions?.map((permission) => (
-            <div key={permission.capabilityId} className="permission-row">
-              <span>{permission.capabilityName}</span>
-              <div className="segmented segmented-sm" role="radiogroup" aria-label={permission.capabilityName}>
+            <div key={permission.capabilityId} className="permission">
+              <span>{PERMISSION_LABELS[permission.capabilityName] ?? permission.capabilityName}</span>
+              <div className="segmented" role="radiogroup" aria-label={permission.capabilityName}>
                 {GRANT_OPTIONS.map((option) => (
                   <button
                     key={option.value}
                     type="button"
                     role="radio"
                     aria-checked={permission.grant === option.value}
-                    className={permission.grant === option.value ? "active" : ""}
                     onClick={() => changeGrant(permission, option.value)}
                   >
                     {option.label}
@@ -967,10 +697,19 @@ function DeviceRow({ peer, onChanged, onRemove, onError }: DeviceRowProps) {
               </div>
             </div>
           ))}
-          <div className="permission-row">
-            <span className="muted">Remove this device and forget its key.</span>
-            <InlineConfirmButton label="Remove device" confirmLabel="Click again to remove" onConfirm={onRemove} />
-          </div>
+          <button
+            type="button"
+            className={`btn ${confirmingRemove ? "btn-danger" : "btn-quiet danger"}`}
+            onClick={() => {
+              if (confirmingRemove) {
+                onRemove();
+              } else {
+                setConfirmingRemove(true);
+              }
+            }}
+          >
+            {confirmingRemove ? "Click again to remove" : "Remove device"}
+          </button>
         </div>
       )}
     </li>

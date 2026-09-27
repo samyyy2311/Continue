@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useState } from "react";
-import { Check, Copy, X } from "lucide-react";
+import { Check, Copy, Loader, X } from "lucide-react";
 import { renderSVG } from "uqr";
 import {
   cancelPairing,
@@ -143,7 +143,7 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
           </li>
           <li>Point the camera at this code</li>
         </ol>
-        <p className="muted small">Both devices need to be on the same Wi-Fi network.</p>
+        <p className="setting-help">Both devices need to be on the same Wi-Fi.</p>
         <p className="waiting-label" role="status">
           {state.status === "waiting" && (
             <>
@@ -154,12 +154,12 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
         </p>
         <button
           type="button"
-          className="btn btn-secondary btn-sm"
+          className="btn btn-quiet"
           disabled={state.status !== "waiting"}
           onClick={() => state.status === "waiting" && copyCode(state.code)}
         >
           {copied ? <Check size={14} /> : <Copy size={14} />}
-          {copied ? "Copied" : "Copy code instead"}
+          {copied ? "Copied" : "Copy as text"}
         </button>
       </div>
       <div className="qr-frame" aria-busy={state.status === "starting"}>
@@ -171,7 +171,7 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
             dangerouslySetInnerHTML={{ __html: renderSVG(state.code, { border: 2 }) }}
           />
         ) : (
-          <span className="muted small">Preparing code…</span>
+          <Loader size={18} className="spin faint" aria-label="Preparing code" />
         )}
       </div>
     </div>
@@ -198,13 +198,13 @@ function EnterCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
   return (
     <form className="dialog-body" onSubmit={submit}>
       <label className="field">
-        <span className="field-label">Pairing code</span>
+        <span className="field-label">Code from your other device</span>
         <textarea
-          className="input code-input"
+          className="input code"
           rows={3}
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          placeholder="Paste the code shown on your other device"
+          placeholder="Paste it here"
           spellCheck={false}
           autoFocus
         />

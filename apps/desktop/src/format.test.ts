@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { fileNameFromPath, formatBytes, formatRelativeTime, shortFingerprint } from "./format.ts";
+import { fileNameFromPath, formatBytes, formatRelativeTime } from "./format.ts";
 
 describe("formatBytes", () => {
   it("picks the largest unit below the value", () => {
@@ -28,21 +28,11 @@ describe("formatRelativeTime", () => {
   const now = 1_700_000_000_000;
 
   it("treats the last few seconds as just now", () => {
-    expect(formatRelativeTime(now - 10_000, now)).toBe("Just now");
+    expect(formatRelativeTime(now - 10_000, now)).toBe("just now");
   });
 
   it("uses minutes and hours for the same day", () => {
     expect(formatRelativeTime(now - 5 * 60_000, now)).toBe("5 min ago");
     expect(formatRelativeTime(now - 3 * 3_600_000, now)).toBe("3 h ago");
-  });
-});
-
-describe("shortFingerprint", () => {
-  it("keeps both ends of long fingerprints", () => {
-    expect(shortFingerprint("cont1q8f7e2a9d4c6b8a1e3f5a7b9c1d3e5f7a9b1c3d")).toBe("cont1q8f7e…9b1c3d");
-  });
-
-  it("leaves short values unchanged", () => {
-    expect(shortFingerprint("cont1qabc")).toBe("cont1qabc");
   });
 });

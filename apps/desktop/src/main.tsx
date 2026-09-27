@@ -3,8 +3,7 @@
 
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "@fontsource-variable/geist";
-import "@fontsource-variable/geist-mono";
+import "@fontsource-variable/inter/opsz.css";
 import App from "./App.tsx";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

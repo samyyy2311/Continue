@@ -24,15 +24,10 @@ export function formatPairedDate(pairedAt: number): string {
 
 export function formatRelativeTime(timestamp: number, now = Date.now()): string {
   const seconds = Math.round((now - timestamp) / 1000);
-  if (seconds < 45) return "Just now";
+  if (seconds < 45) return "just now";
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours} h ago`;
   return new Date(timestamp).toLocaleDateString();
-}
-
-/** Shortened fingerprint for display; the full value stays available to copy. */
-export function shortFingerprint(fingerprint: string): string {
-  return fingerprint.length > 16 ? `${fingerprint.slice(0, 10)}…${fingerprint.slice(-6)}` : fingerprint;
 }
