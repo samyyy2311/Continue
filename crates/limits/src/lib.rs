@@ -27,7 +27,7 @@ pub const MAX_DEVICE_NAME_BYTES: usize = 64;
 
 /// Byte length of the pairing session token.
 ///
-/// Distinct from SHA256_DIGEST_LEN â€” this is 16 bytes, not 32.
+/// Distinct from SHA256_DIGEST_LEN — this is 16 bytes, not 32.
 pub const SESSION_TOKEN_LEN: usize = 16;
 
 /// Maximum active pairing session lifetime in seconds.
@@ -114,7 +114,7 @@ pub const RETRY_MAX_DELAY_MS: u64 = 60_000;
 /// Maximum number of reconnect attempts before giving up.
 pub const RETRY_MAX_ATTEMPTS: u32 = 8;
 
-/// Jitter fraction applied to each backoff interval (Â±25%).
+/// Jitter fraction applied to each backoff interval (±25%).
 pub const RETRY_JITTER_FACTOR: f64 = 0.25;
 
 // â”€â”€ Notification content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

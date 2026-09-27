@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use capabilities::{evaluate_capability, CapabilityQuery};
-use limits::MAX_NOTIFICATION_BODY_BYTES;
+use limits::{MAX_FRAME_NOTIFICATION_BYTES, MAX_NOTIFICATION_BODY_BYTES};
 use protocol::v1::{
     NotificationAck, NotificationActionInvoke, NotificationDismiss, NotificationPost,
 };
+use transport::{read_msg, write_msg};
 
 use crate::error::NotificationError;
-use crate::wire::{read_msg, write_msg};
 
 pub struct NotificationDispatcher;
 
@@ -33,8 +33,8 @@ impl NotificationDispatcher {
             });
         }
 
-        write_msg(send_stream, &post).await?;
-        let ack: NotificationAck = read_msg(recv_stream).await?;
+        write_msg(send_stream, &post, MAX_FRAME_NOTIFICATION_BYTES).await?;
+        let ack: NotificationAck = read_msg(recv_stream, MAX_FRAME_NOTIFICATION_BYTES).await?;
 
         if !ack.handled {
             return Err(NotificationError::ActionFailed(
@@ -57,7 +57,7 @@ impl NotificationDispatcher {
     {
         evaluate_capability(query)?;
 
-        let post: NotificationPost = read_msg(recv_stream).await?;
+        let post: NotificationPost = read_msg(recv_stream, MAX_FRAME_NOTIFICATION_BYTES).await?;
 
         if post.body.len() > MAX_NOTIFICATION_BODY_BYTES {
             let _ = write_msg(
@@ -66,6 +66,7 @@ impl NotificationDispatcher {
                     notification_id: post.notification_id.clone(),
                     handled: false,
                 },
+                MAX_FRAME_NOTIFICATION_BYTES,
             )
             .await;
             return Err(NotificationError::BodyTooLarge {
@@ -82,6 +83,7 @@ impl NotificationDispatcher {
                         notification_id: post.notification_id.clone(),
                         handled: true,
                     },
+                    MAX_FRAME_NOTIFICATION_BYTES,
                 )
                 .await?;
                 Ok(post)
@@ -93,6 +95,7 @@ impl NotificationDispatcher {
                         notification_id: post.notification_id.clone(),
                         handled: false,
                     },
+                    MAX_FRAME_NOTIFICATION_BYTES,
                 )
                 .await?;
                 Err(NotificationError::ActionFailed(e))
@@ -109,8 +112,8 @@ impl NotificationDispatcher {
     ) -> Result<NotificationAck, NotificationError> {
         evaluate_capability(query)?;
 
-        write_msg(send_stream, &dismiss).await?;
-        let ack: NotificationAck = read_msg(recv_stream).await?;
+        write_msg(send_stream, &dismiss, MAX_FRAME_NOTIFICATION_BYTES).await?;
+        let ack: NotificationAck = read_msg(recv_stream, MAX_FRAME_NOTIFICATION_BYTES).await?;
         Ok(ack)
     }
 
@@ -126,7 +129,7 @@ impl NotificationDispatcher {
     {
         evaluate_capability(query)?;
 
-        let dismiss: NotificationDismiss = read_msg(recv_stream).await?;
+        let dismiss: NotificationDismiss = read_msg(recv_stream, MAX_FRAME_NOTIFICATION_BYTES).await?;
         let success = handler(dismiss.clone()).is_ok();
 
         write_msg(
@@ -135,6 +138,7 @@ impl NotificationDispatcher {
                 notification_id: dismiss.notification_id.clone(),
                 handled: success,
             },
+            MAX_FRAME_NOTIFICATION_BYTES,
         )
         .await?;
 
@@ -150,8 +154,8 @@ impl NotificationDispatcher {
     ) -> Result<NotificationAck, NotificationError> {
         evaluate_capability(query)?;
 
-        write_msg(send_stream, &action).await?;
-        let ack: NotificationAck = read_msg(recv_stream).await?;
+        write_msg(send_stream, &action, MAX_FRAME_NOTIFICATION_BYTES).await?;
+        let ack: NotificationAck = read_msg(recv_stream, MAX_FRAME_NOTIFICATION_BYTES).await?;
 
         if !ack.handled {
             return Err(NotificationError::ActionFailed(
@@ -174,7 +178,7 @@ impl NotificationDispatcher {
     {
         evaluate_capability(query)?;
 
-        let action: NotificationActionInvoke = read_msg(recv_stream).await?;
+        let action: NotificationActionInvoke = read_msg(recv_stream, MAX_FRAME_NOTIFICATION_BYTES).await?;
 
         match handler(action.clone()) {
             Ok(()) => {
@@ -184,6 +188,7 @@ impl NotificationDispatcher {
                         notification_id: action.notification_id.clone(),
                         handled: true,
                     },
+                    MAX_FRAME_NOTIFICATION_BYTES,
                 )
                 .await?;
                 Ok(action)
@@ -195,6 +200,7 @@ impl NotificationDispatcher {
                         notification_id: action.notification_id.clone(),
                         handled: false,
                     },
+                    MAX_FRAME_NOTIFICATION_BYTES,
                 )
                 .await?;
                 Err(NotificationError::ActionFailed(e))

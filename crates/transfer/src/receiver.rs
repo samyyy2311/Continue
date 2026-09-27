@@ -5,12 +5,13 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
-use limits::TRANSFER_CHUNK_BYTES;
+use limits::{MAX_FRAME_TRANSFER_META_BYTES, TRANSFER_CHUNK_BYTES};
 use protocol::v1::{FileTransferAck, FileTransferRequest, FileTransferResponse, TransferResponseStatus};
+use transport::{read_msg, write_msg};
 
 use crate::error::TransferError;
+use crate::hex::hex_encode;
 use crate::sanitizer::sanitize_filename;
-use crate::wire::{hex_encode, read_msg, write_msg};
 
 /// Result of a completed and verified incoming file transfer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,7 +33,7 @@ where
     P: Fn(&FileTransferRequest) -> bool,
     F: Fn(u64, u64),
 {
-    let req: FileTransferRequest = read_msg(recv_stream).await?;
+    let req: FileTransferRequest = read_msg(recv_stream, MAX_FRAME_TRANSFER_META_BYTES).await?;
 
     let clean_name = match sanitize_filename(&req.file_name) {
         Ok(name) => name,
@@ -42,7 +43,7 @@ where
                 status: TransferResponseStatus::Rejected as i32,
                 reason: e.to_string(),
             };
-            write_msg(send_stream, &resp).await?;
+            write_msg(send_stream, &resp, MAX_FRAME_TRANSFER_META_BYTES).await?;
             return Err(e);
         }
     };
@@ -54,7 +55,7 @@ where
                 status: TransferResponseStatus::Rejected as i32,
                 reason: "Permission denied".to_string(),
             };
-            write_msg(send_stream, &resp).await?;
+            write_msg(send_stream, &resp, MAX_FRAME_TRANSFER_META_BYTES).await?;
             return Err(TransferError::Rejected("Permission denied".to_string()));
         }
     }
@@ -70,7 +71,7 @@ where
         status: TransferResponseStatus::Accepted as i32,
         reason: String::new(),
     };
-    write_msg(send_stream, &resp).await?;
+    write_msg(send_stream, &resp, MAX_FRAME_TRANSFER_META_BYTES).await?;
 
     let mut hasher = Sha256::new();
     let mut total_received = 0u64;
@@ -110,7 +111,7 @@ where
             bytes_received: total_received,
             verified: false,
         };
-        let _ = write_msg(send_stream, &ack).await;
+        let _ = write_msg(send_stream, &ack, MAX_FRAME_TRANSFER_META_BYTES).await;
         return Err(TransferError::SizeMismatch {
             expected: req.file_size,
             actual: total_received,
@@ -125,7 +126,7 @@ where
             bytes_received: total_received,
             verified: false,
         };
-        let _ = write_msg(send_stream, &ack).await;
+        let _ = write_msg(send_stream, &ack, MAX_FRAME_TRANSFER_META_BYTES).await;
         return Err(TransferError::ChecksumMismatch {
             expected: hex_encode(&req.sha256_checksum),
             actual: hex_encode(actual_hash),
@@ -140,7 +141,7 @@ where
         bytes_received: total_received,
         verified: true,
     };
-    write_msg(send_stream, &ack).await?;
+    write_msg(send_stream, &ack, MAX_FRAME_TRANSFER_META_BYTES).await?;
 
     Ok(ReceivedFile {
         path: target_path,

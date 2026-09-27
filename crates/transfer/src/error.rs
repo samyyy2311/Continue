@@ -20,6 +20,9 @@ pub enum TransferError {
     #[error("QUIC stream write error: {0}")]
     QuinnWrite(#[from] quinn::WriteError),
 
+    #[error("QUIC stream already closed: {0}")]
+    QuinnClosed(#[from] quinn::ClosedStream),
+
     #[error("Protocol error: {0}")]
     Protocol(#[from] protocol::ProtocolError),
 

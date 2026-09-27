@@ -24,7 +24,7 @@ pub fn encrypt(
 ) -> Result<Vec<u8>, CryptoError> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
     let nonce = Nonce::from_slice(nonce);
-    let mut payload = chacha20poly1305::aead::Payload { msg: plaintext, aad };
+    let payload = chacha20poly1305::aead::Payload { msg: plaintext, aad };
     cipher.encrypt(nonce, payload).map_err(|_| CryptoError::AeadEncrypt)
 }
 

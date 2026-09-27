@@ -4,9 +4,9 @@
 use std::sync::{Arc, Mutex};
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{CertificateDer, DistinguishedName, ServerName, UnixTime};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
-use rustls::{DigitallySignedStruct, Error as RustlsError, SignatureScheme};
+use rustls::{DigitallySignedStruct, DistinguishedName, Error as RustlsError, SignatureScheme};
 
 use crate::spki::extract_and_hash_spki;
 
@@ -15,9 +15,12 @@ fn default_verify_tls12_signature(
     cert: &CertificateDer<'_>,
     dss: &DigitallySignedStruct,
 ) -> Result<HandshakeSignatureValid, RustlsError> {
-    rustls::crypto::ring::default_provider()
-        .signature_verification_algorithms
-        .verify_tls12_signature(message, cert, dss)
+    rustls::crypto::verify_tls12_signature(
+        message,
+        cert,
+        dss,
+        &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+    )
 }
 
 fn default_verify_tls13_signature(
@@ -25,9 +28,12 @@ fn default_verify_tls13_signature(
     cert: &CertificateDer<'_>,
     dss: &DigitallySignedStruct,
 ) -> Result<HandshakeSignatureValid, RustlsError> {
-    rustls::crypto::ring::default_provider()
-        .signature_verification_algorithms
-        .verify_tls13_signature(message, cert, dss)
+    rustls::crypto::verify_tls13_signature(
+        message,
+        cert,
+        dss,
+        &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+    )
 }
 
 fn default_supported_schemes() -> Vec<SignatureScheme> {

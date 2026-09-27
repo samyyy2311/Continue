@@ -127,7 +127,7 @@ fn test_pair_confirm_tampered_mac_rejection() -> Result<()> {
     tampered_mac[0] ^= 0xFF;
 
     match crypto::pairing::verify_confirm_mac(&tampered_mac, &valid_mac) {
-        Err(crypto::error::CryptoError::TranscriptMismatch) => {
+        Err(crypto::CryptoError::TranscriptMismatch) => {
             info!("Check passed: Tampered PairConfirm MAC rejected in constant time");
             Ok(())
         }
@@ -247,13 +247,13 @@ async fn test_clipboard_capability_and_echo_suppression() -> Result<()> {
         negotiated_session_capabilities: HashSet::new(),
     };
 
-    let fake_send: &mut quinn::SendStream = unsafe { std::mem::zeroed() };
-    let fake_recv: &mut quinn::RecvStream = unsafe { std::mem::zeroed() };
+    let (client, _server) = setup_connected_peer_pair().await?;
+    let (mut send, mut recv) = client.connection().open_bi().await?;
     let res = sync
         .send_update(
-            fake_send,
-            fake_recv,
-            ClipboardFormat::ClipboardFormatTextPlain,
+            &mut send,
+            &mut recv,
+            ClipboardFormat::TextPlain,
             b"test".to_vec(),
             &unauthorized_query,
         )
@@ -290,10 +290,10 @@ async fn test_notification_body_size_enforcement() -> Result<()> {
         actions: vec![],
     };
 
-    let fake_send: &mut quinn::SendStream = unsafe { std::mem::zeroed() };
-    let fake_recv: &mut quinn::RecvStream = unsafe { std::mem::zeroed() };
+    let (client, _server) = setup_connected_peer_pair().await?;
+    let (mut send, mut recv) = client.connection().open_bi().await?;
     let res = dispatcher
-        .send_post(fake_send, fake_recv, oversized_post, &query)
+        .send_post(&mut send, &mut recv, oversized_post, &query)
         .await;
     assert!(matches!(
         res,
@@ -423,7 +423,7 @@ async fn test_end_to_end_clipboard_sync() -> Result<()> {
     let ack = client_mux
         .send_clipboard_to_peer(
             &synchronizer,
-            clipboard::ClipboardFormat::ClipboardFormatTextPlain,
+            clipboard::ClipboardFormat::TextPlain,
             sample_text.to_vec(),
             &query,
         )
@@ -439,7 +439,7 @@ async fn test_end_to_end_clipboard_sync() -> Result<()> {
     assert_eq!(update.payload, sample_text.to_vec());
     assert_eq!(
         update.format,
-        clipboard::ClipboardFormat::ClipboardFormatTextPlain as i32
+        clipboard::ClipboardFormat::TextPlain as i32
     );
 
     info!("Check passed: End-to-end clipboard synchronization and acknowledgment");

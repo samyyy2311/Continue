@@ -12,7 +12,6 @@ use protocol::v1::{
 };
 use protocol::CapabilityId;
 
-use crate::error::SessionError;
 use crate::keepalive::KeepaliveTracker;
 use crate::session::Session;
 
@@ -184,7 +183,7 @@ impl SessionMultiplexer {
                     let pong = KeepaliveTracker::make_pong(seq);
                     let _ = Session::send_envelope(&mut send, &pong).await;
                     let mut tracker = keepalive.lock().await;
-                    tracker.record_received();
+                    tracker.record_activity();
                 }
                 Some(Body::Disconnect(Disconnect { reason, message })) => {
                     debug!("Peer sent disconnect: reason={reason:?}, message={message}");

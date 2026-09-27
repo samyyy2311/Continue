@@ -3,14 +3,15 @@
 
 use std::path::Path;
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 
-use limits::TRANSFER_CHUNK_BYTES;
+use limits::{MAX_FRAME_TRANSFER_META_BYTES, TRANSFER_CHUNK_BYTES};
 use protocol::v1::{FileTransferAck, FileTransferRequest, FileTransferResponse, TransferResponseStatus};
+use transport::{read_msg, write_msg};
 
 use crate::error::TransferError;
+use crate::hex::hex_encode;
 use crate::sanitizer::sanitize_filename;
-use crate::wire::{hex_encode, read_msg, write_msg};
 
 /// Compute the SHA-256 digest of a file on disk.
 pub async fn compute_file_sha256(path: &Path) -> Result<[u8; 32], TransferError> {
@@ -57,9 +58,9 @@ where
         sha256_checksum: sha256_bytes.to_vec(),
         mime_type: String::new(),
     };
-    write_msg(send_stream, &req).await?;
+    write_msg(send_stream, &req, MAX_FRAME_TRANSFER_META_BYTES).await?;
 
-    let resp: FileTransferResponse = read_msg(recv_stream).await?;
+    let resp: FileTransferResponse = read_msg(recv_stream, MAX_FRAME_TRANSFER_META_BYTES).await?;
     if resp.transfer_id != transfer_id {
         return Err(TransferError::UnexpectedResponse);
     }
@@ -92,7 +93,7 @@ where
 
     send_stream.finish()?;
 
-    let ack: FileTransferAck = read_msg(recv_stream).await?;
+    let ack: FileTransferAck = read_msg(recv_stream, MAX_FRAME_TRANSFER_META_BYTES).await?;
     if ack.transfer_id != transfer_id {
         return Err(TransferError::UnexpectedResponse);
     }

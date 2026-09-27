@@ -9,9 +9,9 @@ use capabilities::{evaluate_capability, CapabilityQuery};
 use limits::MAX_FRAME_CLIPBOARD_BYTES;
 use protocol::v1::{ClipboardAck, ClipboardFormat, ClipboardUpdate};
 use sha2::{Digest, Sha256};
+use transport::{read_msg, write_msg};
 
 use crate::error::ClipboardError;
-use crate::wire::{read_msg, write_msg};
 
 pub struct ClipboardSynchronizer {
     local_sequence: AtomicU64,
@@ -83,8 +83,8 @@ impl ClipboardSynchronizer {
             payload,
         };
 
-        write_msg(stream, &update).await?;
-        let ack: ClipboardAck = read_msg(recv_stream).await?;
+        write_msg(stream, &update, MAX_FRAME_CLIPBOARD_BYTES).await?;
+        let ack: ClipboardAck = read_msg(recv_stream, MAX_FRAME_CLIPBOARD_BYTES).await?;
 
         if !ack.applied {
             return Err(ClipboardError::Rejected(ack.error_message));
@@ -105,7 +105,7 @@ impl ClipboardSynchronizer {
     {
         evaluate_capability(query)?;
 
-        let update: ClipboardUpdate = read_msg(recv_stream).await?;
+        let update: ClipboardUpdate = read_msg(recv_stream, MAX_FRAME_CLIPBOARD_BYTES).await?;
 
         if update.payload.len() > MAX_FRAME_CLIPBOARD_BYTES {
             let _ = write_msg(
@@ -115,6 +115,7 @@ impl ClipboardSynchronizer {
                     applied: false,
                     error_message: "Payload exceeds maximum allowed frame bytes".to_string(),
                 },
+                MAX_FRAME_CLIPBOARD_BYTES,
             )
             .await;
             return Err(ClipboardError::PayloadTooLarge {
@@ -124,10 +125,10 @@ impl ClipboardSynchronizer {
         }
 
         let format = match update.format {
-            1 => ClipboardFormat::ClipboardFormatTextPlain,
-            2 => ClipboardFormat::ClipboardFormatTextHtml,
-            3 => ClipboardFormat::ClipboardFormatImagePng,
-            _ => ClipboardFormat::ClipboardFormatUnspecified,
+            1 => ClipboardFormat::TextPlain,
+            2 => ClipboardFormat::TextHtml,
+            3 => ClipboardFormat::ImagePng,
+            _ => ClipboardFormat::Unspecified,
         };
 
         let hash = Self::compute_hash(format, &update.payload);
@@ -140,6 +141,7 @@ impl ClipboardSynchronizer {
                     applied: false,
                     error_message: "Suppressed echo loop".to_string(),
                 },
+                MAX_FRAME_CLIPBOARD_BYTES,
             )
             .await?;
             return Ok(update);
@@ -154,6 +156,7 @@ impl ClipboardSynchronizer {
                     applied: false,
                     error_message: "Stale sequence number".to_string(),
                 },
+                MAX_FRAME_CLIPBOARD_BYTES,
             )
             .await;
             return Err(ClipboardError::StaleSequence {
@@ -177,6 +180,7 @@ impl ClipboardSynchronizer {
                         applied: true,
                         error_message: String::new(),
                     },
+                    MAX_FRAME_CLIPBOARD_BYTES,
                 )
                 .await?;
 
@@ -190,6 +194,7 @@ impl ClipboardSynchronizer {
                         applied: false,
                         error_message: e.clone(),
                     },
+                    MAX_FRAME_CLIPBOARD_BYTES,
                 )
                 .await?;
                 Err(ClipboardError::Rejected(e))

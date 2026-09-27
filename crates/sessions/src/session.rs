@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::net::SocketAddr;
-use bytes::BytesMut;
 
 use limits::MAX_FRAME_SESSION_BYTES;
 use protocol::v1::SessionEnvelope;
@@ -71,30 +70,13 @@ impl Session {
         send_stream: &mut quinn::SendStream,
         envelope: &SessionEnvelope,
     ) -> Result<(), SessionError> {
-        let frame = protocol::encode_frame(envelope, MAX_FRAME_SESSION_BYTES)?;
-        send_stream
-            .write_all(&frame)
-            .await
-            .map_err(transport::TransportError::from)?;
-        Ok(())
+        Ok(transport::write_msg(send_stream, envelope, MAX_FRAME_SESSION_BYTES).await?)
     }
 
     /// Read a control envelope from the session's stream.
     pub async fn read_envelope(
         recv_stream: &mut quinn::RecvStream,
     ) -> Result<SessionEnvelope, SessionError> {
-        let mut buf = BytesMut::with_capacity(1024);
-        let mut chunk = [0u8; 1024];
-        loop {
-            if let Some(msg) = protocol::decode_frame_from_buf::<SessionEnvelope>(&mut buf, MAX_FRAME_SESSION_BYTES)? {
-                return Ok(msg);
-            }
-            match recv_stream.read(&mut chunk).await.map_err(transport::TransportError::from)? {
-                Some(n) if n > 0 => {
-                    buf.extend_from_slice(&chunk[..n]);
-                }
-                _ => return Err(transport::TransportError::ConnectionClosed.into()),
-            }
-        }
+        Ok(transport::read_msg(recv_stream, MAX_FRAME_SESSION_BYTES).await?)
     }
 }

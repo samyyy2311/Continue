@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 use transport::{create_client_endpoint, create_server_endpoint, TransportCertificate};
-use transport::verifier::{PinnedClientCertVerifier, PinnedServerCertVerifier};
 
 use transfer::{receive_file, send_file};
 
@@ -42,14 +40,16 @@ async fn file_transfer_e2e_success() {
         let conn = incoming.await.expect("established conn");
         let (mut send_stream, mut recv_stream) = conn.accept_bi().await.expect("accept bi stream");
 
-        receive_file(
+        let result = receive_file(
             &mut send_stream,
             &mut recv_stream,
             &recv_dir_clone,
             None::<fn(&_) -> bool>,
             None::<fn(u64, u64)>,
         )
-        .await
+        .await;
+        // Dropping the connection here would discard the final reply before the sender reads it.
+        (result, conn)
     });
 
     // Client sender task
@@ -68,7 +68,8 @@ async fn file_transfer_e2e_success() {
 
     assert_eq!(bytes_sent, 150 * 1024);
 
-    let recv_result = recv_handle.await.unwrap().expect("receive_file should succeed");
+    let (recv_result, _conn) = recv_handle.await.unwrap();
+    let recv_result = recv_result.expect("receive_file should succeed");
     assert_eq!(recv_result.bytes_received, 150 * 1024);
     assert_eq!(recv_result.file_name, "sample_document.pdf");
 
@@ -111,14 +112,16 @@ async fn file_transfer_rejected_by_permission_checker() {
         let (mut send_stream, mut recv_stream) = conn.accept_bi().await.expect("accept bi stream");
 
         // Permission checker rejects all transfers
-        receive_file(
+        let result = receive_file(
             &mut send_stream,
             &mut recv_stream,
             &recv_dir_clone,
             Some(|_req: &protocol::v1::FileTransferRequest| false),
             None::<fn(u64, u64)>,
         )
-        .await
+        .await;
+        // Dropping the connection here would discard the final reply before the sender reads it.
+        (result, conn)
     });
 
     let client_conn = client_endpoint.connect(bound_addr, "continue-device").unwrap().await.unwrap();
@@ -134,7 +137,7 @@ async fn file_transfer_rejected_by_permission_checker() {
     .await;
 
     assert!(matches!(send_result, Err(transfer::TransferError::Rejected(_))));
-    assert!(recv_handle.await.unwrap().is_err());
+    assert!(recv_handle.await.unwrap().0.is_err());
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }

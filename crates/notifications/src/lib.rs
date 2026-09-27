@@ -3,7 +3,6 @@
 
 pub mod dispatcher;
 pub mod error;
-pub mod wire;
 
 pub use dispatcher::NotificationDispatcher;
 pub use error::NotificationError;

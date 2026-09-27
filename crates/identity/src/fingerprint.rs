@@ -7,7 +7,7 @@
 //! It is 43 characters long and URL-safe.
 //!
 //! The fingerprint is used in the trust store and logs. Full fingerprints
-//! are never logged by default â€” use `Fingerprint::diagnostic()` for log output.
+//! are never logged by default — use `Fingerprint::diagnostic()` for log output.
 
 use std::fmt;
 
@@ -56,7 +56,7 @@ impl Fingerprint {
         &self.0
     }
 
-    /// A redacted form for log output: first 8 characters followed by `â€¦`.
+    /// A redacted form for log output: first 8 characters followed by `…`.
     ///
     /// Use this in all log fields that carry a peer reference. Full fingerprints
     /// are only shown in explicit trust-management UI.
@@ -68,7 +68,7 @@ impl Fingerprint {
 impl fmt::Display for Fingerprint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Display uses the diagnostic form to prevent accidental full-fingerprint logging.
-        write!(f, "{}â€¦", self.diagnostic())
+        write!(f, "{}…", self.diagnostic())
     }
 }
 
@@ -97,8 +97,8 @@ mod tests {
         let key_bytes = [0u8; 32];
         let fp = Fingerprint::from_pubkey_bytes(&key_bytes);
         let displayed = format!("{fp}");
-        assert!(displayed.ends_with('â€¦'));
-        assert_eq!(displayed.len(), 9); // 8 chars + ellipsis
+        assert!(displayed.ends_with('…'));
+        assert_eq!(displayed.chars().count(), 9); // 8 chars + ellipsis
     }
 
     #[test]

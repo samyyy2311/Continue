@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
+// Generated UniFFI scaffolding (uniffi 0.28) leaves blank lines after doc comments.
+#![allow(clippy::empty_line_after_doc_comments)]
+
 uniffi::include_scaffolding!("continue");
 
 use std::collections::HashMap;
@@ -207,9 +210,9 @@ pub fn start_pairing_server(
         let incoming = match endpoint_clone.accept().await {
             Some(inc) => inc,
             None => {
-                let _ = tx.send(Err(pairing::PairingError::HandshakeFailed(
+                let _ = tx.send(Err(transport::TransportError::HandshakeFailed(
                     "Listener closed".to_string(),
-                )));
+                ).into()));
                 return;
             }
         };
@@ -217,9 +220,9 @@ pub fn start_pairing_server(
         let conn = match incoming.await {
             Ok(c) => c,
             Err(e) => {
-                let _ = tx.send(Err(pairing::PairingError::HandshakeFailed(format!(
+                let _ = tx.send(Err(transport::TransportError::HandshakeFailed(format!(
                     "Connection failed: {e}"
-                ))));
+                )).into()));
                 return;
             }
         };
@@ -227,9 +230,9 @@ pub fn start_pairing_server(
         let (mut send_stream, mut recv_stream) = match conn.accept_bi().await {
             Ok(s) => s,
             Err(e) => {
-                let _ = tx.send(Err(pairing::PairingError::HandshakeFailed(format!(
+                let _ = tx.send(Err(transport::TransportError::HandshakeFailed(format!(
                     "Stream accept failed: {e}"
-                ))));
+                )).into()));
                 return;
             }
         };
@@ -541,7 +544,7 @@ pub fn disconnect(peer_fingerprint: String) -> Result<(), ContinueFfiError> {
     if let Some(mux) = maybe_mux {
         runtime.block_on(async move {
             mux.disconnect(
-                protocol::v1::DisconnectReason::DisconnectReasonNormal,
+                protocol::v1::DisconnectReason::Normal,
                 "Disconnected by user".to_string(),
             )
             .await;
@@ -602,7 +605,7 @@ pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(),
 
         mux.send_clipboard_to_peer(
             &synchronizer,
-            clipboard::ClipboardFormat::ClipboardFormatTextPlain,
+            clipboard::ClipboardFormat::TextPlain,
             text.into_bytes(),
             &query,
         )

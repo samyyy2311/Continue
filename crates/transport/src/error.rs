@@ -11,6 +11,15 @@ pub enum TransportError {
     #[error("QUIC connect error: {0}")]
     QuinnConnect(#[from] quinn::ConnectError),
 
+    #[error("QUIC stream write error: {0}")]
+    StreamWrite(#[from] quinn::WriteError),
+
+    #[error("QUIC stream read error: {0}")]
+    StreamRead(#[from] quinn::ReadError),
+
+    #[error("QUIC stream read error: {0}")]
+    StreamReadExact(#[from] quinn::ReadExactError),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -28,6 +37,9 @@ pub enum TransportError {
         expected: [u8; 32],
         actual: [u8; 32],
     },
+
+    #[error("Frame error: {0}")]
+    Frame(#[from] protocol::FrameError),
 
     #[error("Connection closed by peer")]
     ConnectionClosed,

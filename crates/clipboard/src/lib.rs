@@ -3,7 +3,6 @@
 
 pub mod error;
 pub mod sync;
-pub mod wire;
 
 pub use error::ClipboardError;
 pub use protocol::v1::{ClipboardAck, ClipboardFormat, ClipboardUpdate};

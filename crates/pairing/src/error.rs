@@ -27,7 +27,7 @@ pub enum PairingError {
     MacMismatch,
 
     #[error("Cryptographic operation error: {0}")]
-    Crypto(#[from] crypto::error::CryptoError),
+    Crypto(#[from] crypto::CryptoError),
 
     #[error("Identity signer error: {0}")]
     Signer(#[from] identity::SignerError),

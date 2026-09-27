@@ -5,7 +5,6 @@ use std::collections::HashMap;
 
 use limits::MAX_CAPABILITY_ENTRIES;
 use protocol::v1::CapabilityEntry;
-use protocol::CapabilityId;
 
 use crate::error::CapabilityError;
 
@@ -49,6 +48,7 @@ pub fn negotiate_capabilities(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use protocol::CapabilityId;
 
     #[test]
     fn negotiation_intersection_and_unknown_handling() {

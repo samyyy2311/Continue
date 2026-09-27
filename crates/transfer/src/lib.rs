@@ -7,7 +7,7 @@ pub mod error;
 pub mod receiver;
 pub mod sanitizer;
 pub mod sender;
-mod wire;
+mod hex;
 
 pub use error::TransferError;
 pub use receiver::{receive_file, ReceivedFile};

@@ -7,7 +7,7 @@ pub mod frame;
 pub mod version;
 
 pub mod v1 {
-    include!(concat!(env!("OUT_DIR"), "/continue.v1.rs"));
+    include!(concat!(env!("OUT_DIR"), "/r#continue.v1.rs"));
 }
 
 pub use capability::CapabilityId;

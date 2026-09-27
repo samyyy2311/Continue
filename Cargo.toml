@@ -18,6 +18,8 @@ members = [
     "tools/keygen",
 ]
 resolver = "2"
+# The Tauri app builds on its own; it needs system WebKit libraries the core crates do not.
+exclude = ["apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -73,16 +75,6 @@ anyhow = "1"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Platform-specific
-[target.'cfg(target_os = "windows")'.workspace.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Security_Cryptography"] }
-
-[target.'cfg(any(target_os = "macos", target_os = "ios"))'.workspace.dependencies]
-security-framework = "2"
-
-[target.'cfg(target_os = "linux")'.workspace.dependencies]
-zbus = "4"
 
 [profile.release]
 opt-level = 3

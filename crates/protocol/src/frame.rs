@@ -128,7 +128,7 @@ mod tests {
     use super::*;
     use prost::Message;
 
-    #[derive(Clone, PartialEq, Message, Default)]
+    #[derive(Clone, PartialEq, Message)]
     struct DummyMessage {
         #[prost(uint64, tag = "1")]
         seq: u64,

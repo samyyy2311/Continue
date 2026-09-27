@@ -4,7 +4,6 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bytes::BytesMut;
 use ed25519_dalek::{Signature, VerifyingKey};
 use x25519_dalek::PublicKey as X25519PublicKey;
 
@@ -19,42 +18,12 @@ use crypto::token::SessionToken;
 use identity::{Fingerprint, IdentitySigner};
 use limits::{MAX_FRAME_PAIRING_BYTES, MAX_PAIRING_SESSION_SECS};
 use protocol::v1::{KeyExchangeResponse, PairConfirm};
-use transport::TransportCertificate;
+use transport::{read_msg, write_msg, TransportCertificate};
 
 use crate::error::PairingError;
 use crate::qr::{QrPayload, QR_FORMAT_VERSION, QR_ROLE_INITIATOR};
 use crate::replay::ReplayCache;
 use crate::trust_store::{TrustStore, TrustedPeer};
-
-async fn write_msg<M: prost::Message>(
-    stream: &mut quinn::SendStream,
-    msg: &M,
-) -> Result<(), PairingError> {
-    let frame = protocol::encode_frame(msg, MAX_FRAME_PAIRING_BYTES)?;
-    stream
-        .write_all(&frame)
-        .await
-        .map_err(transport::TransportError::from)?;
-    Ok(())
-}
-
-async fn read_msg<M: prost::Message + Default>(
-    stream: &mut quinn::RecvStream,
-) -> Result<M, PairingError> {
-    let mut buf = BytesMut::with_capacity(1024);
-    let mut chunk = [0u8; 1024];
-    loop {
-        if let Some(msg) = protocol::decode_frame_from_buf::<M>(&mut buf, MAX_FRAME_PAIRING_BYTES)? {
-            return Ok(msg);
-        }
-        match stream.read(&mut chunk).await.map_err(transport::TransportError::from)? {
-            Some(n) if n > 0 => {
-                buf.extend_from_slice(&chunk[..n]);
-            }
-            _ => return Err(transport::TransportError::ConnectionClosed.into()),
-        }
-    }
-}
 
 fn current_unix_timestamp() -> u64 {
     SystemTime::now()
@@ -151,7 +120,7 @@ impl InitiatorPairing {
             .ok_or_else(|| PairingError::InvalidQr("QR payload missing".to_string()))?;
 
         // 1. Receive KeyExchangeResponse from responder
-        let resp: KeyExchangeResponse = read_msg(recv_stream).await?;
+        let resp: KeyExchangeResponse = read_msg(recv_stream, MAX_FRAME_PAIRING_BYTES).await?;
 
         // 2. Validate token and consume atomically from replay cache
         if resp.session_token != expected_token {
@@ -221,11 +190,12 @@ impl InitiatorPairing {
             &PairConfirm {
                 mac: confirm_init_mac.to_vec(),
             },
+            MAX_FRAME_PAIRING_BYTES,
         )
         .await?;
 
         // 8. Receive PairConfirm from responder
-        let confirm_resp_msg: PairConfirm = read_msg(recv_stream).await?;
+        let confirm_resp_msg: PairConfirm = read_msg(recv_stream, MAX_FRAME_PAIRING_BYTES).await?;
         let confirm_resp_mac: [u8; 32] = confirm_resp_msg
             .mac
             .as_slice()
@@ -307,7 +277,7 @@ impl ResponderPairing {
             session_token: qr.session_token.to_vec(),
             signature: sig.to_bytes().to_vec(),
         };
-        write_msg(send_stream, &resp_msg).await?;
+        write_msg(send_stream, &resp_msg, MAX_FRAME_PAIRING_BYTES).await?;
 
         // 5. Diffie-Hellman & Confirmation Key derivation
         let remote_eph_pub = X25519PublicKey::from(qr.x25519_ephemeral);
@@ -326,7 +296,7 @@ impl ResponderPairing {
         let full_transcript = build_full_transcript(&init_transcript, &resp_transcript);
 
         // 7. Receive PairConfirm from initiator
-        let confirm_init_msg: PairConfirm = read_msg(recv_stream).await?;
+        let confirm_init_msg: PairConfirm = read_msg(recv_stream, MAX_FRAME_PAIRING_BYTES).await?;
         let confirm_init_mac: [u8; 32] = confirm_init_msg
             .mac
             .as_slice()
@@ -343,6 +313,7 @@ impl ResponderPairing {
             &PairConfirm {
                 mac: confirm_resp_mac.to_vec(),
             },
+            MAX_FRAME_PAIRING_BYTES,
         )
         .await?;
 

@@ -58,7 +58,7 @@ impl ReconnectPolicy {
 
         self.current_attempt += 1;
 
-        // Apply Â±25% random jitter
+        // Apply ±25% random jitter
         let mut rng = rand::thread_rng();
         let jitter_range = (base_delay_ms as f64) * self.jitter_factor;
         let jitter = rng.gen_range(-jitter_range..=jitter_range);

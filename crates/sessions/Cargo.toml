@@ -17,12 +17,11 @@ transfer = { path = "../transfer" }
 clipboard = { path = "../clipboard" }
 notifications = { path = "../notifications" }
 quinn = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time", "rt", "net"] }
+tokio = { workspace = true, features = ["sync", "time", "rt", "net", "macros"] }
 rand = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 prost = { workspace = true }
-bytes = { workspace = true }
 
 [dev-dependencies]
 crypto = { path = "../crypto" }

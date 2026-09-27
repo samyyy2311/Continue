@@ -8,6 +8,8 @@ publish = false
 [dependencies]
 limits = { path = "../limits" }
 protocol = { path = "../protocol" }
+bytes = { workspace = true }
+prost = { workspace = true }
 quinn = { workspace = true }
 rustls = { workspace = true }
 rcgen = { workspace = true }

@@ -10,6 +10,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 name = "continue_ffi"
 
 [dependencies]
+crypto = { path = "../crypto" }
 identity = { path = "../identity" }
 discovery = { path = "../discovery" }
 pairing = { path = "../pairing" }

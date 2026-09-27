@@ -44,11 +44,11 @@ impl TransportCertificate {
         expected_server_spki_hash: [u8; 32],
     ) -> Result<rustls::ClientConfig, TransportError> {
         let verifier = Arc::new(PinnedServerCertVerifier::new(expected_server_spki_hash));
-        let config = rustls::ClientConfig::builder()
+        let config = rustls::ClientConfig::builder_with_provider(ring_provider())
+            .with_protocol_versions(&[&rustls::version::TLS13])?
             .dangerous()
             .with_custom_certificate_verifier(verifier)
-            .with_client_auth_cert(vec![self.cert_der.clone()], self.key_der.clone_key())
-            .map_err(TransportError::Tls)?;
+            .with_client_auth_cert(vec![self.cert_der.clone()], self.key_der.clone_key())?;
         Ok(config)
     }
 
@@ -57,10 +57,10 @@ impl TransportCertificate {
         recorded_spki_hash: Arc<Mutex<Option<[u8; 32]>>>,
     ) -> Result<rustls::ServerConfig, TransportError> {
         let verifier = Arc::new(PairingClientCertVerifier::new(recorded_spki_hash));
-        let config = rustls::ServerConfig::builder()
+        let config = rustls::ServerConfig::builder_with_provider(ring_provider())
+            .with_protocol_versions(&[&rustls::version::TLS13])?
             .with_client_cert_verifier(verifier)
-            .with_single_cert(vec![self.cert_der.clone()], self.key_der.clone_key())
-            .map_err(TransportError::Tls)?;
+            .with_single_cert(vec![self.cert_der.clone()], self.key_der.clone_key())?;
         Ok(config)
     }
 
@@ -69,12 +69,18 @@ impl TransportCertificate {
         expected_client_spki_hash: [u8; 32],
     ) -> Result<rustls::ServerConfig, TransportError> {
         let verifier = Arc::new(PinnedClientCertVerifier::new(expected_client_spki_hash));
-        let config = rustls::ServerConfig::builder()
+        let config = rustls::ServerConfig::builder_with_provider(ring_provider())
+            .with_protocol_versions(&[&rustls::version::TLS13])?
             .with_client_cert_verifier(verifier)
-            .with_single_cert(vec![self.cert_der.clone()], self.key_der.clone_key())
-            .map_err(TransportError::Tls)?;
+            .with_single_cert(vec![self.cert_der.clone()], self.key_der.clone_key())?;
         Ok(config)
     }
+}
+
+/// Pins the provider explicitly: rustls cannot choose a process default when more than
+/// one backend is compiled in, and QUIC only runs over TLS 1.3.
+fn ring_provider() -> Arc<rustls::crypto::CryptoProvider> {
+    Arc::new(rustls::crypto::ring::default_provider())
 }
 
 #[cfg(test)]

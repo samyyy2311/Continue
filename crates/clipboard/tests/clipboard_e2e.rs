@@ -22,11 +22,10 @@ fn authorized_clipboard_query() -> CapabilityQuery {
     }
 }
 
-#[tokio::test]
-async fn clipboard_e2e_sync_and_echo_suppression() {
+/// Both ends of a loopback QUIC connection whose peers pin each other's certificates.
+async fn loopback_connections() -> (quinn::Connection, quinn::Connection) {
     let server_cert = TransportCertificate::generate().unwrap();
     let client_cert = TransportCertificate::generate().unwrap();
-
     let server_tls = server_cert
         .build_pinned_server_tls(client_cert.spki_hash)
         .unwrap();
@@ -34,21 +33,30 @@ async fn clipboard_e2e_sync_and_echo_suppression() {
         .build_pinned_client_tls(server_cert.spki_hash)
         .unwrap();
 
-    let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let server_endpoint = create_server_endpoint(server_addr, server_tls).unwrap();
-    let bound_addr = server_endpoint.local_addr().unwrap();
+    let loopback: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let server_endpoint = create_server_endpoint(loopback, server_tls).unwrap();
+    let client_endpoint = create_client_endpoint(loopback, client_tls).unwrap();
 
-    let client_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let client_endpoint = create_client_endpoint(client_addr, client_tls).unwrap();
+    let connecting = client_endpoint
+        .connect(server_endpoint.local_addr().unwrap(), "continue-device")
+        .unwrap();
+    let accepting = async { server_endpoint.accept().await.expect("incoming conn").await };
+    let (client, server) = tokio::join!(connecting, accepting);
+    (client.unwrap(), server.unwrap())
+}
+
+#[tokio::test]
+async fn clipboard_e2e_sync_and_echo_suppression() {
+    let (client_conn, server_conn) = loopback_connections().await;
 
     let receiver_sync = Arc::new(ClipboardSynchronizer::new());
     let recv_sync_clone = receiver_sync.clone();
 
-    // Receiver loop
+    // Receiver loop. It gets a clone so `server_conn` keeps the connection open
+    // until the sender has read the reply.
+    let receiver_conn = server_conn.clone();
     let recv_handle = tokio::spawn(async move {
-        let incoming = server_endpoint.accept().await.expect("incoming conn");
-        let conn = incoming.await.expect("conn");
-        let (mut send, mut recv) = conn.accept_bi().await.expect("bi stream");
+        let (mut send, mut recv) = receiver_conn.accept_bi().await.expect("bi stream");
 
         let query = authorized_clipboard_query();
         let received = recv_sync_clone
@@ -63,11 +71,6 @@ async fn clipboard_e2e_sync_and_echo_suppression() {
     });
 
     // Sender
-    let client_conn = client_endpoint
-        .connect(bound_addr, "continue-device")
-        .unwrap()
-        .await
-        .unwrap();
     let (mut client_send, mut client_recv) = client_conn.open_bi().await.unwrap();
 
     let sender_sync = ClipboardSynchronizer::new();
@@ -76,7 +79,7 @@ async fn clipboard_e2e_sync_and_echo_suppression() {
         .send_update(
             &mut client_send,
             &mut client_recv,
-            ClipboardFormat::ClipboardFormatTextPlain,
+            ClipboardFormat::TextPlain,
             b"Hello from Continue clipboard sync!".to_vec(),
             &query,
         )
@@ -100,16 +103,14 @@ async fn clipboard_rejects_unauthorized_capability() {
         negotiated_session_capabilities: HashSet::new(),
     };
 
-    let cert = TransportCertificate::generate().unwrap();
-    let tls = cert.build_pinned_client_tls(cert.spki_hash).unwrap();
-    let endpoint = create_client_endpoint("127.0.0.1:0".parse().unwrap(), tls).unwrap();
-    let conn = endpoint.connect("127.0.0.1:1".parse().unwrap(), "continue-device");
+    let (client_conn, _server_conn) = loopback_connections().await;
+    let (mut send, mut recv) = client_conn.open_bi().await.unwrap();
 
-    // Check evaluate_capability fails without attempting network I/O
+    // Rejected before anything is written to the stream.
     let res = sync.send_update(
-        &mut unsafe { std::mem::zeroed() },
-        &mut unsafe { std::mem::zeroed() },
-        ClipboardFormat::ClipboardFormatTextPlain,
+        &mut send,
+        &mut recv,
+        ClipboardFormat::TextPlain,
         b"test".to_vec(),
         &unauthorized_query,
     ).await;

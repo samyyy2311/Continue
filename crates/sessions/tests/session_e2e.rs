@@ -116,5 +116,5 @@ async fn session_control_ping_pong_roundtrip() {
     }
 
     let server_mux = server_handle.await.unwrap();
-    server_mux.disconnect(DisconnectReason::DisconnectReasonNormal, "test complete".to_string()).await;
+    server_mux.disconnect(DisconnectReason::Normal, "test complete".to_string()).await;
 }

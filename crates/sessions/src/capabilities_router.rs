@@ -193,7 +193,7 @@ impl SessionMultiplexer {
         let (mut send, mut recv) = self
             .open_stream(CapabilityId::CLIPBOARD)
             .await
-            .map_err(|e| clipboard::ClipboardError::Transport(e.to_string()))?;
+            .map_err(clipboard::ClipboardError::Transport)?;
 
         synchronizer
             .send_update(&mut send, &mut recv, format, payload, query)
@@ -209,7 +209,7 @@ impl SessionMultiplexer {
         let (mut send, mut recv) = self
             .open_stream(CapabilityId::NOTIFICATIONS)
             .await
-            .map_err(|e| notifications::NotificationError::Transport(e.to_string()))?;
+            .map_err(notifications::NotificationError::Transport)?;
 
         dispatcher
             .send_post(&mut send, &mut recv, post, query)

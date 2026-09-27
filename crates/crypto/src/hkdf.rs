@@ -9,6 +9,8 @@ use zeroize::Zeroizing;
 
 use crate::error::CryptoError;
 
+type Key32 = Zeroizing<[u8; 32]>;
+
 /// Labels used as HKDF `info` inputs. Labels are domain-separated and version-tagged.
 /// Using a distinct constant for each key purpose prevents key confusion.
 pub const INFO_CONFIRMATION_KEY: &[u8] = b"CONFIRM_KEY_V1";
@@ -40,7 +42,7 @@ pub fn derive_key(
 pub fn derive_pairing_keys(
     dh_output: &Zeroizing<[u8; 32]>,
     session_token: &[u8],
-) -> Result<(Zeroizing<[u8; 32]>, Zeroizing<[u8; 32]>), CryptoError> {
+) -> Result<(Key32, Key32), CryptoError> {
     let confirmation_key = derive_key(dh_output.as_ref(), session_token, INFO_CONFIRMATION_KEY)?;
     let session_key = derive_key(dh_output.as_ref(), session_token, INFO_SESSION_KEY)?;
     Ok((confirmation_key, session_key))

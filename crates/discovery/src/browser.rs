@@ -45,7 +45,7 @@ impl DiscoveryBrowser {
 
                 let ephemeral_id = info
                     .get_property_val_str("id")
-                    .unwrap_or_else(|| info.get_name())
+                    .unwrap_or_else(|| info.get_fullname())
                     .to_string();
 
                 let protocol_version = info
