@@ -28,6 +28,7 @@ node_modules/
 dist/
 build/
 .tauri/
+apps/desktop/src-tauri/gen/
 .gradle/
 local.properties
 *.apk

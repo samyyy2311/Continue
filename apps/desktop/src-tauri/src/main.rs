@@ -54,8 +54,8 @@ pub struct DesktopRuntimeState {
     device_name: String,
     identity_signer: Arc<dyn IdentitySigner>,
     transport_cert: Arc<TransportCertificate>,
-    trust_store: Arc<Mutex<TrustStore>>,
-    permission_store: Arc<Mutex<PermissionStore>>,
+    trust_store: TrustStore,
+    permission_store: PermissionStore,
     replay_cache: Arc<ReplayCache>,
     active_pairing: Arc<Mutex<Option<Arc<ActivePairingServer>>>>,
     active_sessions: Arc<Mutex<HashMap<String, Arc<SessionMultiplexer>>>>,
@@ -79,10 +79,10 @@ fn get_device_identity(state: State<DesktopRuntimeState>) -> Result<DeviceIdenti
 
 #[tauri::command]
 fn get_trusted_peers(state: State<DesktopRuntimeState>) -> Result<Vec<TrustedPeerDto>, String> {
-    let peers = {
-        let store = state.trust_store.lock();
-        store.list_peers().map_err(|e| format!("Database error: {e}"))?
-    };
+    let peers = state
+        .trust_store
+        .list_peers()
+        .map_err(|e| format!("Database error: {e}"))?;
 
     let sessions = state.active_sessions.lock();
     let dtos = peers
@@ -111,8 +111,10 @@ fn remove_trusted_peer(state: State<DesktopRuntimeState>, fingerprint: String) -
         }
     }
 
-    let mut store = state.trust_store.lock();
-    store.remove_peer(&fingerprint).map_err(|e| format!("Database error: {e}"))
+    state
+        .trust_store
+        .remove_peer(&fingerprint)
+        .map_err(|e| format!("Database error: {e}"))
 }
 
 /// Finds the address other devices on the LAN can reach us at. Connecting a UDP
@@ -303,7 +305,7 @@ fn get_permissions(
     state: State<DesktopRuntimeState>,
     peer_fingerprint: String,
 ) -> Result<Vec<PeerPermissionDto>, String> {
-    let store = state.permission_store.lock();
+    let store = &state.permission_store;
     let capabilities = [
         (CapabilityId::FILE_TRANSFER, "File Transfer"),
         (CapabilityId::CLIPBOARD, "Clipboard Sync"),
@@ -345,15 +347,16 @@ fn set_permission(
         "Deny" => permissions::PersistedGrant::Deny,
         "Ask" => permissions::PersistedGrant::Ask,
         "AllowOnce" => {
-            let mut store = state.permission_store.lock();
-            store.grant_allow_once(&peer_fingerprint, CapabilityId(capability_id));
+            state
+                .permission_store
+                .grant_allow_once(&peer_fingerprint, CapabilityId(capability_id));
             return Ok(());
         }
         _ => return Err(format!("Unsupported grant type: {grant}")),
     };
 
-    let mut store = state.permission_store.lock();
-    store
+    state
+        .permission_store
         .set_persisted_grant(
             &peer_fingerprint,
             CapabilityId(capability_id),
@@ -371,13 +374,11 @@ async fn connect_to_peer(
     peer_fingerprint: String,
     endpoint: String,
 ) -> Result<(), String> {
-    let peer = {
-        let store = state.trust_store.lock();
-        store
-            .get_peer(&peer_fingerprint)
-            .map_err(|e| format!("Database error: {e}"))?
-            .ok_or_else(|| "Peer not found in trust store".to_string())?
-    };
+    let peer = state
+        .trust_store
+        .get_peer(&peer_fingerprint)
+        .map_err(|e| format!("Database error: {e}"))?
+        .ok_or_else(|| "Peer not found in trust store".to_string())?;
 
     let addr: std::net::SocketAddr = endpoint
         .parse()
@@ -479,7 +480,7 @@ async fn send_clipboard_text(
 
     mux.send_clipboard_to_peer(
         &synchronizer,
-        clipboard::ClipboardFormat::ClipboardFormatTextPlain,
+        clipboard::ClipboardFormat::TextPlain,
         text.into_bytes(),
         &query,
     )
@@ -539,8 +540,8 @@ async fn send_notification(
 }
 
 fn initialize_desktop_runtime(db_path: &str) -> Result<DesktopRuntimeState, Box<dyn std::error::Error>> {
-    let trust_store = Arc::new(Mutex::new(TrustStore::open(db_path)?));
-    let permission_store = Arc::new(Mutex::new(PermissionStore::open(db_path)?));
+    let trust_store = TrustStore::open(db_path)?;
+    let permission_store = PermissionStore::open(db_path)?;
     let transport_cert = Arc::new(TransportCertificate::generate()?);
 
     let seed = crypto::keys::generate_ed25519_seed();
