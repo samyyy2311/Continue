@@ -132,36 +132,47 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
   }
 
   return (
-    <div className="dialog-body">
-      <p className="muted">
-        On your other device, open Continue, choose <strong>Pair a device</strong> and scan this code. Both
-        devices need to be on the same network.
-      </p>
+    <div className="pair-show">
+      <div className="pair-steps">
+        <ol className="steps">
+          <li>Open Continue on your phone</li>
+          <li>
+            <span>
+              Tap <strong>Pair a device</strong>
+            </span>
+          </li>
+          <li>Point the camera at this code</li>
+        </ol>
+        <p className="muted small">Both devices need to be on the same Wi-Fi network.</p>
+        <p className="waiting-label" role="status">
+          {state.status === "waiting" && (
+            <>
+              <span className="pulse-dot" aria-hidden="true" />
+              Waiting for your device
+            </>
+          )}
+        </p>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={state.status !== "waiting"}
+          onClick={() => state.status === "waiting" && copyCode(state.code)}
+        >
+          {copied ? <Check size={14} /> : <Copy size={14} />}
+          {copied ? "Copied" : "Copy code instead"}
+        </button>
+      </div>
       <div className="qr-frame" aria-busy={state.status === "starting"}>
         {state.status === "waiting" ? (
           <div
             className="qr"
             role="img"
             aria-label="Pairing QR code"
-            dangerouslySetInnerHTML={{ __html: renderSVG(state.code, { border: 4 }) }}
+            dangerouslySetInnerHTML={{ __html: renderSVG(state.code, { border: 2 }) }}
           />
         ) : (
-          <span className="muted">Preparing code…</span>
+          <span className="muted small">Preparing code…</span>
         )}
-      </div>
-      <div className="dialog-footer">
-        <span className="waiting-label" role="status">
-          {state.status === "waiting" ? "Waiting for your device…" : ""}
-        </span>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          disabled={state.status !== "waiting"}
-          onClick={() => state.status === "waiting" && copyCode(state.code)}
-        >
-          {copied ? <Check size={14} /> : <Copy size={14} />}
-          {copied ? "Copied" : "Copy code"}
-        </button>
       </div>
     </div>
   );
