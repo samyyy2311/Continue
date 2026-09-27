@@ -9,14 +9,12 @@ import {
   CircleAlert,
   Copy,
   History,
-  Laptop,
   Loader,
   Plus,
   Search,
   Send,
   Settings,
   SlidersHorizontal,
-  Smartphone,
   Type,
   Upload,
 } from "lucide-react";
@@ -161,7 +159,7 @@ function Segmented<T extends string>(props: {
 function ActivityIcon({ item }: { item: Activity }) {
   if (item.kind === "text") {
     return (
-      <span className="tile tile-text" aria-hidden="true">
+      <span className="badge badge-text" aria-hidden="true">
         <Type size={16} />
       </span>
     );
@@ -169,7 +167,7 @@ function ActivityIcon({ item }: { item: Activity }) {
   const ext = item.label.includes(".") ? (item.label.split(".").pop() ?? "").toLowerCase() : "";
   const tone = FILE_KINDS.find((k) => k.extensions.includes(ext))?.tone ?? "other";
   return (
-    <span className={`tile tile-${tone}`} aria-hidden="true">
+    <span className={`badge badge-${tone}`} aria-hidden="true">
       {ext.slice(0, 4) || "file"}
     </span>
   );
@@ -197,6 +195,17 @@ function ActivityRow({ item, onCopy }: { item: Activity; onCopy: (text: string) 
         </button>
       )}
     </li>
+  );
+}
+
+/** A drawn phone rather than a photo, so it suits any make and follows the accent colour. */
+function PhoneArt({ online }: { online: boolean }) {
+  return (
+    <div className={`phone-art ${online ? "online" : ""}`} aria-hidden="true">
+      <div className="phone-art-screen">
+        <img src="/icon.svg" alt="" />
+      </div>
+    </div>
   );
 }
 
@@ -414,15 +423,7 @@ export default function App() {
 
   const renderWelcome = (title: string, text: string, action?: React.ReactNode) => (
     <div className="welcome">
-      <div className="welcome-art" aria-hidden="true">
-        <span className="welcome-device">
-          <Laptop size={30} strokeWidth={1.5} />
-        </span>
-        <span className="welcome-link" />
-        <span className="welcome-device">
-          <Smartphone size={28} strokeWidth={1.5} />
-        </span>
-      </div>
+      <PhoneArt online />
       <h1>{title}</h1>
       <p className="lead">{text}</p>
       {action}
@@ -441,103 +442,125 @@ export default function App() {
     }
 
     const peer = selectedPeer;
-    const recent = activity.slice(0, 4);
+    const online = peer.isConnected;
+    const busy = connecting === peer.fingerprint;
+    const recent = activity.slice(0, 3);
+    const openDevice = () => setView({ name: "device", fingerprint: peer.fingerprint });
+
     return (
       <div className="page">
-        <header className="device-head">
-          <span className={`device-badge ${peer.isConnected ? "online" : ""}`} aria-hidden="true">
-            <Smartphone size={22} strokeWidth={1.75} />
-          </span>
-          <div className="device-head-text">
+        <section className={`hero ${online ? "online" : ""}`}>
+          <PhoneArt online={online} />
+          <div className="hero-body">
+            <span className={`status-pill ${online ? "online" : ""}`}>{online ? "Connected" : "Offline"}</span>
             <h1>{peer.displayName}</h1>
-            <p className={`status ${peer.isConnected ? "online" : ""}`}>
-              {peer.isConnected ? "Connected" : "Not connected"}
-            </p>
+            {online ? (
+              <>
+                <p className="hero-sub">Ready. Drop files anywhere in this window or send some text.</p>
+                <div className="hero-actions">
+                  <button type="button" className="btn btn-soft" onClick={() => disconnect(peer)}>
+                    Disconnect
+                  </button>
+                  <button type="button" className="btn btn-soft" onClick={openDevice}>
+                    <SlidersHorizontal size={16} />
+                    Device settings
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="hero-sub">Enter the address shown in Continue on your phone.</p>
+                <form className="hero-actions" onSubmit={connect}>
+                  <input
+                    className="input address"
+                    value={endpoint}
+                    onChange={(e) => setEndpointDrafts((prev) => ({ ...prev, [peer.fingerprint]: e.target.value }))}
+                    placeholder="192.168.1.20:4433"
+                    aria-label="Phone address"
+                    spellCheck={false}
+                  />
+                  <button type="submit" className="btn btn-primary" disabled={busy || !endpoint.trim()}>
+                    {busy && <Loader size={16} className="spin" />}
+                    {busy ? "Connecting" : "Connect"}
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={openDevice}
+                    aria-label="Device settings"
+                    title="Device settings"
+                  >
+                    <SlidersHorizontal size={17} />
+                  </button>
+                </form>
+              </>
+            )}
           </div>
-          {peer.isConnected && (
-            <button type="button" className="btn btn-quiet" onClick={() => disconnect(peer)}>
-              Disconnect
-            </button>
-          )}
+        </section>
+
+        <div className="bento">
           <button
             type="button"
-            className="icon-btn"
-            onClick={() => setView({ name: "device", fingerprint: peer.fingerprint })}
-            aria-label={`${peer.displayName} settings`}
-            title="Device settings"
+            className={`tile tile-drop ${dragActive ? "active" : ""}`}
+            disabled={!online}
+            onClick={chooseFiles}
           >
-            <SlidersHorizontal size={17} />
+            <span className="tile-icon large">
+              <Upload size={22} />
+            </span>
+            <span className="tile-title">Send files</span>
+            <span className="tile-text">{online ? "Drop them here or click to browse" : "Connect first to send files"}</span>
           </button>
-        </header>
 
-        {peer.isConnected ? (
-          <>
-            <button type="button" className={`drop ${dragActive ? "active" : ""}`} onClick={chooseFiles}>
-              <span className="drop-icon">
-                <Upload size={20} />
+          <form className="tile tile-note" onSubmit={sendNote}>
+            <div className="tile-head">
+              <span className="tile-icon">
+                <Type size={18} />
               </span>
-              <span className="drop-title">Drop files to send</span>
-              <span className="drop-sub">or click to choose them</span>
-            </button>
-
-            <form className="compose" onSubmit={sendNote}>
+              <div>
+                <p className="tile-title">Send text</p>
+                <p className="tile-text">Lands on your phone's clipboard</p>
+              </div>
+            </div>
+            <div className="compose">
               <input
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="Send text to your phone's clipboard"
+                placeholder={online ? "Type or paste something" : "Connect first to send text"}
                 aria-label="Text to send"
+                disabled={!online}
               />
-              <button type="submit" className="compose-send" disabled={!note.trim()} aria-label="Send">
+              <button type="submit" className="compose-send" disabled={!online || !note.trim()} aria-label="Send">
                 <ArrowUp size={17} />
-              </button>
-            </form>
-          </>
-        ) : (
-          <form className="connect" onSubmit={connect}>
-            <div>
-              <p className="row-title">Connect to start sending</p>
-              <p className="row-sub">Open Continue on your phone and enter the address it shows.</p>
-            </div>
-            <div className="connect-fields">
-              <input
-                className="input"
-                value={endpoint}
-                onChange={(e) => setEndpointDrafts((prev) => ({ ...prev, [peer.fingerprint]: e.target.value }))}
-                placeholder="192.168.1.20:4433"
-                aria-label="Phone address"
-                spellCheck={false}
-              />
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={connecting === peer.fingerprint || !endpoint.trim()}
-              >
-                {connecting === peer.fingerprint && <Loader size={15} className="spin" />}
-                {connecting === peer.fingerprint ? "Connecting" : "Connect"}
               </button>
             </div>
           </form>
-        )}
 
-        <section className="section">
-          <div className="section-head">
-            <h2>Recent</h2>
-            {activity.length > recent.length && (
-              <button type="button" className="link" onClick={() => setView({ name: "history" })}>
-                See all
-              </button>
+          <section className="tile tile-recent" aria-labelledby="recent-title">
+            <div className="tile-head">
+              <span className="tile-icon">
+                <History size={18} />
+              </span>
+              <p id="recent-title" className="tile-title">
+                Recent
+              </p>
+              {activity.length > 0 && (
+                <button type="button" className="link" onClick={() => setView({ name: "history" })}>
+                  See all
+                </button>
+              )}
+            </div>
+            {recent.length === 0 ? (
+              <p className="tile-text">Nothing sent yet.</p>
+            ) : (
+              <ul className="list">
+                {recent.map((item) => (
+                  <ActivityRow key={item.id} item={item} onCopy={copyText} />
+                ))}
+              </ul>
             )}
-          </div>
-          {recent.length === 0 ? (
-            <p className="muted">Files and text you send will show up here.</p>
-          ) : (
-            <ul className="list">
-              {recent.map((item) => (
-                <ActivityRow key={item.id} item={item} onCopy={copyText} />
-              ))}
-            </ul>
-          )}
-        </section>
+          </section>
+        </div>
       </div>
     );
   };
