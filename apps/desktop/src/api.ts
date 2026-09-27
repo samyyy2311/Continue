@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { DeviceIdentity, Grant, PeerPermission, TrustedPeer } from "./types.ts";
 
@@ -32,9 +32,21 @@ export const getPermissions = (peerFingerprint: string) =>
 export const setPermission = (peerFingerprint: string, capabilityId: number, grant: Grant) =>
   invoke<void>("set_permission", { peerFingerprint, capabilityId, grant });
 
+export interface TransferProgress {
+  bytesSent: number;
+  totalBytes: number;
+}
+
 /** Resolves with the number of bytes sent once the peer has the whole file. */
-export const sendFileToPeer = (peerFingerprint: string, filePath: string) =>
-  invoke<number>("send_file_to_peer", { peerFingerprint, filePath });
+export function sendFileToPeer(
+  peerFingerprint: string,
+  filePath: string,
+  onProgress: (progress: TransferProgress) => void,
+) {
+  const channel = new Channel<TransferProgress>();
+  channel.onmessage = onProgress;
+  return invoke<number>("send_file_to_peer", { peerFingerprint, filePath, onProgress: channel });
+}
 
 export const sendClipboardText = (peerFingerprint: string, text: string) =>
   invoke<void>("send_clipboard_text", { peerFingerprint, text });

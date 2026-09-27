@@ -6,10 +6,12 @@ import {
   ArrowLeft,
   ArrowUp,
   Check,
+  CheckCheck,
   CircleAlert,
   Copy,
   History,
   Loader,
+  Paperclip,
   Plus,
   Search,
   Send,
@@ -59,10 +61,14 @@ interface Activity {
   id: string;
   kind: "file" | "text";
   label: string;
+  peerId: string;
   peerName: string;
   status: "sending" | "sent" | "failed";
   timestamp: number;
+  /** Kept so a failed file can be sent again. */
+  path?: string;
   bytesSent?: number;
+  totalBytes?: number;
   error?: string;
 }
 
@@ -198,13 +204,102 @@ function ActivityRow({ item, onCopy }: { item: Activity; onCopy: (text: string) 
   );
 }
 
-/** A drawn phone rather than a photo, so it suits any make and follows the accent colour. */
-function PhoneArt({ online }: { online: boolean }) {
+function dayLabel(timestamp: number, now = new Date()): string {
+  const day = new Date(timestamp);
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (day.toDateString() === now.toDateString()) return "Today";
+  if (day.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return day.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+}
+
+function timeLabel(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function ItemStatus({ item, onRetry }: { item: Activity; onRetry: (item: Activity) => void }) {
+  if (item.status === "failed") {
+    return (
+      <span className="item-status failed" title={item.error}>
+        Didn't send ·{" "}
+        <button type="button" onClick={() => onRetry(item)}>
+          Try again
+        </button>
+      </span>
+    );
+  }
   return (
-    <div className={`phone-art ${online ? "online" : ""}`} aria-hidden="true">
-      <div className="phone-art-screen">
-        <img src="/icon.svg" alt="" />
-      </div>
+    <span className="item-status">
+      {timeLabel(item.timestamp)}
+      {item.status === "sending" ? " · Sending" : <CheckCheck size={14} aria-label="Delivered" />}
+    </span>
+  );
+}
+
+function Thread(props: {
+  items: Activity[];
+  onCopy: (text: string) => void;
+  onRetry: (item: Activity) => void;
+  children?: React.ReactNode;
+}) {
+  const { items, onCopy, onRetry, children } = props;
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [items.length]);
+
+  return (
+    <div className="thread">
+      {items.length === 0 && !children && (
+        <p className="thread-empty">Nothing sent yet. Type below, or drag files anywhere onto this window.</p>
+      )}
+      {items.map((item, index) => {
+        const label = dayLabel(item.timestamp);
+        const newDay = index === 0 || dayLabel(items[index - 1].timestamp) !== label;
+        return (
+          <React.Fragment key={item.id}>
+            {newDay && <p className="day">{label}</p>}
+            {item.kind === "text" ? (
+              <div className={`bubble ${item.status}`}>
+                <p className="bubble-text">{item.label}</p>
+                <div className="bubble-foot">
+                  <button type="button" className="bubble-copy" onClick={() => onCopy(item.label)}>
+                    <Copy size={13} />
+                    Copy
+                  </button>
+                  <ItemStatus item={item} onRetry={onRetry} />
+                </div>
+              </div>
+            ) : (
+              <div className={`file-card ${item.status}`}>
+                <ActivityIcon item={item} />
+                <div className="file-card-main">
+                  <p className="file-card-name">{item.label}</p>
+                  {item.status === "sending" && item.totalBytes ? (
+                    <>
+                      <div className="progress" role="progressbar" aria-valuenow={item.bytesSent} aria-valuemax={item.totalBytes}>
+                        <span style={{ width: `${((item.bytesSent ?? 0) / item.totalBytes) * 100}%` }} />
+                      </div>
+                      <p className="file-card-meta">
+                        {formatBytes(item.bytesSent ?? 0)} of {formatBytes(item.totalBytes)}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="file-card-meta">
+                      {item.status === "sending" && "Preparing"}
+                      {item.status === "sent" && item.bytesSent !== undefined && formatBytes(item.bytesSent)}
+                    </p>
+                  )}
+                </div>
+                <ItemStatus item={item} onRetry={onRetry} />
+              </div>
+            )}
+          </React.Fragment>
+        );
+      })}
+      {children}
+      <div ref={endRef} />
     </div>
   );
 }
@@ -235,7 +330,7 @@ export default function App() {
   const [activity, setActivity] = useState<Activity[]>([]);
   const [note, setNote] = useState("");
   const [endpointDrafts, setEndpointDrafts] = useState<Record<string, string>>({});
-  const [dragActive, setDragActive] = useState(false);
+  const [dragCount, setDragCount] = useState<number | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
 
@@ -332,13 +427,16 @@ export default function App() {
     }
   };
 
-  const track = async (item: Omit<Activity, "id" | "status" | "timestamp">, send: () => Promise<number | void>) => {
+  const track = async (
+    item: Omit<Activity, "id" | "status" | "timestamp">,
+    send: (update: (patch: Partial<Activity>) => void) => Promise<number | void>,
+  ) => {
     const id = crypto.randomUUID();
     setActivity((prev) => [{ ...item, id, status: "sending", timestamp: Date.now() }, ...prev]);
     const update = (patch: Partial<Activity>) =>
       setActivity((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
     try {
-      const bytesSent = await send();
+      const bytesSent = await send(update);
       update({ status: "sent", bytesSent: bytesSent ?? undefined });
       return true;
     } catch (error) {
@@ -347,16 +445,38 @@ export default function App() {
     }
   };
 
+  const sendFile = (peer: TrustedPeer, path: string) =>
+    track(
+      { kind: "file", label: fileNameFromPath(path), path, peerId: peer.fingerprint, peerName: peer.displayName },
+      (update) => sendFileToPeer(peer.fingerprint, path, (progress) => update(progress)),
+    );
+
+  const sendText = (peer: TrustedPeer, text: string) =>
+    track({ kind: "text", label: text, peerId: peer.fingerprint, peerName: peer.displayName }, () =>
+      sendClipboardText(peer.fingerprint, text),
+    );
+
   const sendFiles = async (paths: string[]) => {
     if (!selectedPeer?.isConnected) {
       showError(selectedPeer ? `Connect to ${selectedPeer.displayName} first.` : "Pair a device first.");
       return;
     }
-    const peer = selectedPeer;
     for (const path of paths) {
-      await track({ kind: "file", label: fileNameFromPath(path), peerName: peer.displayName }, () =>
-        sendFileToPeer(peer.fingerprint, path),
-      );
+      await sendFile(selectedPeer, path);
+    }
+  };
+
+  const retry = (item: Activity) => {
+    const peer = peers?.find((p) => p.fingerprint === item.peerId);
+    if (!peer?.isConnected) {
+      showError(`Connect to ${item.peerName} first.`);
+      return;
+    }
+    setActivity((prev) => prev.filter((a) => a.id !== item.id));
+    if (item.kind === "file" && item.path) {
+      sendFile(peer, item.path);
+    } else {
+      sendText(peer, item.label);
     }
   };
 
@@ -367,12 +487,13 @@ export default function App() {
   useEffect(() => {
     if (!isTauri()) return;
     const unlisten = getCurrentWebview().onDragDropEvent(({ payload }) => {
-      if (payload.type === "enter" || payload.type === "over") {
+      if (payload.type === "enter") {
         setView({ name: "send" });
-        setDragActive(true);
+        setDragCount(payload.paths.length);
         return;
       }
-      setDragActive(false);
+      if (payload.type === "over") return;
+      setDragCount(null);
       if (payload.type === "drop" && payload.paths.length > 0) {
         sendFilesRef.current(payload.paths);
       }
@@ -392,9 +513,7 @@ export default function App() {
     const text = note.trim();
     if (!selectedPeer || !text) return;
     setNote("");
-    const sent = await track({ kind: "text", label: text, peerName: selectedPeer.displayName }, () =>
-      sendClipboardText(selectedPeer.fingerprint, text),
-    );
+    const sent = await sendText(selectedPeer, text);
     if (!sent) setNote(text);
   };
 
@@ -423,7 +542,6 @@ export default function App() {
 
   const renderWelcome = (title: string, text: string, action?: React.ReactNode) => (
     <div className="welcome">
-      <PhoneArt online />
       <h1>{title}</h1>
       <p className="lead">{text}</p>
       {action}
@@ -433,8 +551,8 @@ export default function App() {
   const renderSend = () => {
     if (!selectedPeer) {
       return renderWelcome(
-        "Pair your phone",
-        "Scan a code once, then send files and text between your phone and this computer. Everything stays on your own network.",
+        "Your phone, one step away",
+        "Pair once by scanning a code. After that, anything you send here lands on your phone, over your own Wi-Fi.",
         <button type="button" className="btn btn-primary btn-large" onClick={openPairDialog}>
           Pair a device
         </button>,
@@ -444,123 +562,94 @@ export default function App() {
     const peer = selectedPeer;
     const online = peer.isConnected;
     const busy = connecting === peer.fingerprint;
-    const recent = activity.slice(0, 3);
-    const openDevice = () => setView({ name: "device", fingerprint: peer.fingerprint });
+    const items = activity.filter((a) => a.peerId === peer.fingerprint).reverse();
 
     return (
-      <div className="page">
-        <section className={`hero ${online ? "online" : ""}`}>
-          <PhoneArt online={online} />
-          <div className="hero-body">
-            <span className={`status-pill ${online ? "online" : ""}`}>{online ? "Connected" : "Offline"}</span>
+      <div className="conversation">
+        <header className="conversation-head">
+          <span className={`avatar ${online ? "online" : ""}`} aria-hidden="true">
+            {peer.displayName.slice(0, 1).toUpperCase()}
+          </span>
+          <div className="conversation-title">
             <h1>{peer.displayName}</h1>
-            {online ? (
-              <>
-                <p className="hero-sub">Ready. Drop files anywhere in this window or send some text.</p>
-                <div className="hero-actions">
-                  <button type="button" className="btn btn-soft" onClick={() => disconnect(peer)}>
-                    Disconnect
-                  </button>
-                  <button type="button" className="btn btn-soft" onClick={openDevice}>
-                    <SlidersHorizontal size={16} />
-                    Device settings
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="hero-sub">Enter the address shown in Continue on your phone.</p>
-                <form className="hero-actions" onSubmit={connect}>
-                  <input
-                    className="input address"
-                    value={endpoint}
-                    onChange={(e) => setEndpointDrafts((prev) => ({ ...prev, [peer.fingerprint]: e.target.value }))}
-                    placeholder="192.168.1.20:4433"
-                    aria-label="Phone address"
-                    spellCheck={false}
-                  />
-                  <button type="submit" className="btn btn-primary" disabled={busy || !endpoint.trim()}>
-                    {busy && <Loader size={16} className="spin" />}
-                    {busy ? "Connecting" : "Connect"}
-                  </button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    onClick={openDevice}
-                    aria-label="Device settings"
-                    title="Device settings"
-                  >
-                    <SlidersHorizontal size={17} />
-                  </button>
-                </form>
-              </>
-            )}
+            <p className={`presence ${online ? "online" : ""}`}>{online ? "Connected" : "Offline"}</p>
           </div>
-        </section>
-
-        <div className="bento">
+          {online && (
+            <button type="button" className="btn btn-quiet" onClick={() => disconnect(peer)}>
+              Disconnect
+            </button>
+          )}
           <button
             type="button"
-            className={`tile tile-drop ${dragActive ? "active" : ""}`}
-            disabled={!online}
-            onClick={chooseFiles}
+            className="icon-btn"
+            onClick={() => setView({ name: "device", fingerprint: peer.fingerprint })}
+            aria-label={`${peer.displayName} settings`}
+            title="Device settings"
           >
-            <span className="tile-icon large">
-              <Upload size={22} />
-            </span>
-            <span className="tile-title">Send files</span>
-            <span className="tile-text">{online ? "Drop them here or click to browse" : "Connect first to send files"}</span>
+            <SlidersHorizontal size={17} />
           </button>
+        </header>
 
-          <form className="tile tile-note" onSubmit={sendNote}>
-            <div className="tile-head">
-              <span className="tile-icon">
-                <Type size={18} />
-              </span>
-              <div>
-                <p className="tile-title">Send text</p>
-                <p className="tile-text">Lands on your phone's clipboard</p>
-              </div>
-            </div>
-            <div className="compose">
-              <input
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder={online ? "Type or paste something" : "Connect first to send text"}
-                aria-label="Text to send"
-                disabled={!online}
-              />
-              <button type="submit" className="compose-send" disabled={!online || !note.trim()} aria-label="Send">
-                <ArrowUp size={17} />
-              </button>
-            </div>
-          </form>
-
-          <section className="tile tile-recent" aria-labelledby="recent-title">
-            <div className="tile-head">
-              <span className="tile-icon">
-                <History size={18} />
-              </span>
-              <p id="recent-title" className="tile-title">
-                Recent
+        <Thread items={items} onCopy={copyText} onRetry={retry}>
+          {!online && (
+            <form className="notice" onSubmit={connect}>
+              <p>
+                <strong>{peer.displayName} is offline.</strong> Open Continue on it and enter the address it shows.
               </p>
-              {activity.length > 0 && (
-                <button type="button" className="link" onClick={() => setView({ name: "history" })}>
-                  See all
+              <div className="notice-row">
+                <input
+                  className="input address"
+                  value={endpoint}
+                  onChange={(e) => setEndpointDrafts((prev) => ({ ...prev, [peer.fingerprint]: e.target.value }))}
+                  placeholder="192.168.1.20:4433"
+                  aria-label="Phone address"
+                  spellCheck={false}
+                />
+                <button type="submit" className="btn btn-primary" disabled={busy || !endpoint.trim()}>
+                  {busy && <Loader size={16} className="spin" />}
+                  {busy ? "Connecting" : "Connect"}
                 </button>
+              </div>
+            </form>
+          )}
+        </Thread>
+
+        <form className="composer" onSubmit={sendNote}>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={chooseFiles}
+            disabled={!online}
+            aria-label="Send files"
+            title="Send files"
+          >
+            <Paperclip size={19} />
+          </button>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={online ? `Send text to ${peer.displayName}` : "Connect to send"}
+            aria-label="Text to send"
+            disabled={!online}
+          />
+          <button type="submit" className="send-btn" disabled={!online || !note.trim()} aria-label="Send">
+            <ArrowUp size={18} />
+          </button>
+        </form>
+
+        {dragCount !== null && (
+          <div className="drop-overlay" aria-hidden="true">
+            <div className="drop-target">
+              <Upload size={26} />
+              <p className="drop-title">
+                {online ? `Drop to send to ${peer.displayName}` : `Connect to ${peer.displayName} first`}
+              </p>
+              {online && dragCount > 0 && (
+                <p className="drop-sub">{dragCount === 1 ? "1 file" : `${dragCount} files`}</p>
               )}
             </div>
-            {recent.length === 0 ? (
-              <p className="tile-text">Nothing sent yet.</p>
-            ) : (
-              <ul className="list">
-                {recent.map((item) => (
-                  <ActivityRow key={item.id} item={item} onCopy={copyText} />
-                ))}
-              </ul>
-            )}
-          </section>
-        </div>
+          </div>
+        )}
       </div>
     );
   };

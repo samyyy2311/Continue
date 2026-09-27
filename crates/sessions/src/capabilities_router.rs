@@ -163,24 +163,22 @@ pub fn spawn_capabilities_dispatcher(
 }
 
 impl SessionMultiplexer {
-    pub async fn send_file_to_peer(
+    /// `on_progress` receives (bytes sent, file size) after each chunk is written.
+    pub async fn send_file_to_peer<F>(
         &self,
         file_path: &Path,
         transfer_id: String,
-    ) -> Result<u64, transfer::TransferError> {
+        on_progress: Option<F>,
+    ) -> Result<u64, transfer::TransferError>
+    where
+        F: Fn(u64, u64),
+    {
         let (mut send, mut recv) = self
             .open_stream(CapabilityId::FILE_TRANSFER)
             .await
             .map_err(transfer::TransferError::Transport)?;
 
-        send_file(
-            &mut send,
-            &mut recv,
-            file_path,
-            transfer_id,
-            None::<fn(u64, u64)>,
-        )
-        .await
+        send_file(&mut send, &mut recv, file_path, transfer_id, on_progress).await
     }
 
     pub async fn send_clipboard_to_peer(

@@ -442,11 +442,22 @@ fn disconnect_peer(
     Ok(())
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferProgressDto {
+    pub bytes_sent: u64,
+    pub total_bytes: u64,
+}
+
+/// Progress updates are capped so a fast LAN transfer doesn't flood the webview.
+const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
 #[tauri::command]
 async fn send_file_to_peer(
     state: State<'_, DesktopRuntimeState>,
     peer_fingerprint: String,
     file_path: String,
+    on_progress: tauri::ipc::Channel<TransferProgressDto>,
 ) -> Result<u64, String> {
     let mux = {
         let sessions = state.active_sessions.lock();
@@ -463,7 +474,20 @@ async fn send_file_to_peer(
         .unwrap_or(0);
     let transfer_id = format!("tx-{now}");
 
-    mux.send_file_to_peer(&path, transfer_id)
+    let last_update = Mutex::new(std::time::Instant::now() - PROGRESS_INTERVAL);
+    let report = |bytes_sent: u64, total_bytes: u64| {
+        let mut last = last_update.lock();
+        if bytes_sent < total_bytes && last.elapsed() < PROGRESS_INTERVAL {
+            return;
+        }
+        *last = std::time::Instant::now();
+        let _ = on_progress.send(TransferProgressDto {
+            bytes_sent,
+            total_bytes,
+        });
+    };
+
+    mux.send_file_to_peer(&path, transfer_id, Some(report))
         .await
         .map_err(|e| format!("Failed to send file: {e}"))
 }

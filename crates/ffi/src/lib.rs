@@ -591,7 +591,7 @@ pub fn send_file(peer_fingerprint: String, file_path: String) -> Result<u64, Con
             .map(|d| d.as_millis())
             .unwrap_or(0);
         let transfer_id = format!("tx-{now}");
-        mux.send_file_to_peer(path, transfer_id)
+        mux.send_file_to_peer(path, transfer_id, None::<fn(u64, u64)>)
             .await
             .map_err(|e| ContinueFfiError::InternalError(e.to_string()))
     })

@@ -386,7 +386,11 @@ async fn test_end_to_end_file_transfer() -> Result<()> {
     sessions::spawn_capabilities_dispatcher(server_mux, handlers, 16);
 
     let bytes_sent = client_mux
-        .send_file_to_peer(&send_file_path, "transfer-e2e-1".to_string())
+        .send_file_to_peer(
+            &send_file_path,
+            "transfer-e2e-1".to_string(),
+            None::<fn(u64, u64)>,
+        )
         .await
         .map_err(|e| anyhow::anyhow!("send_file_to_peer failed: {e}"))?;
 
