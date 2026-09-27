@@ -117,12 +117,12 @@ async fn notification_rejects_oversized_body() {
     let (mut send, mut recv) = client_conn.open_bi().await.unwrap();
 
     // Rejected before anything is written to the stream.
-    let res = dispatcher.send_post(
-        &mut send,
-        &mut recv,
-        oversized_post,
-        &query,
-    ).await;
+    let res = dispatcher
+        .send_post(&mut send, &mut recv, oversized_post, &query)
+        .await;
 
-    assert!(matches!(res, Err(notifications::NotificationError::BodyTooLarge { .. })));
+    assert!(matches!(
+        res,
+        Err(notifications::NotificationError::BodyTooLarge { .. })
+    ));
 }

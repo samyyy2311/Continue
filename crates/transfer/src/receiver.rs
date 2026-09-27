@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 
 use limits::{MAX_FRAME_TRANSFER_META_BYTES, TRANSFER_CHUNK_BYTES};
-use protocol::v1::{FileTransferAck, FileTransferRequest, FileTransferResponse, TransferResponseStatus};
+use protocol::v1::{
+    FileTransferAck, FileTransferRequest, FileTransferResponse, TransferResponseStatus,
+};
 use transport::{read_msg, write_msg};
 
 use crate::error::TransferError;
@@ -160,9 +162,7 @@ async fn resolve_unique_path(dir: &Path, file_name: &str) -> PathBuf {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(file_name);
-    let ext = Path::new(file_name)
-        .extension()
-        .and_then(|e| e.to_str());
+    let ext = Path::new(file_name).extension().and_then(|e| e.to_str());
 
     for i in 1..1000 {
         let name = match ext {

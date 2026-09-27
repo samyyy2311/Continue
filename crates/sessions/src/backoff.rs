@@ -1,12 +1,10 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::time::Duration;
 use rand::Rng;
+use std::time::Duration;
 
-use limits::{
-    RETRY_INITIAL_DELAY_MS, RETRY_JITTER_FACTOR, RETRY_MAX_ATTEMPTS, RETRY_MAX_DELAY_MS,
-};
+use limits::{RETRY_INITIAL_DELAY_MS, RETRY_JITTER_FACTOR, RETRY_MAX_ATTEMPTS, RETRY_MAX_DELAY_MS};
 
 /// Truncated exponential backoff with jitter for reconnecting to peers.
 #[derive(Debug, Clone)]

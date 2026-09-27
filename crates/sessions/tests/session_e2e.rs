@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::net::SocketAddr;
 use protocol::v1::{session_envelope::Body, DisconnectReason, Ping, Pong, SessionEnvelope};
 use protocol::CapabilityId;
 use sessions::{open_capability_stream, Session, SessionMultiplexer};
+use std::net::SocketAddr;
 use transport::{create_client_endpoint, create_server_endpoint, TransportCertificate};
 
 #[tokio::test]
@@ -54,11 +54,17 @@ async fn session_multiplexer_routes_capability_streams() {
     let client_mux = SessionMultiplexer::new("server-fingerprint".to_string(), client_conn);
 
     // Open file transfer stream
-    let (mut send1, _recv1) = client_mux.open_stream(CapabilityId::FILE_TRANSFER).await.unwrap();
+    let (mut send1, _recv1) = client_mux
+        .open_stream(CapabilityId::FILE_TRANSFER)
+        .await
+        .unwrap();
     send1.finish().unwrap();
 
     // Open clipboard stream
-    let (mut send2, _recv2) = client_mux.open_stream(CapabilityId::CLIPBOARD).await.unwrap();
+    let (mut send2, _recv2) = client_mux
+        .open_stream(CapabilityId::CLIPBOARD)
+        .await
+        .unwrap();
     send2.finish().unwrap();
 
     let _server_mux = server_handle.await.unwrap();
@@ -102,7 +108,9 @@ async fn session_control_ping_pong_roundtrip() {
         .unwrap();
 
     // Open control stream manually and verify Ping -> Pong
-    let (mut send, mut recv) = open_capability_stream(&client_conn, CapabilityId::CONTROL).await.unwrap();
+    let (mut send, mut recv) = open_capability_stream(&client_conn, CapabilityId::CONTROL)
+        .await
+        .unwrap();
 
     let ping = SessionEnvelope {
         body: Some(Body::Ping(Ping { seq: 42 })),
@@ -116,5 +124,7 @@ async fn session_control_ping_pong_roundtrip() {
     }
 
     let server_mux = server_handle.await.unwrap();
-    server_mux.disconnect(DisconnectReason::Normal, "test complete".to_string()).await;
+    server_mux
+        .disconnect(DisconnectReason::Normal, "test complete".to_string())
+        .await;
 }

@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 //! Pairing transcript construction and HMAC-SHA256 key confirmation MACs.
@@ -127,8 +127,8 @@ fn compute_confirm_mac(
     label: &[u8],
     transcript: &[u8],
 ) -> Result<[u8; 32], CryptoError> {
-    let mut mac =
-        HmacSha256::new_from_slice(key.as_ref()).map_err(|_| CryptoError::InvalidKey("HMAC key"))?;
+    let mut mac = HmacSha256::new_from_slice(key.as_ref())
+        .map_err(|_| CryptoError::InvalidKey("HMAC key"))?;
     mac.update(label);
     mac.update(transcript);
     let result = mac.finalize().into_bytes();

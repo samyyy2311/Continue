@@ -1,9 +1,9 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashSet;
-use protocol::CapabilityId;
 use crate::error::CapabilityError;
+use protocol::CapabilityId;
+use std::collections::HashSet;
 
 /// Evaluation query context for checking whether a capability operation is authorized.
 pub struct CapabilityQuery {
@@ -33,7 +33,10 @@ pub fn evaluate_capability(query: &CapabilityQuery) -> Result<(), CapabilityErro
         return Err(CapabilityError::PeerDenied(query.capability));
     }
 
-    if !query.negotiated_session_capabilities.contains(&query.capability) {
+    if !query
+        .negotiated_session_capabilities
+        .contains(&query.capability)
+    {
         return Err(CapabilityError::NotNegotiated(query.capability));
     }
 
@@ -73,7 +76,10 @@ mod tests {
             is_peer_authorized: true,
             negotiated_session_capabilities: caps.clone(),
         };
-        assert!(matches!(evaluate_capability(&q1), Err(CapabilityError::OsUnavailable(_))));
+        assert!(matches!(
+            evaluate_capability(&q1),
+            Err(CapabilityError::OsUnavailable(_))
+        ));
 
         // App permission denied
         let q2 = CapabilityQuery {
@@ -83,7 +89,10 @@ mod tests {
             is_peer_authorized: true,
             negotiated_session_capabilities: caps.clone(),
         };
-        assert!(matches!(evaluate_capability(&q2), Err(CapabilityError::AppPermissionDenied(_))));
+        assert!(matches!(
+            evaluate_capability(&q2),
+            Err(CapabilityError::AppPermissionDenied(_))
+        ));
 
         // Peer denied
         let q3 = CapabilityQuery {
@@ -93,7 +102,10 @@ mod tests {
             is_peer_authorized: false,
             negotiated_session_capabilities: caps.clone(),
         };
-        assert!(matches!(evaluate_capability(&q3), Err(CapabilityError::PeerDenied(_))));
+        assert!(matches!(
+            evaluate_capability(&q3),
+            Err(CapabilityError::PeerDenied(_))
+        ));
 
         // Not in negotiated session set
         let q4 = CapabilityQuery {
@@ -103,6 +115,9 @@ mod tests {
             is_peer_authorized: true,
             negotiated_session_capabilities: HashSet::new(),
         };
-        assert!(matches!(evaluate_capability(&q4), Err(CapabilityError::NotNegotiated(_))));
+        assert!(matches!(
+            evaluate_capability(&q4),
+            Err(CapabilityError::NotNegotiated(_))
+        ));
     }
 }

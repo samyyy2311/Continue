@@ -20,7 +20,10 @@ pub async fn open_capability_stream(
     conn: &quinn::Connection,
     capability: CapabilityId,
 ) -> Result<(quinn::SendStream, quinn::RecvStream), transport::TransportError> {
-    let (mut send, recv) = conn.open_bi().await.map_err(transport::TransportError::from)?;
+    let (mut send, recv) = conn
+        .open_bi()
+        .await
+        .map_err(transport::TransportError::from)?;
     send.write_all(&capability.raw().to_be_bytes())
         .await
         .map_err(transport::TransportError::from)?;
@@ -197,7 +200,9 @@ impl SessionMultiplexer {
     pub async fn disconnect(&self, reason: DisconnectReason, message: String) {
         self.shutdown_notify.notify_waiters();
 
-        if let Ok((mut send, _)) = open_capability_stream(&self.connection, CapabilityId::CONTROL).await {
+        if let Ok((mut send, _)) =
+            open_capability_stream(&self.connection, CapabilityId::CONTROL).await
+        {
             let env = SessionEnvelope {
                 body: Some(Body::Disconnect(Disconnect {
                     reason: reason as i32,

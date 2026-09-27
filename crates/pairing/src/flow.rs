@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 use std::sync::Arc;
@@ -11,8 +11,8 @@ use crypto::hkdf::derive_pairing_keys;
 use crypto::keys::EphemeralX25519;
 use crypto::pairing::{
     build_full_transcript, build_initiator_transcript, build_responder_transcript,
-    confirm_mac_initiator, confirm_mac_responder, verify_confirm_mac,
-    InitiatorTranscriptInputs, ResponderTranscriptInputs,
+    confirm_mac_initiator, confirm_mac_responder, verify_confirm_mac, InitiatorTranscriptInputs,
+    ResponderTranscriptInputs,
 };
 use crypto::token::SessionToken;
 use identity::{Fingerprint, IdentitySigner};
@@ -159,8 +159,8 @@ impl InitiatorPairing {
             transport_spki_hash: &resp_claimed_spki,
         });
 
-        let resp_sig = Signature::from_slice(&resp.signature)
-            .map_err(|_| PairingError::SignatureInvalid)?;
+        let resp_sig =
+            Signature::from_slice(&resp.signature).map_err(|_| PairingError::SignatureInvalid)?;
         let resp_verifying_key = VerifyingKey::from_bytes(&resp_pubkey_bytes)
             .map_err(|_| PairingError::SignatureInvalid)?;
         resp_verifying_key

@@ -1,13 +1,15 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::{Arc, Mutex};
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, PKCS_ECDSA_P256_SHA256};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use std::sync::{Arc, Mutex};
 
 use crate::error::TransportError;
 use crate::spki::compute_spki_hash;
-use crate::verifier::{PairingClientCertVerifier, PinnedClientCertVerifier, PinnedServerCertVerifier};
+use crate::verifier::{
+    PairingClientCertVerifier, PinnedClientCertVerifier, PinnedServerCertVerifier,
+};
 
 /// Transport keypair and self-signed TLS certificate.
 pub struct TransportCertificate {

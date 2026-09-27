@@ -107,13 +107,15 @@ async fn clipboard_rejects_unauthorized_capability() {
     let (mut send, mut recv) = client_conn.open_bi().await.unwrap();
 
     // Rejected before anything is written to the stream.
-    let res = sync.send_update(
-        &mut send,
-        &mut recv,
-        ClipboardFormat::TextPlain,
-        b"test".to_vec(),
-        &unauthorized_query,
-    ).await;
+    let res = sync
+        .send_update(
+            &mut send,
+            &mut recv,
+            ClipboardFormat::TextPlain,
+            b"test".to_vec(),
+            &unauthorized_query,
+        )
+        .await;
 
     assert!(matches!(res, Err(clipboard::ClipboardError::Capability(_))));
 }

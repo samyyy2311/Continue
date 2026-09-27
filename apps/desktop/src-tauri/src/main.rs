@@ -3,10 +3,10 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use identity::IdentitySigner;
@@ -67,7 +67,9 @@ fn get_device_identity(state: State<DesktopRuntimeState>) -> Result<DeviceIdenti
         .identity_signer
         .verifying_key()
         .map_err(|e| format!("Key derivation error: {e}"))?;
-    let fingerprint = identity::Fingerprint::from_verifying_key(&verifying_key).as_str().to_string();
+    let fingerprint = identity::Fingerprint::from_verifying_key(&verifying_key)
+        .as_str()
+        .to_string();
     let spki_hash = hex_encode(state.transport_cert.spki_hash);
 
     Ok(DeviceIdentityDto {
@@ -103,7 +105,10 @@ fn get_trusted_peers(state: State<DesktopRuntimeState>) -> Result<Vec<TrustedPee
 }
 
 #[tauri::command]
-fn remove_trusted_peer(state: State<DesktopRuntimeState>, fingerprint: String) -> Result<bool, String> {
+fn remove_trusted_peer(
+    state: State<DesktopRuntimeState>,
+    fingerprint: String,
+) -> Result<bool, String> {
     {
         let mut sessions = state.active_sessions.lock();
         if let Some(session) = sessions.remove(&fingerprint) {
@@ -121,8 +126,8 @@ fn remove_trusted_peer(state: State<DesktopRuntimeState>, fingerprint: String) -
 /// socket only selects a route; no packet is sent, so this works offline as long
 /// as the machine has a default route.
 fn local_lan_ip() -> Result<std::net::IpAddr, String> {
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| format!("Network unavailable: {e}"))?;
+    let socket =
+        std::net::UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Network unavailable: {e}"))?;
     socket
         .connect("192.0.2.1:9")
         .map_err(|e| format!("No local network route: {e}"))?;
@@ -144,7 +149,8 @@ async fn start_pairing(
         }
     }
 
-    let recorded_spki: Arc<std::sync::Mutex<Option<[u8; 32]>>> = Arc::new(std::sync::Mutex::new(None));
+    let recorded_spki: Arc<std::sync::Mutex<Option<[u8; 32]>>> =
+        Arc::new(std::sync::Mutex::new(None));
     let server_tls = state
         .transport_cert
         .build_pairing_server_tls(recorded_spki.clone())
@@ -208,7 +214,10 @@ async fn start_pairing(
         // A cancelled or superseded attempt must not report into the UI's current one.
         {
             let mut active = active_pairing.lock();
-            if !active.as_ref().is_some_and(|a| Arc::ptr_eq(a, &pairing_server)) {
+            if !active
+                .as_ref()
+                .is_some_and(|a| Arc::ptr_eq(a, &pairing_server))
+            {
                 return;
             }
             active.take();
@@ -246,8 +255,8 @@ async fn pair_from_qr(
     state: State<'_, DesktopRuntimeState>,
     qr_payload: String,
 ) -> Result<TrustedPeerDto, String> {
-    let qr = pairing::QrPayload::decode(&qr_payload)
-        .map_err(|e| format!("Invalid QR payload: {e}"))?;
+    let qr =
+        pairing::QrPayload::decode(&qr_payload).map_err(|e| format!("Invalid QR payload: {e}"))?;
 
     let addr: std::net::SocketAddr = qr
         .endpoint
@@ -404,7 +413,10 @@ async fn connect_to_peer(
         .await
         .map_err(|e| format!("TLS handshake failed: {e}"))?;
 
-    let mux = Arc::new(SessionMultiplexer::new(peer_fingerprint.clone(), connection));
+    let mux = Arc::new(SessionMultiplexer::new(
+        peer_fingerprint.clone(),
+        connection,
+    ));
     mux.spawn_keepalive_sender();
 
     let download_dir = std::env::temp_dir().join("continue_desktop_downloads");
@@ -419,7 +431,10 @@ async fn connect_to_peer(
 }
 
 #[tauri::command]
-fn disconnect_peer(state: State<DesktopRuntimeState>, peer_fingerprint: String) -> Result<(), String> {
+fn disconnect_peer(
+    state: State<DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Result<(), String> {
     let mut sessions = state.active_sessions.lock();
     if let Some(session) = sessions.remove(&peer_fingerprint) {
         session.connection().close(0u32.into(), b"user_disconnect");
@@ -539,14 +554,17 @@ async fn send_notification(
     Ok(())
 }
 
-fn initialize_desktop_runtime(db_path: &str) -> Result<DesktopRuntimeState, Box<dyn std::error::Error>> {
+fn initialize_desktop_runtime(
+    db_path: &str,
+) -> Result<DesktopRuntimeState, Box<dyn std::error::Error>> {
     let trust_store = TrustStore::open(db_path)?;
     let permission_store = PermissionStore::open(db_path)?;
     let transport_cert = Arc::new(TransportCertificate::generate()?);
 
     let seed = crypto::keys::generate_ed25519_seed();
     let signing_key = crypto::keys::signing_key_from_seed(&seed.0);
-    let identity_signer: Arc<dyn IdentitySigner> = Arc::new(identity::InMemorySigner::new(signing_key));
+    let identity_signer: Arc<dyn IdentitySigner> =
+        Arc::new(identity::InMemorySigner::new(signing_key));
 
     Ok(DesktopRuntimeState {
         device_name: "Desktop PC".to_string(),
@@ -564,10 +582,9 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let db_dir = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+            let db_dir = app.path().app_data_dir().unwrap_or_else(|_| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
             let _ = std::fs::create_dir_all(&db_dir);
             let db_path = db_dir.join("continue_desktop.db");
             let db_path_str = db_path.to_string_lossy().to_string();

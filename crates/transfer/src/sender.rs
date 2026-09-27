@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::Path;
 use sha2::{Digest, Sha256};
+use std::path::Path;
 use tokio::io::AsyncReadExt;
 
 use limits::{MAX_FRAME_TRANSFER_META_BYTES, TRANSFER_CHUNK_BYTES};
-use protocol::v1::{FileTransferAck, FileTransferRequest, FileTransferResponse, TransferResponseStatus};
+use protocol::v1::{
+    FileTransferAck, FileTransferRequest, FileTransferResponse, TransferResponseStatus,
+};
 use transport::{read_msg, write_msg};
 
 use crate::error::TransferError;

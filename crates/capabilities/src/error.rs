@@ -1,8 +1,8 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use thiserror::Error;
 use protocol::CapabilityId;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CapabilityError {

@@ -23,8 +23,12 @@ async fn file_transfer_e2e_success() {
     let server_cert = TransportCertificate::generate().unwrap();
     let client_cert = TransportCertificate::generate().unwrap();
 
-    let server_tls = server_cert.build_pinned_server_tls(client_cert.spki_hash).unwrap();
-    let client_tls = client_cert.build_pinned_client_tls(server_cert.spki_hash).unwrap();
+    let server_tls = server_cert
+        .build_pinned_server_tls(client_cert.spki_hash)
+        .unwrap();
+    let client_tls = client_cert
+        .build_pinned_client_tls(server_cert.spki_hash)
+        .unwrap();
 
     let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let server_endpoint = create_server_endpoint(server_addr, server_tls).unwrap();
@@ -53,7 +57,11 @@ async fn file_transfer_e2e_success() {
     });
 
     // Client sender task
-    let client_conn = client_endpoint.connect(bound_addr, "continue-device").unwrap().await.unwrap();
+    let client_conn = client_endpoint
+        .connect(bound_addr, "continue-device")
+        .unwrap()
+        .await
+        .unwrap();
     let (mut client_send, mut client_recv) = client_conn.open_bi().await.unwrap();
 
     let bytes_sent = send_file(
@@ -95,8 +103,12 @@ async fn file_transfer_rejected_by_permission_checker() {
     let server_cert = TransportCertificate::generate().unwrap();
     let client_cert = TransportCertificate::generate().unwrap();
 
-    let server_tls = server_cert.build_pinned_server_tls(client_cert.spki_hash).unwrap();
-    let client_tls = client_cert.build_pinned_client_tls(server_cert.spki_hash).unwrap();
+    let server_tls = server_cert
+        .build_pinned_server_tls(client_cert.spki_hash)
+        .unwrap();
+    let client_tls = client_cert
+        .build_pinned_client_tls(server_cert.spki_hash)
+        .unwrap();
 
     let server_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let server_endpoint = create_server_endpoint(server_addr, server_tls).unwrap();
@@ -124,7 +136,11 @@ async fn file_transfer_rejected_by_permission_checker() {
         (result, conn)
     });
 
-    let client_conn = client_endpoint.connect(bound_addr, "continue-device").unwrap().await.unwrap();
+    let client_conn = client_endpoint
+        .connect(bound_addr, "continue-device")
+        .unwrap()
+        .await
+        .unwrap();
     let (mut client_send, mut client_recv) = client_conn.open_bi().await.unwrap();
 
     let send_result = send_file(
@@ -136,7 +152,10 @@ async fn file_transfer_rejected_by_permission_checker() {
     )
     .await;
 
-    assert!(matches!(send_result, Err(transfer::TransferError::Rejected(_))));
+    assert!(matches!(
+        send_result,
+        Err(transfer::TransferError::Rejected(_))
+    ));
     assert!(recv_handle.await.unwrap().0.is_err());
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;

@@ -1,12 +1,12 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use limits::{MAX_PAIRING_CACHE_ENTRIES, MAX_PAIRING_SESSION_SECS};
 use crate::error::PairingError;
+use limits::{MAX_PAIRING_CACHE_ENTRIES, MAX_PAIRING_SESSION_SECS};
 
 struct CacheEntry {
     expires_at: Instant,
@@ -46,7 +46,9 @@ impl ReplayCache {
         }
 
         if map.len() >= MAX_PAIRING_CACHE_ENTRIES {
-            return Err(PairingError::InvalidQr("Too many concurrent pairing sessions".to_string()));
+            return Err(PairingError::InvalidQr(
+                "Too many concurrent pairing sessions".to_string(),
+            ));
         }
 
         map.insert(
@@ -68,7 +70,9 @@ impl ReplayCache {
         // Prune expired entries
         map.retain(|_, v| v.expires_at > now);
 
-        let entry = map.get_mut(token).ok_or(PairingError::SessionTokenMismatch)?;
+        let entry = map
+            .get_mut(token)
+            .ok_or(PairingError::SessionTokenMismatch)?;
 
         if entry.expires_at <= now {
             return Err(PairingError::SessionTokenExpired);

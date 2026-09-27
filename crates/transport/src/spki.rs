@@ -1,8 +1,8 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use sha2::{Digest, Sha256};
 use crate::error::TransportError;
+use sha2::{Digest, Sha256};
 
 fn parse_der_length(input: &[u8]) -> Option<(usize, usize)> {
     if input.is_empty() {
@@ -41,12 +41,14 @@ fn parse_der_tlv(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
 
 /// Extract raw SubjectPublicKeyInfo (SPKI) bytes from an X.509 certificate in DER format.
 pub fn extract_spki_bytes(cert_der: &[u8]) -> Result<&[u8], TransportError> {
-    let (tag, cert_body, _) = parse_der_tlv(cert_der).ok_or(TransportError::SpkiExtractionFailed)?;
+    let (tag, cert_body, _) =
+        parse_der_tlv(cert_der).ok_or(TransportError::SpkiExtractionFailed)?;
     if tag != 0x30 {
         return Err(TransportError::SpkiExtractionFailed);
     }
 
-    let (tag, mut tbs_fields, _) = parse_der_tlv(cert_body).ok_or(TransportError::SpkiExtractionFailed)?;
+    let (tag, mut tbs_fields, _) =
+        parse_der_tlv(cert_body).ok_or(TransportError::SpkiExtractionFailed)?;
     if tag != 0x30 {
         return Err(TransportError::SpkiExtractionFailed);
     }
@@ -81,7 +83,8 @@ pub fn extract_spki_bytes(cert_der: &[u8]) -> Result<&[u8], TransportError> {
         return Err(TransportError::SpkiExtractionFailed);
     }
 
-    let (len, header_len) = parse_der_length(&tbs_fields[1..]).ok_or(TransportError::SpkiExtractionFailed)?;
+    let (len, header_len) =
+        parse_der_length(&tbs_fields[1..]).ok_or(TransportError::SpkiExtractionFailed)?;
     let total_spki_len = 1 + header_len + len;
     if tbs_fields.len() < total_spki_len {
         return Err(TransportError::SpkiExtractionFailed);

@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -15,7 +15,10 @@ fn main() {
 
     println!("Ed25519 Seed (hex):        {}", hex::encode(&seed.0[..]));
     println!("Public Key (hex):          {}", hex::encode(pubkey_bytes));
-    println!("Public Key (base64url):    {}", URL_SAFE_NO_PAD.encode(pubkey_bytes));
+    println!(
+        "Public Key (base64url):    {}",
+        URL_SAFE_NO_PAD.encode(pubkey_bytes)
+    );
     println!("Device Fingerprint:        {}", fingerprint);
 }
 

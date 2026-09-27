@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
-use quinn::{ClientConfig as QuinnClientConfig, Endpoint, ServerConfig as QuinnServerConfig, TransportConfig};
+use quinn::{
+    ClientConfig as QuinnClientConfig, Endpoint, ServerConfig as QuinnServerConfig, TransportConfig,
+};
 use rustls::{ClientConfig as RustlsClientConfig, ServerConfig as RustlsServerConfig};
 
 use crate::error::TransportError;
@@ -31,8 +33,9 @@ pub fn create_server_endpoint(
     bind_addr: SocketAddr,
     server_tls: RustlsServerConfig,
 ) -> Result<Endpoint, TransportError> {
-    let quic_server_config = QuicServerConfig::try_from(server_tls)
-        .map_err(|e| TransportError::HandshakeFailed(format!("Failed to build QUIC server config: {e}")))?;
+    let quic_server_config = QuicServerConfig::try_from(server_tls).map_err(|e| {
+        TransportError::HandshakeFailed(format!("Failed to build QUIC server config: {e}"))
+    })?;
 
     let mut quinn_server_config = QuinnServerConfig::with_crypto(Arc::new(quic_server_config));
     quinn_server_config.transport_config(default_transport_config());
@@ -46,8 +49,9 @@ pub fn create_client_endpoint(
     bind_addr: SocketAddr,
     client_tls: RustlsClientConfig,
 ) -> Result<Endpoint, TransportError> {
-    let quic_client_config = QuicClientConfig::try_from(client_tls)
-        .map_err(|e| TransportError::HandshakeFailed(format!("Failed to build QUIC client config: {e}")))?;
+    let quic_client_config = QuicClientConfig::try_from(client_tls).map_err(|e| {
+        TransportError::HandshakeFailed(format!("Failed to build QUIC client config: {e}"))
+    })?;
 
     let mut quinn_client_config = QuinnClientConfig::new(Arc::new(quic_client_config));
     quinn_client_config.transport_config(default_transport_config());

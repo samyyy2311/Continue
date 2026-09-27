@@ -1,8 +1,8 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::time::{Duration, Instant};
 use rand::RngCore;
+use std::time::{Duration, Instant};
 
 /// 24-hour lifetime for discovery identifiers.
 pub const ROTATION_PERIOD: Duration = Duration::from_secs(24 * 60 * 60);

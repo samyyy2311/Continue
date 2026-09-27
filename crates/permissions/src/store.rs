@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::HashSet;
@@ -99,7 +99,9 @@ impl PermissionStore {
         )?;
 
         let grant_str: Option<String> = stmt
-            .query_row(params![peer_fingerprint, capability.raw()], |row| row.get(0))
+            .query_row(params![peer_fingerprint, capability.raw()], |row| {
+                row.get(0)
+            })
             .optional()?;
 
         match grant_str {
@@ -161,7 +163,10 @@ mod tests {
 
         // Grant AllowOnce
         store.grant_allow_once(peer, cap);
-        assert_eq!(store.query_state(peer, cap).unwrap(), PermissionState::AllowOnce);
+        assert_eq!(
+            store.query_state(peer, cap).unwrap(),
+            PermissionState::AllowOnce
+        );
 
         // Verify DB still has NO row
         assert_eq!(store.get_persisted_grant(peer, cap).unwrap(), None);
@@ -171,7 +176,12 @@ mod tests {
         assert_eq!(store.query_state(peer, cap).unwrap(), PermissionState::Ask);
 
         // Persist Allow
-        store.set_persisted_grant(peer, cap, 1, PersistedGrant::Allow).unwrap();
-        assert_eq!(store.query_state(peer, cap).unwrap(), PermissionState::Allow);
+        store
+            .set_persisted_grant(peer, cap, 1, PersistedGrant::Allow)
+            .unwrap();
+        assert_eq!(
+            store.query_state(peer, cap).unwrap(),
+            PermissionState::Allow
+        );
     }
 }

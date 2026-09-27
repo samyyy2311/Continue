@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fmt;
@@ -48,12 +48,16 @@ impl AuthenticatedPeerSession {
     }
 
     /// Open a bidirectional stream on the QUIC connection.
-    pub async fn open_bi(&self) -> Result<(quinn::SendStream, quinn::RecvStream), quinn::ConnectionError> {
+    pub async fn open_bi(
+        &self,
+    ) -> Result<(quinn::SendStream, quinn::RecvStream), quinn::ConnectionError> {
         self.connection.open_bi().await
     }
 
     /// Accept an incoming bidirectional stream on the QUIC connection.
-    pub async fn accept_bi(&self) -> Result<(quinn::SendStream, quinn::RecvStream), quinn::ConnectionError> {
+    pub async fn accept_bi(
+        &self,
+    ) -> Result<(quinn::SendStream, quinn::RecvStream), quinn::ConnectionError> {
         self.connection.accept_bi().await
     }
 }

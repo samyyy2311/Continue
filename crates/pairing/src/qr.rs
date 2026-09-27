@@ -1,13 +1,13 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use ed25519_dalek::{Signature, VerifyingKey};
 
+use crate::error::PairingError;
 use crypto::pairing::{build_initiator_transcript, InitiatorTranscriptInputs};
 use limits::{SESSION_TOKEN_LEN, SHA256_DIGEST_LEN};
-use crate::error::PairingError;
 
 pub const QR_FORMAT_VERSION: u8 = 0x01;
 pub const QR_ROLE_INITIATOR: u8 = 0x01;
@@ -93,7 +93,9 @@ impl QrPayload {
         offset += 2;
 
         if raw.len() != offset + endpoint_len {
-            return Err(PairingError::InvalidQr("Malformed endpoint length".to_string()));
+            return Err(PairingError::InvalidQr(
+                "Malformed endpoint length".to_string(),
+            ));
         }
 
         let endpoint = std::str::from_utf8(&raw[offset..offset + endpoint_len])

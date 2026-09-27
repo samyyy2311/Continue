@@ -129,7 +129,8 @@ impl NotificationDispatcher {
     {
         evaluate_capability(query)?;
 
-        let dismiss: NotificationDismiss = read_msg(recv_stream, MAX_FRAME_NOTIFICATION_BYTES).await?;
+        let dismiss: NotificationDismiss =
+            read_msg(recv_stream, MAX_FRAME_NOTIFICATION_BYTES).await?;
         let success = handler(dismiss.clone()).is_ok();
 
         write_msg(
@@ -178,7 +179,8 @@ impl NotificationDispatcher {
     {
         evaluate_capability(query)?;
 
-        let action: NotificationActionInvoke = read_msg(recv_stream, MAX_FRAME_NOTIFICATION_BYTES).await?;
+        let action: NotificationActionInvoke =
+            read_msg(recv_stream, MAX_FRAME_NOTIFICATION_BYTES).await?;
 
         match handler(action.clone()) {
             Ok(()) => {

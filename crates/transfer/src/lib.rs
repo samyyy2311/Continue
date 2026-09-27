@@ -4,10 +4,10 @@
 //! Streaming file transfer over dedicated QUIC streams (Phase 1B).
 
 pub mod error;
+mod hex;
 pub mod receiver;
 pub mod sanitizer;
 pub mod sender;
-mod hex;
 
 pub use error::TransferError;
 pub use receiver::{receive_file, ReceivedFile};

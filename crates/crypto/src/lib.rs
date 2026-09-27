@@ -1,8 +1,8 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-mod error;
 pub mod aead;
+mod error;
 pub mod hkdf;
 pub mod keys;
 pub mod pairing;

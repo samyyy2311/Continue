@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
+use mdns_sd::{Receiver, ServiceDaemon, ServiceEvent};
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
-use mdns_sd::{Receiver, ServiceDaemon, ServiceEvent};
 
 use crate::advertiser::SERVICE_TYPE;
 use crate::error::DiscoveryError;
@@ -41,7 +41,8 @@ impl DiscoveryBrowser {
             Ok(ServiceEvent::ServiceResolved(info)) => {
                 let port = info.get_port();
                 let ips: &HashSet<IpAddr> = info.get_addresses();
-                let addresses: Vec<SocketAddr> = ips.iter().map(|&ip| SocketAddr::new(ip, port)).collect();
+                let addresses: Vec<SocketAddr> =
+                    ips.iter().map(|&ip| SocketAddr::new(ip, port)).collect();
 
                 let ephemeral_id = info
                     .get_property_val_str("id")

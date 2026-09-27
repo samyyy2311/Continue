@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 //! Pairing session token generation and expiry tracking.
@@ -22,7 +22,11 @@ impl SessionToken {
     pub fn new(ttl: Duration) -> Self {
         let mut bytes = [0u8; SESSION_TOKEN_LEN];
         OsRng.fill_bytes(&mut bytes);
-        Self { bytes, expires_at: Instant::now() + ttl, consumed: false }
+        Self {
+            bytes,
+            expires_at: Instant::now() + ttl,
+            consumed: false,
+        }
     }
 
     pub fn bytes(&self) -> &[u8; SESSION_TOKEN_LEN] {

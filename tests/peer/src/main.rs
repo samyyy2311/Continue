@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
 use anyhow::{bail, Result};
+use std::sync::Arc;
 use tracing::info;
 
 use crypto::keys::{generate_ed25519_seed, signing_key_from_seed};
-use identity::{InMemorySigner, IdentitySigner};
+use identity::{IdentitySigner, InMemorySigner};
 use pairing::{InitiatorPairing, QrPayload, ReplayCache, ResponderPairing, TrustStore};
 use transport::TransportCertificate;
 
@@ -260,7 +260,9 @@ async fn test_clipboard_capability_and_echo_suppression() -> Result<()> {
         .await;
     assert!(res.is_err());
 
-    info!("Check passed: Unauthorized clipboard operation rejected by 4-layer capability evaluator");
+    info!(
+        "Check passed: Unauthorized clipboard operation rejected by 4-layer capability evaluator"
+    );
     Ok(())
 }
 
@@ -304,7 +306,10 @@ async fn test_notification_body_size_enforcement() -> Result<()> {
     Ok(())
 }
 
-async fn setup_connected_peer_pair() -> Result<(Arc<sessions::SessionMultiplexer>, Arc<sessions::SessionMultiplexer>)> {
+async fn setup_connected_peer_pair() -> Result<(
+    Arc<sessions::SessionMultiplexer>,
+    Arc<sessions::SessionMultiplexer>,
+)> {
     let server_cert = transport::TransportCertificate::generate()?;
     let client_cert = transport::TransportCertificate::generate()?;
 
@@ -322,11 +327,19 @@ async fn setup_connected_peer_pair() -> Result<(Arc<sessions::SessionMultiplexer
             .await
             .ok_or_else(|| anyhow::anyhow!("No incoming connection"))?;
         let conn = incoming.await?;
-        anyhow::Ok(Arc::new(sessions::SessionMultiplexer::new("client-node".to_string(), conn)))
+        anyhow::Ok(Arc::new(sessions::SessionMultiplexer::new(
+            "client-node".to_string(),
+            conn,
+        )))
     });
 
-    let client_conn = client_endpoint.connect(bound_addr, "continue-device")?.await?;
-    let client_mux = Arc::new(sessions::SessionMultiplexer::new("server-node".to_string(), client_conn));
+    let client_conn = client_endpoint
+        .connect(bound_addr, "continue-device")?
+        .await?;
+    let client_mux = Arc::new(sessions::SessionMultiplexer::new(
+        "server-node".to_string(),
+        client_conn,
+    ));
     let server_mux = server_handle.await??;
 
     Ok((server_mux, client_mux))
@@ -341,7 +354,10 @@ async fn test_session_multiplexer_routing() -> Result<()> {
     let (mut send, _recv) = client_mux.open_stream(CapabilityId::CLIPBOARD).await?;
     send.finish()?;
 
-    let stream = rx.recv().await.ok_or_else(|| anyhow::anyhow!("No stream"))?;
+    let stream = rx
+        .recv()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("No stream"))?;
     assert_eq!(stream.capability, CapabilityId::CLIPBOARD);
 
     info!("Check passed: QUIC stream multiplexing and capability routing verified");
@@ -437,10 +453,7 @@ async fn test_end_to_end_clipboard_sync() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Timed out waiting for clipboard update"))?;
 
     assert_eq!(update.payload, sample_text.to_vec());
-    assert_eq!(
-        update.format,
-        clipboard::ClipboardFormat::TextPlain as i32
-    );
+    assert_eq!(update.format, clipboard::ClipboardFormat::TextPlain as i32);
 
     info!("Check passed: End-to-end clipboard synchronization and acknowledgment");
     Ok(())

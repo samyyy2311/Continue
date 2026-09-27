@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
 use mdns_sd::{ServiceDaemon, ServiceInfo};
+use std::collections::HashMap;
 
 use crate::ephemeral::EphemeralDiscoveryId;
 use crate::error::DiscoveryError;

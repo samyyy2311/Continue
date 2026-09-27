@@ -82,8 +82,8 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
             .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?,
     );
 
-    let trust_store = TrustStore::open(&db_path)
-        .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;
+    let trust_store =
+        TrustStore::open(&db_path).map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;
     let permission_store = PermissionStore::open(&db_path)
         .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;
 
@@ -121,7 +121,9 @@ pub fn get_device_fingerprint() -> Result<String, ContinueFfiError> {
         .identity_signer
         .verifying_key()
         .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
-    Ok(identity::Fingerprint::from_verifying_key(&key).as_str().to_string())
+    Ok(identity::Fingerprint::from_verifying_key(&key)
+        .as_str()
+        .to_string())
 }
 
 pub fn get_device_spki_hash() -> Result<String, ContinueFfiError> {
@@ -212,7 +214,8 @@ pub fn start_pairing_server(
             None => {
                 let _ = tx.send(Err(transport::TransportError::HandshakeFailed(
                     "Listener closed".to_string(),
-                ).into()));
+                )
+                .into()));
                 return;
             }
         };
@@ -222,7 +225,8 @@ pub fn start_pairing_server(
             Err(e) => {
                 let _ = tx.send(Err(transport::TransportError::HandshakeFailed(format!(
                     "Connection failed: {e}"
-                )).into()));
+                ))
+                .into()));
                 return;
             }
         };
@@ -232,7 +236,8 @@ pub fn start_pairing_server(
             Err(e) => {
                 let _ = tx.send(Err(transport::TransportError::HandshakeFailed(format!(
                     "Stream accept failed: {e}"
-                )).into()));
+                ))
+                .into()));
                 return;
             }
         };
@@ -263,10 +268,9 @@ pub fn await_pairing_result(timeout_secs: u32) -> Result<TrustedPeerFfi, Continu
     let (runtime, mut active_pairing) = {
         let mut lock = CORE.lock().unwrap();
         let state = lock.as_mut().ok_or(ContinueFfiError::NotInitialized)?;
-        let pairing = state
-            .active_pairing
-            .take()
-            .ok_or_else(|| ContinueFfiError::InternalError("No active pairing server".to_string()))?;
+        let pairing = state.active_pairing.take().ok_or_else(|| {
+            ContinueFfiError::InternalError("No active pairing server".to_string())
+        })?;
         (state.runtime.clone(), pairing)
     };
 
@@ -278,7 +282,9 @@ pub fn await_pairing_result(timeout_secs: u32) -> Result<TrustedPeerFfi, Continu
         .await
     });
 
-    active_pairing.server_endpoint.close(0u32.into(), b"complete");
+    active_pairing
+        .server_endpoint
+        .close(0u32.into(), b"complete");
 
     match result {
         Ok(Ok(Ok(peer))) => Ok(peer.into()),
@@ -316,9 +322,10 @@ pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiErr
         let qr = pairing::QrPayload::decode(&qr_payload)
             .map_err(|e| ContinueFfiError::InvalidQr(e.to_string()))?;
 
-        let addr: std::net::SocketAddr = qr.endpoint.parse().map_err(|e| {
-            ContinueFfiError::InvalidQr(format!("Invalid endpoint address: {e}"))
-        })?;
+        let addr: std::net::SocketAddr = qr
+            .endpoint
+            .parse()
+            .map_err(|e| ContinueFfiError::InvalidQr(format!("Invalid endpoint address: {e}")))?;
 
         let client_tls = transport_cert
             .build_pinned_client_tls(qr.transport_spki_hash)
@@ -344,7 +351,8 @@ pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiErr
             .await
             .map_err(|e| ContinueFfiError::PairingFailed(format!("Stream open failed: {e}")))?;
 
-        let responder = pairing::ResponderPairing::new(identity_signer, transport_cert, trust_store);
+        let responder =
+            pairing::ResponderPairing::new(identity_signer, transport_cert, trust_store);
         let trusted_peer = responder
             .complete_handshake(&qr, &mut send_stream, &mut recv_stream)
             .await
@@ -431,7 +439,12 @@ pub fn set_permission(
 
     state
         .permission_store
-        .set_persisted_grant(&peer_fingerprint, CapabilityId(capability_id), 1, parsed_grant)
+        .set_persisted_grant(
+            &peer_fingerprint,
+            CapabilityId(capability_id),
+            1,
+            parsed_grant,
+        )
         .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;
 
     Ok(())
@@ -477,7 +490,9 @@ pub fn connect_to_peer(peer_fingerprint: String, endpoint: String) -> Result<(),
         let peer = trust_store
             .get_peer(&peer_fingerprint)
             .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?
-            .ok_or_else(|| ContinueFfiError::InternalError("Peer not found in trust store".to_string()))?;
+            .ok_or_else(|| {
+                ContinueFfiError::InternalError("Peer not found in trust store".to_string())
+            })?;
 
         let addr: std::net::SocketAddr = endpoint.parse().map_err(|e| {
             ContinueFfiError::InternalError(format!("Invalid endpoint address: {e}"))
@@ -502,7 +517,10 @@ pub fn connect_to_peer(peer_fingerprint: String, endpoint: String) -> Result<(),
             .await
             .map_err(|e| ContinueFfiError::InternalError(format!("Handshake failed: {e}")))?;
 
-        let mux = Arc::new(SessionMultiplexer::new(peer_fingerprint.clone(), connection));
+        let mux = Arc::new(SessionMultiplexer::new(
+            peer_fingerprint.clone(),
+            connection,
+        ));
         mux.spawn_keepalive_sender();
 
         let download_dir = std::env::temp_dir().join("continue_downloads");

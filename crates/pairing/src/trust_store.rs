@@ -1,8 +1,8 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::{Arc, Mutex};
 use rusqlite::{params, Connection, OptionalExtension};
+use std::sync::{Arc, Mutex};
 
 use crate::error::PairingError;
 
@@ -179,7 +179,10 @@ mod tests {
 
         store.add_peer(&peer).unwrap();
 
-        let retrieved = store.get_peer(&peer.fingerprint).unwrap().expect("peer exists");
+        let retrieved = store
+            .get_peer(&peer.fingerprint)
+            .unwrap()
+            .expect("peer exists");
         assert_eq!(peer, retrieved);
 
         let list = store.list_peers().unwrap();
