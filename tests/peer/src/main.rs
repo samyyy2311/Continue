@@ -428,7 +428,6 @@ async fn test_end_to_end_clipboard_sync() -> Result<()> {
 
     sessions::spawn_capabilities_dispatcher(server_mux, handlers, 16);
 
-    let synchronizer = clipboard::ClipboardSynchronizer::new();
     let mut caps = std::collections::HashSet::new();
     caps.insert(protocol::CapabilityId::CLIPBOARD);
     let query = capabilities::CapabilityQuery {
@@ -442,7 +441,6 @@ async fn test_end_to_end_clipboard_sync() -> Result<()> {
     let sample_text = b"Pasted text across Continue mesh nodes";
     let ack = client_mux
         .send_clipboard_to_peer(
-            &synchronizer,
             clipboard::ClipboardFormat::TextPlain,
             sample_text.to_vec(),
             &query,

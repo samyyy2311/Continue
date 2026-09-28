@@ -41,6 +41,9 @@ pub enum TransportError {
     #[error("Frame error: {0}")]
     Frame(#[from] protocol::FrameError),
 
+    #[error("Timed out connecting to {0}")]
+    ConnectTimeout(std::net::SocketAddr),
+
     #[error("Connection closed by peer")]
     ConnectionClosed,
 

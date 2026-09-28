@@ -6,6 +6,7 @@ pub mod capabilities_router;
 pub mod error;
 pub mod keepalive;
 pub mod multiplexer;
+pub mod registry;
 pub mod session;
 pub mod state;
 
@@ -14,8 +15,9 @@ pub use capabilities_router::{spawn_capabilities_dispatcher, SessionCapabilityHa
 pub use error::SessionError;
 pub use keepalive::KeepaliveTracker;
 pub use multiplexer::{
-    open_capability_stream, read_capability_stream_header, IncomingCapabilityStream,
+    close_code, open_capability_stream, read_capability_stream_header, IncomingCapabilityStream,
     SessionMultiplexer,
 };
+pub use registry::{Direction, RegistryConfig, SessionRegistry, StateListener};
 pub use session::Session;
 pub use state::SessionState;

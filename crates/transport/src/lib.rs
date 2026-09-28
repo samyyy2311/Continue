@@ -11,7 +11,8 @@ pub mod verifier;
 
 pub use cert::TransportCertificate;
 pub use endpoint::{
-    create_client_endpoint, create_server_endpoint, default_transport_config, ALPN_CONTINUE,
+    connect_pinned, create_client_endpoint, create_server_endpoint, default_transport_config,
+    DialConfig, ALPN_CONTINUE,
 };
 pub use error::TransportError;
 pub use framed::{read_msg, write_msg};

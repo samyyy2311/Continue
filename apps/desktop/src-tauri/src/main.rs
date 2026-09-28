@@ -5,7 +5,7 @@
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -15,8 +15,8 @@ use identity::{FileSecretStore, IdentitySigner, SecretStore};
 use pairing::{InitiatorPairing, ReplayCache, TrustStore};
 use permissions::PermissionStore;
 use protocol::CapabilityId;
-use sessions::SessionMultiplexer;
-use transport::TransportCertificate;
+use sessions::{Direction, SessionRegistry, SessionState};
+use transport::{DialConfig, TransportCertificate};
 
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
     bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
@@ -61,21 +61,15 @@ pub struct DesktopRuntimeState {
     replay_cache: Arc<ReplayCache>,
     allowed_spki_hashes: Arc<std::sync::RwLock<HashSet<[u8; 32]>>>,
     active_pairing: Arc<Mutex<Option<Arc<ActivePairingServer>>>>,
-    active_sessions: Arc<Mutex<HashMap<String, Arc<SessionMultiplexer>>>>,
-    download_dir: PathBuf,
+    sessions: SessionRegistry,
     advertiser: Arc<Mutex<Option<discovery::DiscoveryAdvertiser>>>,
 }
 
-fn attach_session_and_dispatch(
-    mux: Arc<SessionMultiplexer>,
-    peer_fingerprint: &str,
-    download_dir: &Path,
+fn session_handlers(
+    download_dir: PathBuf,
     permission_store: Arc<PermissionStore>,
     app_handle: &AppHandle,
-    active_sessions: &Arc<Mutex<HashMap<String, Arc<SessionMultiplexer>>>>,
-) {
-    mux.spawn_keepalive_sender();
-
+) -> sessions::SessionCapabilityHandlers {
     let mut handlers = sessions::SessionCapabilityHandlers::new(download_dir)
         .with_permission_store(permission_store);
 
@@ -103,10 +97,37 @@ fn attach_session_and_dispatch(
         );
     }));
 
-    sessions::spawn_capabilities_dispatcher(mux.clone(), handlers, 16);
+    handlers
+}
 
-    let mut sessions = active_sessions.lock();
-    sessions.insert(peer_fingerprint.to_string(), mux);
+fn session_state_listener(
+    app_handle: AppHandle,
+    trust_store: TrustStore,
+) -> sessions::StateListener {
+    Arc::new(move |peer, session_state| {
+        let _ = app_handle.emit(
+            "peer-state-changed",
+            serde_json::json!({
+                "fingerprint": peer,
+                "state": session_state.to_string(),
+            }),
+        );
+        if session_state == SessionState::Connected {
+            let display_name = trust_store
+                .get_peer(peer)
+                .ok()
+                .flatten()
+                .map(|p| p.display_name)
+                .unwrap_or_default();
+            let _ = app_handle.emit(
+                "peer-connected",
+                serde_json::json!({
+                    "fingerprint": peer,
+                    "displayName": display_name,
+                }),
+            );
+        }
+    })
 }
 
 #[tauri::command]
@@ -134,11 +155,10 @@ fn get_trusted_peers(state: State<DesktopRuntimeState>) -> Result<Vec<TrustedPee
         .list_peers()
         .map_err(|e| format!("Database error: {e}"))?;
 
-    let sessions = state.active_sessions.lock();
     let dtos = peers
         .into_iter()
         .map(|p| {
-            let is_connected = sessions.contains_key(&p.fingerprint);
+            let is_connected = state.sessions.state(&p.fingerprint) == SessionState::Connected;
             TrustedPeerDto {
                 fingerprint: p.fingerprint,
                 display_name: p.display_name,
@@ -153,27 +173,23 @@ fn get_trusted_peers(state: State<DesktopRuntimeState>) -> Result<Vec<TrustedPee
 }
 
 #[tauri::command]
-fn remove_trusted_peer(
-    state: State<DesktopRuntimeState>,
+async fn remove_trusted_peer(
+    state: State<'_, DesktopRuntimeState>,
     fingerprint: String,
 ) -> Result<bool, String> {
-    {
-        let mut sessions = state.active_sessions.lock();
-        if let Some(session) = sessions.remove(&fingerprint) {
-            session.connection().close(0u32.into(), b"peer_removed");
-        }
-    }
-
+    // Revoke trust before closing the session so the peer cannot reconnect in between.
     if let Ok(Some(peer)) = state.trust_store.get_peer(&fingerprint) {
         if let Ok(mut allowed) = state.allowed_spki_hashes.write() {
             allowed.remove(&peer.transport_spki_hash);
         }
     }
 
-    state
+    let removed = state
         .trust_store
         .remove_peer(&fingerprint)
-        .map_err(|e| format!("Database error: {e}"))
+        .map_err(|e| format!("Database error: {e}"))?;
+    state.sessions.remove(&fingerprint).await;
+    Ok(removed)
 }
 
 /// Finds the address other devices on the LAN can reach us at. Connecting a UDP
@@ -323,25 +339,14 @@ async fn pair_from_qr(
         .parse()
         .map_err(|e| format!("Invalid endpoint address: {e}"))?;
 
-    let client_tls = state
-        .transport_cert
-        .build_pinned_client_tls(qr.transport_spki_hash)
-        .map_err(|e| format!("TLS configuration failed: {e}"))?;
-
-    let bind_addr: std::net::SocketAddr = if addr.is_ipv6() {
-        "[::]:0".parse().unwrap()
-    } else {
-        "0.0.0.0:0".parse().unwrap()
-    };
-
-    let client_endpoint = transport::create_client_endpoint(bind_addr, client_tls)
-        .map_err(|e| format!("Failed to create client endpoint: {e}"))?;
-
-    let connection = client_endpoint
-        .connect(addr, "continue-device")
-        .map_err(|e| format!("Connect failed: {e}"))?
-        .await
-        .map_err(|e| format!("TLS handshake failed: {e}"))?;
+    let connection = transport::connect_pinned(
+        &state.transport_cert,
+        qr.transport_spki_hash,
+        addr,
+        &DialConfig::default(),
+    )
+    .await
+    .map_err(|e| format!("Connect failed: {e}"))?;
 
     let (mut send_stream, mut recv_stream) = connection
         .open_bi()
@@ -443,7 +448,6 @@ fn set_permission(
 
 #[tauri::command]
 async fn connect_to_peer(
-    app: AppHandle,
     state: State<'_, DesktopRuntimeState>,
     peer_fingerprint: String,
     endpoint: String,
@@ -458,52 +462,19 @@ async fn connect_to_peer(
         .parse()
         .map_err(|e| format!("Invalid endpoint address: {e}"))?;
 
-    let client_tls = state
-        .transport_cert
-        .build_pinned_client_tls(peer.transport_spki_hash)
-        .map_err(|e| format!("TLS configuration failed: {e}"))?;
-
-    let bind_addr: std::net::SocketAddr = if addr.is_ipv6() {
-        "[::]:0".parse().unwrap()
-    } else {
-        "0.0.0.0:0".parse().unwrap()
-    };
-
-    let client_endpoint = transport::create_client_endpoint(bind_addr, client_tls)
-        .map_err(|e| format!("Failed to create client endpoint: {e}"))?;
-
-    let connection = client_endpoint
-        .connect(addr, "continue-device")
-        .map_err(|e| format!("Connect failed: {e}"))?
+    state
+        .sessions
+        .connect(&peer_fingerprint, peer.transport_spki_hash, addr)
         .await
-        .map_err(|e| format!("TLS handshake failed: {e}"))?;
-
-    let mux = Arc::new(SessionMultiplexer::new(
-        peer_fingerprint.clone(),
-        connection,
-    ));
-
-    attach_session_and_dispatch(
-        mux,
-        &peer_fingerprint,
-        &state.download_dir,
-        state.permission_store.clone(),
-        &app,
-        &state.active_sessions,
-    );
-
-    Ok(())
+        .map_err(|e| format!("Connect failed: {e}"))
 }
 
 #[tauri::command]
-fn disconnect_peer(
-    state: State<DesktopRuntimeState>,
+async fn disconnect_peer(
+    state: State<'_, DesktopRuntimeState>,
     peer_fingerprint: String,
 ) -> Result<(), String> {
-    let mut sessions = state.active_sessions.lock();
-    if let Some(session) = sessions.remove(&peer_fingerprint) {
-        session.connection().close(0u32.into(), b"user_disconnect");
-    }
+    state.sessions.disconnect(&peer_fingerprint).await;
     Ok(())
 }
 
@@ -524,13 +495,10 @@ async fn send_file_to_peer(
     file_path: String,
     on_progress: tauri::ipc::Channel<TransferProgressDto>,
 ) -> Result<u64, String> {
-    let mux = {
-        let sessions = state.active_sessions.lock();
-        sessions
-            .get(&peer_fingerprint)
-            .cloned()
-            .ok_or_else(|| "Peer is not connected".to_string())?
-    };
+    let mux = state
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| "Peer is not connected".to_string())?;
 
     let path = std::path::PathBuf::from(file_path);
     let now = std::time::SystemTime::now()
@@ -563,15 +531,11 @@ async fn send_clipboard_text(
     peer_fingerprint: String,
     text: String,
 ) -> Result<(), String> {
-    let mux = {
-        let sessions = state.active_sessions.lock();
-        sessions
-            .get(&peer_fingerprint)
-            .cloned()
-            .ok_or_else(|| "Peer is not connected".to_string())?
-    };
+    let mux = state
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| "Peer is not connected".to_string())?;
 
-    let synchronizer = clipboard::ClipboardSynchronizer::new();
     let mut caps = std::collections::HashSet::new();
     caps.insert(protocol::CapabilityId::CLIPBOARD);
     let query = capabilities::CapabilityQuery {
@@ -583,7 +547,6 @@ async fn send_clipboard_text(
     };
 
     mux.send_clipboard_to_peer(
-        &synchronizer,
         clipboard::ClipboardFormat::TextPlain,
         text.into_bytes(),
         &query,
@@ -602,13 +565,10 @@ async fn send_notification(
     body: String,
     app_name: String,
 ) -> Result<(), String> {
-    let mux = {
-        let sessions = state.active_sessions.lock();
-        sessions
-            .get(&peer_fingerprint)
-            .cloned()
-            .ok_or_else(|| "Peer is not connected".to_string())?
-    };
+    let mux = state
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| "Peer is not connected".to_string())?;
 
     let dispatcher = notifications::NotificationDispatcher::new();
     let mut caps = std::collections::HashSet::new();
@@ -644,6 +604,7 @@ async fn send_notification(
 }
 
 fn initialize_desktop_runtime(
+    app_handle: &AppHandle,
     db_path: &Path,
     secrets_dir: &Path,
     download_dir: PathBuf,
@@ -652,8 +613,10 @@ fn initialize_desktop_runtime(
     let permission_store = Arc::new(PermissionStore::open(db_path)?);
 
     let secret_store = FileSecretStore::new(secrets_dir)?;
-    let identity_signer: Arc<dyn IdentitySigner> =
-        Arc::from(identity::load_or_create_identity(&secret_store, "device_identity")?);
+    let identity_signer: Arc<dyn IdentitySigner> = Arc::from(identity::load_or_create_identity(
+        &secret_store,
+        "device_identity",
+    )?);
 
     let transport_cert = Arc::new(match secret_store.load("transport_cert")? {
         Some(pem_bytes) => TransportCertificate::from_pem_bytes(&pem_bytes)?,
@@ -668,6 +631,19 @@ fn initialize_desktop_runtime(
     let initial_hashes: HashSet<[u8; 32]> = peers.iter().map(|p| p.transport_spki_hash).collect();
     let allowed_spki_hashes = Arc::new(std::sync::RwLock::new(initial_hashes));
 
+    let local_fingerprint =
+        identity::Fingerprint::from_verifying_key(&identity_signer.verifying_key()?).to_string();
+    let sessions = SessionRegistry::new(
+        local_fingerprint,
+        transport_cert.clone(),
+        session_handlers(download_dir, permission_store.clone(), app_handle),
+        sessions::RegistryConfig::default(),
+        Some(session_state_listener(
+            app_handle.clone(),
+            trust_store.clone(),
+        )),
+    );
+
     let device_name = std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
         .unwrap_or_else(|_| "Desktop PC".to_string());
@@ -681,8 +657,7 @@ fn initialize_desktop_runtime(
         replay_cache: Arc::new(ReplayCache::new()),
         allowed_spki_hashes,
         active_pairing: Arc::new(Mutex::new(None)),
-        active_sessions: Arc::new(Mutex::new(HashMap::new())),
-        download_dir,
+        sessions,
         advertiser: Arc::new(Mutex::new(None)),
     })
 }
@@ -691,9 +666,10 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let app_data = app.path().app_data_dir().unwrap_or_else(|_| {
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-            });
+            let app_data = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
             let _ = std::fs::create_dir_all(&app_data);
 
             let db_path = app_data.join("continue_desktop.db");
@@ -706,8 +682,9 @@ fn main() {
                 .unwrap_or_else(|_| app_data.join("downloads"));
             let _ = std::fs::create_dir_all(&download_dir);
 
-            let runtime_state = initialize_desktop_runtime(&db_path, &secrets_dir, download_dir)
-                .expect("Failed to initialize Continue desktop runtime engine");
+            let runtime_state =
+                initialize_desktop_runtime(app.handle(), &db_path, &secrets_dir, download_dir)
+                    .expect("Failed to initialize Continue desktop runtime engine");
 
             // Setup always-listening QUIC endpoint for paired peers
             if let Ok(server_tls) = runtime_state
@@ -715,20 +692,21 @@ fn main() {
                 .build_trusted_peers_server_tls(runtime_state.allowed_spki_hashes.clone())
             {
                 let bind_addr = std::net::SocketAddr::from(([0, 0, 0, 0], 0));
-                if let Ok(server_endpoint) = transport::create_server_endpoint(bind_addr, server_tls) {
+                if let Ok(server_endpoint) =
+                    transport::create_server_endpoint(bind_addr, server_tls)
+                {
                     if let Ok(local_addr) = server_endpoint.local_addr() {
                         let bound_port = local_addr.port();
                         let ephemeral_id = discovery::EphemeralDiscoveryId::generate();
-                        if let Ok(adv) = discovery::DiscoveryAdvertiser::start(bound_port, ephemeral_id, 1) {
+                        if let Ok(adv) =
+                            discovery::DiscoveryAdvertiser::start(bound_port, ephemeral_id, 1)
+                        {
                             *runtime_state.advertiser.lock() = Some(adv);
                         }
 
                         let accept_endpoint = server_endpoint;
-                        let app_handle = app.handle().clone();
                         let trust_store = runtime_state.trust_store.clone();
-                        let permission_store = runtime_state.permission_store.clone();
-                        let download_dir = runtime_state.download_dir.clone();
-                        let active_sessions = runtime_state.active_sessions.clone();
+                        let sessions = runtime_state.sessions.clone();
 
                         tauri::async_runtime::spawn(async move {
                             while let Some(incoming) = accept_endpoint.accept().await {
@@ -753,24 +731,11 @@ fn main() {
                                     }
                                 };
 
-                                let peer_fp = peer.fingerprint.clone();
-                                let mux = Arc::new(SessionMultiplexer::new(peer_fp.clone(), conn));
-
-                                attach_session_and_dispatch(
-                                    mux,
-                                    &peer_fp,
-                                    &download_dir,
-                                    permission_store.clone(),
-                                    &app_handle,
-                                    &active_sessions,
-                                );
-
-                                let _ = app_handle.emit(
-                                    "peer-connected",
-                                    serde_json::json!({
-                                        "fingerprint": peer_fp,
-                                        "displayName": peer.display_name,
-                                    }),
+                                sessions.attach(
+                                    &peer.fingerprint,
+                                    spki_hash,
+                                    conn,
+                                    Direction::Inbound,
                                 );
                             }
                         });

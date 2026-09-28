@@ -234,7 +234,9 @@ impl TrustedPeersClientCertVerifier {
         }
     }
 
-    pub fn from_shared(shared: Arc<std::sync::RwLock<std::collections::HashSet<[u8; 32]>>>) -> Self {
+    pub fn from_shared(
+        shared: Arc<std::sync::RwLock<std::collections::HashSet<[u8; 32]>>>,
+    ) -> Self {
         Self {
             allowed_spki_hashes: shared,
         }
@@ -293,9 +295,15 @@ impl ClientCertVerifier for TrustedPeersClientCertVerifier {
 pub fn extract_peer_spki_hash(connection: &quinn::Connection) -> Option<[u8; 32]> {
     let peer_id = connection.peer_identity()?;
     if let Some(certs) = peer_id.downcast_ref::<Vec<rustls::pki_types::CertificateDer<'static>>>() {
-        certs.first().and_then(|c| crate::spki::extract_and_hash_spki(c.as_ref()).ok())
-    } else if let Some(certs) = peer_id.downcast_ref::<Arc<Vec<rustls::pki_types::CertificateDer<'static>>>>() {
-        certs.first().and_then(|c| crate::spki::extract_and_hash_spki(c.as_ref()).ok())
+        certs
+            .first()
+            .and_then(|c| crate::spki::extract_and_hash_spki(c.as_ref()).ok())
+    } else if let Some(certs) =
+        peer_id.downcast_ref::<Arc<Vec<rustls::pki_types::CertificateDer<'static>>>>()
+    {
+        certs
+            .first()
+            .and_then(|c| crate::spki::extract_and_hash_spki(c.as_ref()).ok())
     } else {
         None
     }

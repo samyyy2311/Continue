@@ -269,6 +269,9 @@ export default function App() {
         );
         cleanups.push(unPeer);
 
+        const unState = await listen("peer-state-changed", () => void refreshPeers());
+        cleanups.push(unState);
+
         const unFile = await listen<{ fileName: string; path: string; bytesReceived: number }>(
           "file-received",
           (event) => {

@@ -98,7 +98,9 @@ impl TransportCertificate {
         &self,
         allowed_spki_hashes: Arc<std::sync::RwLock<std::collections::HashSet<[u8; 32]>>>,
     ) -> Result<rustls::ServerConfig, TransportError> {
-        let verifier = Arc::new(TrustedPeersClientCertVerifier::from_shared(allowed_spki_hashes));
+        let verifier = Arc::new(TrustedPeersClientCertVerifier::from_shared(
+            allowed_spki_hashes,
+        ));
         let config = rustls::ServerConfig::builder_with_provider(ring_provider())
             .with_protocol_versions(&[&rustls::version::TLS13])?
             .with_client_cert_verifier(verifier)

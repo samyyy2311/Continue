@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info};
 
 use capabilities::CapabilityQuery;
-use clipboard::{ClipboardAck, ClipboardFormat, ClipboardSynchronizer, ClipboardUpdate};
+use clipboard::{ClipboardAck, ClipboardFormat, ClipboardUpdate};
 use notifications::{NotificationAck, NotificationDispatcher, NotificationPost};
 use protocol::CapabilityId;
 use transfer::{receive_file, send_file, ReceivedFile};
@@ -18,7 +18,6 @@ use crate::multiplexer::SessionMultiplexer;
 #[derive(Clone)]
 pub struct SessionCapabilityHandlers {
     pub download_dir: PathBuf,
-    pub clipboard_sync: Arc<ClipboardSynchronizer>,
     pub notification_dispatcher: Arc<NotificationDispatcher>,
     pub on_file_received: Option<Arc<dyn Fn(ReceivedFile) + Send + Sync>>,
     pub on_clipboard_received: Option<Arc<dyn Fn(ClipboardUpdate) + Send + Sync>>,
@@ -30,7 +29,6 @@ impl SessionCapabilityHandlers {
     pub fn new(download_dir: impl Into<PathBuf>) -> Self {
         Self {
             download_dir: download_dir.into(),
-            clipboard_sync: Arc::new(ClipboardSynchronizer::new()),
             notification_dispatcher: Arc::new(NotificationDispatcher::new()),
             on_file_received: None,
             on_clipboard_received: None,
@@ -45,6 +43,20 @@ impl SessionCapabilityHandlers {
     }
 }
 
+fn is_permitted(
+    handlers: &SessionCapabilityHandlers,
+    peer: &str,
+    capability: CapabilityId,
+) -> bool {
+    match &handlers.permission_store {
+        Some(store) => matches!(
+            store.query_state(peer, capability),
+            Ok(permissions::PermissionState::Allow | permissions::PermissionState::AllowOnce)
+        ),
+        None => true,
+    }
+}
+
 /// Spawns the capability router loop processing incoming streams dispatched by the multiplexer.
 pub fn spawn_capabilities_dispatcher(
     mux: Arc<SessionMultiplexer>,
@@ -53,23 +65,20 @@ pub fn spawn_capabilities_dispatcher(
 ) {
     let mut stream_rx = mux.spawn_router(buffer_size);
     let peer_fingerprint = mux.peer_fingerprint().to_string();
+    let clipboard = mux.clipboard().clone();
 
     tokio::spawn(async move {
         while let Some(mut stream) = stream_rx.recv().await {
             let handlers = handlers.clone();
             let peer_fp = peer_fingerprint.clone();
+            let clipboard = clipboard.clone();
 
             tokio::spawn(async move {
                 match stream.capability {
                     CapabilityId::FILE_TRANSFER => {
                         debug!("Handling incoming file transfer stream from {peer_fp}");
-                        let is_permitted = match &handlers.permission_store {
-                            Some(store) => match store.query_state(&peer_fp, CapabilityId::FILE_TRANSFER) {
-                                Ok(permissions::PermissionState::Allow | permissions::PermissionState::AllowOnce) => true,
-                                _ => false,
-                            },
-                            None => true,
-                        };
+                        let is_permitted =
+                            is_permitted(&handlers, &peer_fp, CapabilityId::FILE_TRANSFER);
 
                         match receive_file(
                             &mut stream.send_stream,
@@ -86,7 +95,10 @@ pub fn spawn_capabilities_dispatcher(
                                     received.file_name, received.bytes_received
                                 );
                                 if let Some(store) = &handlers.permission_store {
-                                    store.consume_if_allow_once(&peer_fp, CapabilityId::FILE_TRANSFER);
+                                    store.consume_if_allow_once(
+                                        &peer_fp,
+                                        CapabilityId::FILE_TRANSFER,
+                                    );
                                 }
                                 if let Some(cb) = &handlers.on_file_received {
                                     cb(received);
@@ -99,13 +111,8 @@ pub fn spawn_capabilities_dispatcher(
                     }
                     CapabilityId::CLIPBOARD => {
                         debug!("Handling incoming clipboard stream from {peer_fp}");
-                        let is_permitted = match &handlers.permission_store {
-                            Some(store) => match store.query_state(&peer_fp, CapabilityId::CLIPBOARD) {
-                                Ok(permissions::PermissionState::Allow | permissions::PermissionState::AllowOnce) => true,
-                                _ => false,
-                            },
-                            None => true,
-                        };
+                        let is_permitted =
+                            is_permitted(&handlers, &peer_fp, CapabilityId::CLIPBOARD);
 
                         let mut caps = HashSet::new();
                         caps.insert(CapabilityId::CLIPBOARD);
@@ -118,8 +125,7 @@ pub fn spawn_capabilities_dispatcher(
                         };
 
                         let on_received = handlers.on_clipboard_received.clone();
-                        let result = handlers
-                            .clipboard_sync
+                        let result = clipboard
                             .receive_update(
                                 &mut stream.send_stream,
                                 &mut stream.recv_stream,
@@ -150,13 +156,8 @@ pub fn spawn_capabilities_dispatcher(
                     }
                     CapabilityId::NOTIFICATIONS => {
                         debug!("Handling incoming notification stream from {peer_fp}");
-                        let is_permitted = match &handlers.permission_store {
-                            Some(store) => match store.query_state(&peer_fp, CapabilityId::NOTIFICATIONS) {
-                                Ok(permissions::PermissionState::Allow | permissions::PermissionState::AllowOnce) => true,
-                                _ => false,
-                            },
-                            None => true,
-                        };
+                        let is_permitted =
+                            is_permitted(&handlers, &peer_fp, CapabilityId::NOTIFICATIONS);
 
                         let mut caps = HashSet::new();
                         caps.insert(CapabilityId::NOTIFICATIONS);
@@ -182,7 +183,10 @@ pub fn spawn_capabilities_dispatcher(
                         match result {
                             Ok(post) => {
                                 if let Some(store) = &handlers.permission_store {
-                                    store.consume_if_allow_once(&peer_fp, CapabilityId::NOTIFICATIONS);
+                                    store.consume_if_allow_once(
+                                        &peer_fp,
+                                        CapabilityId::NOTIFICATIONS,
+                                    );
                                 }
                                 if let Some(cb) = on_received {
                                     cb(post);
@@ -223,7 +227,6 @@ impl SessionMultiplexer {
 
     pub async fn send_clipboard_to_peer(
         &self,
-        synchronizer: &ClipboardSynchronizer,
         format: ClipboardFormat,
         payload: Vec<u8>,
         query: &CapabilityQuery,
@@ -233,7 +236,7 @@ impl SessionMultiplexer {
             .await
             .map_err(clipboard::ClipboardError::Transport)?;
 
-        synchronizer
+        self.clipboard()
             .send_update(&mut send, &mut recv, format, payload, query)
             .await
     }

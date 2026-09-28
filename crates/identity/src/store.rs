@@ -50,7 +50,13 @@ impl FileSecretStore {
     fn path_for(&self, label: &str) -> PathBuf {
         let safe_name: String = label
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         self.base_dir.join(format!("{safe_name}.secret"))
     }

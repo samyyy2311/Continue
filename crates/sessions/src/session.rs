@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use limits::MAX_FRAME_SESSION_BYTES;
 use protocol::v1::SessionEnvelope;
-use transport::AuthenticatedPeerSession;
 
 use crate::backoff::ReconnectPolicy;
 use crate::error::SessionError;
-use crate::keepalive::KeepaliveTracker;
+use crate::multiplexer::SessionMultiplexer;
 use crate::state::SessionState;
 
 /// An active or reconnecting session with a trusted peer.
@@ -18,8 +18,7 @@ pub struct Session {
     pub peer_transport_spki_hash: [u8; 32],
     pub known_addresses: Vec<SocketAddr>,
     pub state: SessionState,
-    pub active_session: Option<AuthenticatedPeerSession>,
-    pub keepalive: KeepaliveTracker,
+    pub active: Option<Arc<SessionMultiplexer>>,
     pub reconnect_policy: ReconnectPolicy,
 }
 
@@ -34,35 +33,38 @@ impl Session {
             peer_transport_spki_hash,
             known_addresses,
             state: SessionState::Disconnected,
-            active_session: None,
-            keepalive: KeepaliveTracker::new(),
+            active: None,
             reconnect_policy: ReconnectPolicy::new(),
         }
     }
 
-    /// Attach an authenticated QUIC connection to this session.
-    pub fn attach_connection(&mut self, session: AuthenticatedPeerSession) {
-        self.active_session = Some(session);
+    /// Attach an authenticated, multiplexed connection to this session.
+    pub fn attach_connection(&mut self, mux: Arc<SessionMultiplexer>) {
+        self.active = Some(mux);
         self.state = SessionState::Connected;
-        self.keepalive = KeepaliveTracker::new();
         self.reconnect_policy.reset();
     }
 
-    /// Mark the connection as dropped and transition to Reconnecting.
+    /// Mark the connection as dropped. Returns the first reconnect delay, or `None` when the
+    /// session was closed or its retries are spent, in which case it is left disconnected.
     pub fn mark_disconnected(&mut self) -> Option<std::time::Duration> {
-        self.active_session = None;
-        if self.state.can_reconnect() {
-            self.state = SessionState::Reconnecting;
-            self.reconnect_policy.next_delay()
-        } else {
-            None
+        self.active = None;
+        if !self.state.can_reconnect() {
+            return None;
         }
+        let delay = self.reconnect_policy.next_delay();
+        self.state = if delay.is_some() {
+            SessionState::Reconnecting
+        } else {
+            SessionState::Disconnected
+        };
+        delay
     }
 
     /// Explicitly close the session.
     pub fn close(&mut self) {
         self.state = SessionState::Closed;
-        self.active_session = None;
+        self.active = None;
     }
 
     /// Send a control envelope on the session's stream.

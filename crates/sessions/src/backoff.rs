@@ -33,6 +33,16 @@ impl ReconnectPolicy {
         }
     }
 
+    /// Same backoff shape with caller-chosen bounds.
+    pub fn with_limits(max_attempts: u32, initial_delay: Duration, max_delay: Duration) -> Self {
+        Self {
+            max_attempts,
+            initial_delay,
+            max_delay,
+            ..Self::new()
+        }
+    }
+
     /// Reset attempt counter on successful connection.
     pub fn reset(&mut self) {
         self.current_attempt = 0;

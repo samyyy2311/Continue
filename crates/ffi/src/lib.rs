@@ -6,7 +6,6 @@
 
 uniffi::include_scaffolding!("continue");
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
@@ -15,8 +14,8 @@ use identity::IdentitySigner;
 use pairing::{InitiatorPairing, ReplayCache, TrustStore, TrustedPeer};
 use permissions::{PermissionStore, PersistedGrant};
 use protocol::CapabilityId;
-use sessions::SessionMultiplexer;
-use transport::TransportCertificate;
+use sessions::{SessionMultiplexer, SessionRegistry, SessionState};
+use transport::{DialConfig, TransportCertificate};
 
 #[derive(Debug, Error)]
 pub enum ContinueFfiError {
@@ -53,7 +52,7 @@ struct CoreState {
     replay_cache: Arc<ReplayCache>,
     advertiser: Option<DiscoveryAdvertiser>,
     active_pairing: Option<ActivePairing>,
-    active_sessions: Arc<Mutex<HashMap<String, Arc<SessionMultiplexer>>>>,
+    sessions: SessionRegistry,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -97,6 +96,30 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
     let identity_signer: Arc<dyn IdentitySigner> =
         Arc::new(identity::InMemorySigner::new(signing_key));
 
+    let local_fingerprint = identity::Fingerprint::from_verifying_key(
+        &identity_signer
+            .verifying_key()
+            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?,
+    )
+    .to_string();
+    let download_dir = std::env::temp_dir().join("continue_downloads");
+    let _ = std::fs::create_dir_all(&download_dir);
+    let grants = permission_store.clone();
+    let sessions = SessionRegistry::new(
+        local_fingerprint,
+        transport_cert.clone(),
+        sessions::SessionCapabilityHandlers::new(download_dir),
+        sessions::RegistryConfig::default(),
+        Some(Arc::new(move |peer, session_state| {
+            if matches!(
+                session_state,
+                SessionState::Disconnected | SessionState::Closed | SessionState::Reconnecting
+            ) {
+                grants.clear_allow_once_for_peer(peer);
+            }
+        })),
+    );
+
     let state = CoreState {
         runtime,
         trust_store,
@@ -106,7 +129,7 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
         replay_cache: Arc::new(ReplayCache::new()),
         advertiser: None,
         active_pairing: None,
-        active_sessions: Arc::new(Mutex::new(HashMap::new())),
+        sessions,
     };
 
     let mut lock = CORE.lock().unwrap();
@@ -327,24 +350,14 @@ pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiErr
             .parse()
             .map_err(|e| ContinueFfiError::InvalidQr(format!("Invalid endpoint address: {e}")))?;
 
-        let client_tls = transport_cert
-            .build_pinned_client_tls(qr.transport_spki_hash)
-            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
-
-        let bind_addr: std::net::SocketAddr = if addr.is_ipv6() {
-            "[::]:0".parse().unwrap()
-        } else {
-            "0.0.0.0:0".parse().unwrap()
-        };
-
-        let client_endpoint = transport::create_client_endpoint(bind_addr, client_tls)
-            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
-
-        let connection = client_endpoint
-            .connect(addr, "continue-device")
-            .map_err(|e| ContinueFfiError::PairingFailed(format!("Connect failed: {e}")))?
-            .await
-            .map_err(|e| ContinueFfiError::PairingFailed(format!("Handshake failed: {e}")))?;
+        let connection = transport::connect_pinned(
+            &transport_cert,
+            qr.transport_spki_hash,
+            addr,
+            &DialConfig::default(),
+        )
+        .await
+        .map_err(|e| ContinueFfiError::PairingFailed(format!("Connect failed: {e}")))?;
 
         let (mut send_stream, mut recv_stream) = connection
             .open_bi()
@@ -375,13 +388,21 @@ pub fn list_trusted_peers() -> Result<Vec<TrustedPeerFfi>, ContinueFfiError> {
 }
 
 pub fn remove_trusted_peer(fingerprint: String) -> Result<bool, ContinueFfiError> {
-    let lock = CORE.lock().unwrap();
-    let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+    let (runtime, trust_store, sessions) = {
+        let lock = CORE.lock().unwrap();
+        let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+        (
+            state.runtime.clone(),
+            state.trust_store.clone(),
+            state.sessions.clone(),
+        )
+    };
 
-    state
-        .trust_store
+    let removed = trust_store
         .remove_peer(&fingerprint)
-        .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))
+        .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;
+    runtime.block_on(async { sessions.remove(&fingerprint).await });
+    Ok(removed)
 }
 
 pub fn get_capabilities() -> Result<Vec<u32>, ContinueFfiError> {
@@ -475,114 +496,66 @@ pub fn revoke_permission(
 }
 
 pub fn connect_to_peer(peer_fingerprint: String, endpoint: String) -> Result<(), ContinueFfiError> {
-    let (runtime, transport_cert, trust_store, active_sessions) = {
+    let (runtime, trust_store, sessions) = {
         let lock = CORE.lock().unwrap();
         let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
         (
             state.runtime.clone(),
-            state.transport_cert.clone(),
             state.trust_store.clone(),
-            state.active_sessions.clone(),
+            state.sessions.clone(),
         )
     };
 
-    runtime.block_on(async move {
-        let peer = trust_store
-            .get_peer(&peer_fingerprint)
-            .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?
-            .ok_or_else(|| {
-                ContinueFfiError::InternalError("Peer not found in trust store".to_string())
-            })?;
-
-        let addr: std::net::SocketAddr = endpoint.parse().map_err(|e| {
-            ContinueFfiError::InternalError(format!("Invalid endpoint address: {e}"))
+    let peer = trust_store
+        .get_peer(&peer_fingerprint)
+        .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?
+        .ok_or_else(|| {
+            ContinueFfiError::InternalError("Peer not found in trust store".to_string())
         })?;
 
-        let client_tls = transport_cert
-            .build_pinned_client_tls(peer.transport_spki_hash)
-            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
+    let addr: std::net::SocketAddr = endpoint
+        .parse()
+        .map_err(|e| ContinueFfiError::InternalError(format!("Invalid endpoint address: {e}")))?;
 
-        let bind_addr: std::net::SocketAddr = if addr.is_ipv6() {
-            "[::]:0".parse().unwrap()
-        } else {
-            "0.0.0.0:0".parse().unwrap()
-        };
-
-        let client_endpoint = transport::create_client_endpoint(bind_addr, client_tls)
-            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
-
-        let connection = client_endpoint
-            .connect(addr, "continue-device")
-            .map_err(|e| ContinueFfiError::InternalError(format!("Connect failed: {e}")))?
+    runtime.block_on(async move {
+        sessions
+            .connect(&peer_fingerprint, peer.transport_spki_hash, addr)
             .await
-            .map_err(|e| ContinueFfiError::InternalError(format!("Handshake failed: {e}")))?;
-
-        let mux = Arc::new(SessionMultiplexer::new(
-            peer_fingerprint.clone(),
-            connection,
-        ));
-        mux.spawn_keepalive_sender();
-
-        let download_dir = std::env::temp_dir().join("continue_downloads");
-        let _ = std::fs::create_dir_all(&download_dir);
-        let handlers = sessions::SessionCapabilityHandlers::new(download_dir);
-        sessions::spawn_capabilities_dispatcher(mux.clone(), handlers, 16);
-
-        let mut lock = active_sessions.lock().unwrap();
-        lock.insert(peer_fingerprint, mux);
-        Ok(())
+            .map_err(|e| ContinueFfiError::InternalError(format!("Connect failed: {e}")))
     })
 }
 
 pub fn is_peer_connected(peer_fingerprint: String) -> Result<bool, ContinueFfiError> {
     let lock = CORE.lock().unwrap();
     let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
-    let sessions = state.active_sessions.lock().unwrap();
-    Ok(sessions.contains_key(&peer_fingerprint))
+    Ok(state.sessions.state(&peer_fingerprint) == SessionState::Connected)
 }
 
 pub fn disconnect(peer_fingerprint: String) -> Result<(), ContinueFfiError> {
-    let (runtime, active_sessions, permission_store) = {
+    let (runtime, sessions) = {
         let lock = CORE.lock().unwrap();
         let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
-        (
-            state.runtime.clone(),
-            state.active_sessions.clone(),
-            state.permission_store.clone(),
-        )
+        (state.runtime.clone(), state.sessions.clone())
     };
 
-    permission_store.clear_allow_once_for_peer(&peer_fingerprint);
-
-    let maybe_mux = {
-        let mut lock = active_sessions.lock().unwrap();
-        lock.remove(&peer_fingerprint)
-    };
-
-    if let Some(mux) = maybe_mux {
-        runtime.block_on(async move {
-            mux.disconnect(
-                protocol::v1::DisconnectReason::Normal,
-                "Disconnected by user".to_string(),
-            )
-            .await;
-        });
-    }
-
+    runtime.block_on(async move { sessions.disconnect(&peer_fingerprint).await });
     Ok(())
 }
 
+fn connected_session(
+    peer_fingerprint: &str,
+) -> Result<(Arc<tokio::runtime::Runtime>, Arc<SessionMultiplexer>), ContinueFfiError> {
+    let lock = CORE.lock().unwrap();
+    let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+    let mux = state
+        .sessions
+        .get(peer_fingerprint)
+        .ok_or_else(|| ContinueFfiError::InternalError("Peer not connected".to_string()))?;
+    Ok((state.runtime.clone(), mux))
+}
+
 pub fn send_file(peer_fingerprint: String, file_path: String) -> Result<u64, ContinueFfiError> {
-    let (runtime, mux) = {
-        let lock = CORE.lock().unwrap();
-        let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
-        let sessions = state.active_sessions.lock().unwrap();
-        let m = sessions
-            .get(&peer_fingerprint)
-            .cloned()
-            .ok_or_else(|| ContinueFfiError::InternalError("Peer not connected".to_string()))?;
-        (state.runtime.clone(), m)
-    };
+    let (runtime, mux) = connected_session(&peer_fingerprint)?;
 
     runtime.block_on(async move {
         let path = std::path::Path::new(&file_path);
@@ -598,19 +571,9 @@ pub fn send_file(peer_fingerprint: String, file_path: String) -> Result<u64, Con
 }
 
 pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(), ContinueFfiError> {
-    let (runtime, mux) = {
-        let lock = CORE.lock().unwrap();
-        let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
-        let sessions = state.active_sessions.lock().unwrap();
-        let m = sessions
-            .get(&peer_fingerprint)
-            .cloned()
-            .ok_or_else(|| ContinueFfiError::InternalError("Peer not connected".to_string()))?;
-        (state.runtime.clone(), m)
-    };
+    let (runtime, mux) = connected_session(&peer_fingerprint)?;
 
     runtime.block_on(async move {
-        let synchronizer = clipboard::ClipboardSynchronizer::new();
         let mut caps = std::collections::HashSet::new();
         caps.insert(protocol::CapabilityId::CLIPBOARD);
         let query = capabilities::CapabilityQuery {
@@ -622,7 +585,6 @@ pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(),
         };
 
         mux.send_clipboard_to_peer(
-            &synchronizer,
             clipboard::ClipboardFormat::TextPlain,
             text.into_bytes(),
             &query,
@@ -640,16 +602,7 @@ pub fn send_notification(
     body: String,
     app_name: String,
 ) -> Result<(), ContinueFfiError> {
-    let (runtime, mux) = {
-        let lock = CORE.lock().unwrap();
-        let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
-        let sessions = state.active_sessions.lock().unwrap();
-        let m = sessions
-            .get(&peer_fingerprint)
-            .cloned()
-            .ok_or_else(|| ContinueFfiError::InternalError("Peer not connected".to_string()))?;
-        (state.runtime.clone(), m)
-    };
+    let (runtime, mux) = connected_session(&peer_fingerprint)?;
 
     runtime.block_on(async move {
         let dispatcher = notifications::NotificationDispatcher::new();

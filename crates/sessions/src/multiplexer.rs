@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, Notify};
 use tracing::{debug, warn};
 
+use clipboard::ClipboardSynchronizer;
 use limits::KEEPALIVE_INTERVAL_SECS;
 use protocol::v1::{
     session_envelope::Body, Disconnect, DisconnectReason, Ping, Pong, SessionEnvelope,
@@ -41,6 +43,11 @@ pub async fn read_capability_stream_header(
     Ok(CapabilityId(u32::from_be_bytes(buf)))
 }
 
+/// QUIC application close code carrying a protocol `DisconnectReason`.
+pub fn close_code(reason: DisconnectReason) -> quinn::VarInt {
+    quinn::VarInt::from_u32(reason as u32)
+}
+
 /// An incoming stream dispatched by the multiplexer router.
 pub struct IncomingCapabilityStream {
     pub capability: CapabilityId,
@@ -54,6 +61,8 @@ pub struct SessionMultiplexer {
     connection: quinn::Connection,
     keepalive: Arc<Mutex<KeepaliveTracker>>,
     shutdown_notify: Arc<Notify>,
+    peer_disconnected: Arc<AtomicBool>,
+    clipboard: Arc<ClipboardSynchronizer>,
 }
 
 impl SessionMultiplexer {
@@ -63,6 +72,8 @@ impl SessionMultiplexer {
             connection,
             keepalive: Arc::new(Mutex::new(KeepaliveTracker::new())),
             shutdown_notify: Arc::new(Notify::new()),
+            peer_disconnected: Arc::new(AtomicBool::new(false)),
+            clipboard: Arc::new(ClipboardSynchronizer::new()),
         }
     }
 
@@ -72,6 +83,23 @@ impl SessionMultiplexer {
 
     pub fn connection(&self) -> &quinn::Connection {
         &self.connection
+    }
+
+    /// Clipboard ordering and echo state, shared by both directions of this connection.
+    /// Sequence numbers only have meaning within one connection, so a reconnect starts fresh.
+    pub fn clipboard(&self) -> &Arc<ClipboardSynchronizer> {
+        &self.clipboard
+    }
+
+    /// Whether the connection ended because the peer chose to leave, as opposed to a failure.
+    /// Only a normal disconnect counts; errors and timeouts are worth reconnecting after.
+    pub fn ended_by_peer(&self, error: &quinn::ConnectionError) -> bool {
+        self.peer_disconnected.load(Ordering::Acquire)
+            || matches!(
+                error,
+                quinn::ConnectionError::ApplicationClosed(close)
+                    if close.error_code == close_code(DisconnectReason::Normal)
+            )
     }
 
     /// Open a dedicated stream for a specific capability.
@@ -91,6 +119,7 @@ impl SessionMultiplexer {
         let conn = self.connection.clone();
         let shutdown = self.shutdown_notify.clone();
         let keepalive = self.keepalive.clone();
+        let peer_disconnected = self.peer_disconnected.clone();
 
         tokio::spawn(async move {
             loop {
@@ -101,8 +130,13 @@ impl SessionMultiplexer {
                             Ok((send, mut recv)) => {
                                 match read_capability_stream_header(&mut recv).await {
                                     Ok(CapabilityId::CONTROL) => {
-                                        let ka = keepalive.clone();
-                                        tokio::spawn(Self::handle_control_stream(send, recv, ka));
+                                        tokio::spawn(Self::handle_control_stream(
+                                            send,
+                                            recv,
+                                            conn.clone(),
+                                            keepalive.clone(),
+                                            peer_disconnected.clone(),
+                                        ));
                                     }
                                     Ok(cap) => {
                                         let item = IncomingCapabilityStream {
@@ -140,12 +174,13 @@ impl SessionMultiplexer {
             loop {
                 tokio::select! {
                     _ = shutdown.notified() => break,
+                    _ = conn.closed() => break,
                     _ = interval.tick() => {
                         let should_ping = {
                             let tracker = keepalive.lock().await;
                             if tracker.is_timed_out() {
                                 warn!("Keepalive timed out for peer session");
-                                conn.close(0u32.into(), b"keepalive timeout");
+                                conn.close(close_code(DisconnectReason::Error), b"keepalive timeout");
                                 break;
                             }
                             tracker.should_ping()
@@ -178,7 +213,9 @@ impl SessionMultiplexer {
     async fn handle_control_stream(
         mut send: quinn::SendStream,
         mut recv: quinn::RecvStream,
+        conn: quinn::Connection,
         keepalive: Arc<Mutex<KeepaliveTracker>>,
+        peer_disconnected: Arc<AtomicBool>,
     ) {
         if let Ok(env) = Session::read_envelope(&mut recv).await {
             match env.body {
@@ -190,6 +227,12 @@ impl SessionMultiplexer {
                 }
                 Some(Body::Disconnect(Disconnect { reason, message })) => {
                     debug!("Peer sent disconnect: reason={reason:?}, message={message}");
+                    let reason =
+                        DisconnectReason::try_from(reason).unwrap_or(DisconnectReason::Unspecified);
+                    if reason == DisconnectReason::Normal {
+                        peer_disconnected.store(true, Ordering::Release);
+                    }
+                    conn.close(close_code(reason), b"peer disconnected");
                 }
                 _ => {}
             }
@@ -212,6 +255,7 @@ impl SessionMultiplexer {
             let _ = Session::send_envelope(&mut send, &env).await;
         }
 
-        self.connection.close(0u32.into(), message.as_bytes());
+        self.connection
+            .close(close_code(reason), message.as_bytes());
     }
 }
