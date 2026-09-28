@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 mod error;
@@ -9,7 +9,7 @@ mod store;
 pub use error::{IdentityError, SecretStoreError, SignerError};
 pub use fingerprint::Fingerprint;
 pub use signer::{IdentitySigner, InMemorySigner};
-pub use store::SecretStore;
+pub use store::{FileSecretStore, SecretStore};
 
 use crypto::keys::{generate_ed25519_seed, signing_key_from_seed};
 use tracing::debug;

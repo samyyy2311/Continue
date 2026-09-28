@@ -30,3 +30,5 @@ notifications = { path = "../../../crates/notifications" }
 quinn = "0.11"
 parking_lot = "0.12"
 thiserror = "1"
+zeroize = "1"
+tracing = "0.1"

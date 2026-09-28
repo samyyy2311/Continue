@@ -23,6 +23,7 @@ pub struct SessionCapabilityHandlers {
     pub on_file_received: Option<Arc<dyn Fn(ReceivedFile) + Send + Sync>>,
     pub on_clipboard_received: Option<Arc<dyn Fn(ClipboardUpdate) + Send + Sync>>,
     pub on_notification_received: Option<Arc<dyn Fn(NotificationPost) + Send + Sync>>,
+    pub permission_store: Option<Arc<permissions::PermissionStore>>,
 }
 
 impl SessionCapabilityHandlers {
@@ -34,7 +35,13 @@ impl SessionCapabilityHandlers {
             on_file_received: None,
             on_clipboard_received: None,
             on_notification_received: None,
+            permission_store: None,
         }
+    }
+
+    pub fn with_permission_store(mut self, store: Arc<permissions::PermissionStore>) -> Self {
+        self.permission_store = Some(store);
+        self
     }
 }
 
@@ -56,11 +63,19 @@ pub fn spawn_capabilities_dispatcher(
                 match stream.capability {
                     CapabilityId::FILE_TRANSFER => {
                         debug!("Handling incoming file transfer stream from {peer_fp}");
+                        let is_permitted = match &handlers.permission_store {
+                            Some(store) => match store.query_state(&peer_fp, CapabilityId::FILE_TRANSFER) {
+                                Ok(permissions::PermissionState::Allow | permissions::PermissionState::AllowOnce) => true,
+                                _ => false,
+                            },
+                            None => true,
+                        };
+
                         match receive_file(
                             &mut stream.send_stream,
                             &mut stream.recv_stream,
                             &handlers.download_dir,
-                            None::<fn(&protocol::v1::FileTransferRequest) -> bool>,
+                            Some(|_req: &protocol::v1::FileTransferRequest| is_permitted),
                             None::<fn(u64, u64)>,
                         )
                         .await
@@ -70,6 +85,9 @@ pub fn spawn_capabilities_dispatcher(
                                     "Successfully received file {} ({} bytes) from {peer_fp}",
                                     received.file_name, received.bytes_received
                                 );
+                                if let Some(store) = &handlers.permission_store {
+                                    store.consume_if_allow_once(&peer_fp, CapabilityId::FILE_TRANSFER);
+                                }
                                 if let Some(cb) = &handlers.on_file_received {
                                     cb(received);
                                 }
@@ -81,13 +99,21 @@ pub fn spawn_capabilities_dispatcher(
                     }
                     CapabilityId::CLIPBOARD => {
                         debug!("Handling incoming clipboard stream from {peer_fp}");
+                        let is_permitted = match &handlers.permission_store {
+                            Some(store) => match store.query_state(&peer_fp, CapabilityId::CLIPBOARD) {
+                                Ok(permissions::PermissionState::Allow | permissions::PermissionState::AllowOnce) => true,
+                                _ => false,
+                            },
+                            None => true,
+                        };
+
                         let mut caps = HashSet::new();
                         caps.insert(CapabilityId::CLIPBOARD);
                         let query = CapabilityQuery {
                             capability: CapabilityId::CLIPBOARD,
                             is_os_available: true,
                             is_app_permitted: true,
-                            is_peer_authorized: true,
+                            is_peer_authorized: is_permitted,
                             negotiated_session_capabilities: caps,
                         };
 
@@ -110,6 +136,9 @@ pub fn spawn_capabilities_dispatcher(
 
                         match result {
                             Ok(update) => {
+                                if let Some(store) = &handlers.permission_store {
+                                    store.consume_if_allow_once(&peer_fp, CapabilityId::CLIPBOARD);
+                                }
                                 if let Some(cb) = on_received {
                                     cb(update);
                                 }
@@ -121,13 +150,21 @@ pub fn spawn_capabilities_dispatcher(
                     }
                     CapabilityId::NOTIFICATIONS => {
                         debug!("Handling incoming notification stream from {peer_fp}");
+                        let is_permitted = match &handlers.permission_store {
+                            Some(store) => match store.query_state(&peer_fp, CapabilityId::NOTIFICATIONS) {
+                                Ok(permissions::PermissionState::Allow | permissions::PermissionState::AllowOnce) => true,
+                                _ => false,
+                            },
+                            None => true,
+                        };
+
                         let mut caps = HashSet::new();
                         caps.insert(CapabilityId::NOTIFICATIONS);
                         let query = CapabilityQuery {
                             capability: CapabilityId::NOTIFICATIONS,
                             is_os_available: true,
                             is_app_permitted: true,
-                            is_peer_authorized: true,
+                            is_peer_authorized: is_permitted,
                             negotiated_session_capabilities: caps,
                         };
 
@@ -144,6 +181,9 @@ pub fn spawn_capabilities_dispatcher(
 
                         match result {
                             Ok(post) => {
+                                if let Some(store) = &handlers.permission_store {
+                                    store.consume_if_allow_once(&peer_fp, CapabilityId::NOTIFICATIONS);
+                                }
                                 if let Some(cb) = on_received {
                                     cb(post);
                                 }

@@ -5,11 +5,13 @@
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+use zeroize::Zeroizing;
 
-use identity::IdentitySigner;
+use identity::{FileSecretStore, IdentitySigner, SecretStore};
 use pairing::{InitiatorPairing, ReplayCache, TrustStore};
 use permissions::PermissionStore;
 use protocol::CapabilityId;
@@ -55,10 +57,56 @@ pub struct DesktopRuntimeState {
     identity_signer: Arc<dyn IdentitySigner>,
     transport_cert: Arc<TransportCertificate>,
     trust_store: TrustStore,
-    permission_store: PermissionStore,
+    permission_store: Arc<PermissionStore>,
     replay_cache: Arc<ReplayCache>,
+    allowed_spki_hashes: Arc<std::sync::RwLock<HashSet<[u8; 32]>>>,
     active_pairing: Arc<Mutex<Option<Arc<ActivePairingServer>>>>,
     active_sessions: Arc<Mutex<HashMap<String, Arc<SessionMultiplexer>>>>,
+    download_dir: PathBuf,
+    advertiser: Arc<Mutex<Option<discovery::DiscoveryAdvertiser>>>,
+}
+
+fn attach_session_and_dispatch(
+    mux: Arc<SessionMultiplexer>,
+    peer_fingerprint: &str,
+    download_dir: &Path,
+    permission_store: Arc<PermissionStore>,
+    app_handle: &AppHandle,
+    active_sessions: &Arc<Mutex<HashMap<String, Arc<SessionMultiplexer>>>>,
+) {
+    mux.spawn_keepalive_sender();
+
+    let mut handlers = sessions::SessionCapabilityHandlers::new(download_dir)
+        .with_permission_store(permission_store);
+
+    let app_handle_files = app_handle.clone();
+    handlers.on_file_received = Some(Arc::new(move |file| {
+        let _ = app_handle_files.emit(
+            "file-received",
+            serde_json::json!({
+                "fileName": file.file_name,
+                "path": file.path.to_string_lossy(),
+                "bytesReceived": file.bytes_received,
+            }),
+        );
+    }));
+
+    let app_handle_clips = app_handle.clone();
+    handlers.on_clipboard_received = Some(Arc::new(move |update| {
+        let text = String::from_utf8_lossy(&update.payload).to_string();
+        let _ = app_handle_clips.emit(
+            "clipboard-received",
+            serde_json::json!({
+                "format": format!("{:?}", update.format),
+                "content": text,
+            }),
+        );
+    }));
+
+    sessions::spawn_capabilities_dispatcher(mux.clone(), handlers, 16);
+
+    let mut sessions = active_sessions.lock();
+    sessions.insert(peer_fingerprint.to_string(), mux);
 }
 
 #[tauri::command]
@@ -113,6 +161,12 @@ fn remove_trusted_peer(
         let mut sessions = state.active_sessions.lock();
         if let Some(session) = sessions.remove(&fingerprint) {
             session.connection().close(0u32.into(), b"peer_removed");
+        }
+    }
+
+    if let Ok(Some(peer)) = state.trust_store.get_peer(&fingerprint) {
+        if let Ok(mut allowed) = state.allowed_spki_hashes.write() {
+            allowed.remove(&peer.transport_spki_hash);
         }
     }
 
@@ -184,6 +238,7 @@ async fn start_pairing(
 
     let endpoint_for_worker = server_endpoint.clone();
     let active_pairing = state.active_pairing.clone();
+    let allowed_hashes = state.allowed_spki_hashes.clone();
     tokio::spawn(async move {
         let incoming = match endpoint_for_worker.accept().await {
             Some(inc) => inc,
@@ -224,16 +279,21 @@ async fn start_pairing(
         }
 
         let _ = match result {
-            Ok(peer) => app.emit(
-                "pairing-completed",
-                TrustedPeerDto {
-                    fingerprint: peer.fingerprint,
-                    display_name: peer.display_name,
-                    paired_at: peer.paired_at,
-                    is_connected: false,
-                    endpoint: None,
-                },
-            ),
+            Ok(peer) => {
+                if let Ok(mut allowed) = allowed_hashes.write() {
+                    allowed.insert(peer.transport_spki_hash);
+                }
+                app.emit(
+                    "pairing-completed",
+                    TrustedPeerDto {
+                        fingerprint: peer.fingerprint,
+                        display_name: peer.display_name,
+                        paired_at: peer.paired_at,
+                        is_connected: false,
+                        endpoint: None,
+                    },
+                )
+            }
             Err(e) => app.emit("pairing-failed", format!("Pairing handshake failed: {e}")),
         };
     });
@@ -298,6 +358,10 @@ async fn pair_from_qr(
         .complete_handshake(&qr, &mut send_stream, &mut recv_stream)
         .await
         .map_err(|e| format!("Pairing handshake failed: {e}"))?;
+
+    if let Ok(mut allowed) = state.allowed_spki_hashes.write() {
+        allowed.insert(trusted_peer.transport_spki_hash);
+    }
 
     // The pairing connection is dropped here; a session needs a separate connect_to_peer.
     Ok(TrustedPeerDto {
@@ -379,6 +443,7 @@ fn set_permission(
 
 #[tauri::command]
 async fn connect_to_peer(
+    app: AppHandle,
     state: State<'_, DesktopRuntimeState>,
     peer_fingerprint: String,
     endpoint: String,
@@ -417,15 +482,15 @@ async fn connect_to_peer(
         peer_fingerprint.clone(),
         connection,
     ));
-    mux.spawn_keepalive_sender();
 
-    let download_dir = std::env::temp_dir().join("continue_desktop_downloads");
-    let _ = std::fs::create_dir_all(&download_dir);
-    let handlers = sessions::SessionCapabilityHandlers::new(download_dir);
-    sessions::spawn_capabilities_dispatcher(mux.clone(), handlers, 16);
-
-    let mut sessions = state.active_sessions.lock();
-    sessions.insert(peer_fingerprint, mux);
+    attach_session_and_dispatch(
+        mux,
+        &peer_fingerprint,
+        &state.download_dir,
+        state.permission_store.clone(),
+        &app,
+        &state.active_sessions,
+    );
 
     Ok(())
 }
@@ -579,26 +644,46 @@ async fn send_notification(
 }
 
 fn initialize_desktop_runtime(
-    db_path: &str,
+    db_path: &Path,
+    secrets_dir: &Path,
+    download_dir: PathBuf,
 ) -> Result<DesktopRuntimeState, Box<dyn std::error::Error>> {
     let trust_store = TrustStore::open(db_path)?;
-    let permission_store = PermissionStore::open(db_path)?;
-    let transport_cert = Arc::new(TransportCertificate::generate()?);
+    let permission_store = Arc::new(PermissionStore::open(db_path)?);
 
-    let seed = crypto::keys::generate_ed25519_seed();
-    let signing_key = crypto::keys::signing_key_from_seed(&seed.0);
+    let secret_store = FileSecretStore::new(secrets_dir)?;
     let identity_signer: Arc<dyn IdentitySigner> =
-        Arc::new(identity::InMemorySigner::new(signing_key));
+        Arc::from(identity::load_or_create_identity(&secret_store, "device_identity")?);
+
+    let transport_cert = Arc::new(match secret_store.load("transport_cert")? {
+        Some(pem_bytes) => TransportCertificate::from_pem_bytes(&pem_bytes)?,
+        None => {
+            let cert = TransportCertificate::generate()?;
+            secret_store.store("transport_cert", Zeroizing::new(cert.pkcs8_der.clone()))?;
+            cert
+        }
+    });
+
+    let peers = trust_store.list_peers()?;
+    let initial_hashes: HashSet<[u8; 32]> = peers.iter().map(|p| p.transport_spki_hash).collect();
+    let allowed_spki_hashes = Arc::new(std::sync::RwLock::new(initial_hashes));
+
+    let device_name = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "Desktop PC".to_string());
 
     Ok(DesktopRuntimeState {
-        device_name: "Desktop PC".to_string(),
+        device_name,
         identity_signer,
         transport_cert,
         trust_store,
         permission_store,
         replay_cache: Arc::new(ReplayCache::new()),
+        allowed_spki_hashes,
         active_pairing: Arc::new(Mutex::new(None)),
         active_sessions: Arc::new(Mutex::new(HashMap::new())),
+        download_dir,
+        advertiser: Arc::new(Mutex::new(None)),
     })
 }
 
@@ -606,15 +691,92 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let db_dir = app.path().app_data_dir().unwrap_or_else(|_| {
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            let app_data = app.path().app_data_dir().unwrap_or_else(|_| {
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
             });
-            let _ = std::fs::create_dir_all(&db_dir);
-            let db_path = db_dir.join("continue_desktop.db");
-            let db_path_str = db_path.to_string_lossy().to_string();
+            let _ = std::fs::create_dir_all(&app_data);
 
-            let runtime_state = initialize_desktop_runtime(&db_path_str)
+            let db_path = app_data.join("continue_desktop.db");
+            let secrets_dir = app_data.join("secrets");
+            let _ = std::fs::create_dir_all(&secrets_dir);
+
+            let download_dir = app
+                .path()
+                .download_dir()
+                .unwrap_or_else(|_| app_data.join("downloads"));
+            let _ = std::fs::create_dir_all(&download_dir);
+
+            let runtime_state = initialize_desktop_runtime(&db_path, &secrets_dir, download_dir)
                 .expect("Failed to initialize Continue desktop runtime engine");
+
+            // Setup always-listening QUIC endpoint for paired peers
+            if let Ok(server_tls) = runtime_state
+                .transport_cert
+                .build_trusted_peers_server_tls(runtime_state.allowed_spki_hashes.clone())
+            {
+                let bind_addr = std::net::SocketAddr::from(([0, 0, 0, 0], 0));
+                if let Ok(server_endpoint) = transport::create_server_endpoint(bind_addr, server_tls) {
+                    if let Ok(local_addr) = server_endpoint.local_addr() {
+                        let bound_port = local_addr.port();
+                        let ephemeral_id = discovery::EphemeralDiscoveryId::generate();
+                        if let Ok(adv) = discovery::DiscoveryAdvertiser::start(bound_port, ephemeral_id, 1) {
+                            *runtime_state.advertiser.lock() = Some(adv);
+                        }
+
+                        let accept_endpoint = server_endpoint;
+                        let app_handle = app.handle().clone();
+                        let trust_store = runtime_state.trust_store.clone();
+                        let permission_store = runtime_state.permission_store.clone();
+                        let download_dir = runtime_state.download_dir.clone();
+                        let active_sessions = runtime_state.active_sessions.clone();
+
+                        tauri::async_runtime::spawn(async move {
+                            while let Some(incoming) = accept_endpoint.accept().await {
+                                let conn = match incoming.await {
+                                    Ok(c) => c,
+                                    Err(_) => continue,
+                                };
+
+                                let spki_hash = match transport::extract_peer_spki_hash(&conn) {
+                                    Some(h) => h,
+                                    None => {
+                                        conn.close(0u32.into(), b"unknown_peer");
+                                        continue;
+                                    }
+                                };
+
+                                let peer = match trust_store.get_peer_by_spki_hash(&spki_hash) {
+                                    Ok(Some(p)) => p,
+                                    _ => {
+                                        conn.close(0u32.into(), b"untrusted_peer");
+                                        continue;
+                                    }
+                                };
+
+                                let peer_fp = peer.fingerprint.clone();
+                                let mux = Arc::new(SessionMultiplexer::new(peer_fp.clone(), conn));
+
+                                attach_session_and_dispatch(
+                                    mux,
+                                    &peer_fp,
+                                    &download_dir,
+                                    permission_store.clone(),
+                                    &app_handle,
+                                    &active_sessions,
+                                );
+
+                                let _ = app_handle.emit(
+                                    "peer-connected",
+                                    serde_json::json!({
+                                        "fingerprint": peer_fp,
+                                        "displayName": peer.display_name,
+                                    }),
+                                );
+                            }
+                        });
+                    }
+                }
+            }
 
             app.manage(runtime_state);
             Ok(())

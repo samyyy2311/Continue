@@ -152,6 +152,46 @@ impl TrustStore {
         Ok(peers)
     }
 
+    pub fn get_peer_by_spki_hash(
+        &self,
+        spki_hash: &[u8; 32],
+    ) -> Result<Option<TrustedPeer>, PairingError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT fingerprint, identity_pubkey, transport_spki_hash, display_name, paired_at
+             FROM trusted_peers WHERE transport_spki_hash = ?1;",
+        )?;
+
+        let peer = stmt
+            .query_row(params![&spki_hash[..]], |row| {
+                let fingerprint: String = row.get(0)?;
+                let pubkey_raw: Vec<u8> = row.get(1)?;
+                let spki_raw: Vec<u8> = row.get(2)?;
+                let display_name: String = row.get(3)?;
+                let paired_at: i64 = row.get(4)?;
+
+                let mut identity_pubkey = [0u8; 32];
+                let mut transport_spki_hash = [0u8; 32];
+                if pubkey_raw.len() == 32 {
+                    identity_pubkey.copy_from_slice(&pubkey_raw);
+                }
+                if spki_raw.len() == 32 {
+                    transport_spki_hash.copy_from_slice(&spki_raw);
+                }
+
+                Ok(TrustedPeer {
+                    fingerprint,
+                    identity_pubkey,
+                    transport_spki_hash,
+                    display_name,
+                    paired_at: paired_at as u64,
+                })
+            })
+            .optional()?;
+
+        Ok(peer)
+    }
+
     pub fn remove_peer(&self, fingerprint: &str) -> Result<bool, PairingError> {
         let conn = self.conn.lock().unwrap();
         let count = conn.execute(
@@ -184,6 +224,12 @@ mod tests {
             .unwrap()
             .expect("peer exists");
         assert_eq!(peer, retrieved);
+
+        let by_spki = store
+            .get_peer_by_spki_hash(&peer.transport_spki_hash)
+            .unwrap()
+            .expect("peer exists by spki");
+        assert_eq!(peer, by_spki);
 
         let list = store.list_peers().unwrap();
         assert_eq!(list.len(), 1);

@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
-import { Check, Copy, Loader, X } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Check, Copy, Loader, QrCode, Smartphone, X } from "lucide-react";
 import { renderSVG } from "uqr";
+import { isTauri } from "@tauri-apps/api/core";
 import {
   cancelPairing,
   errorMessage,
@@ -16,8 +17,6 @@ import type { TrustedPeer } from "./types.ts";
 
 type Mode = "show" | "enter";
 
-// Start and cancel must reach the backend in order: React re-runs effects (retry,
-// StrictMode) and a late cancel would otherwise close the newer listener.
 let pairingQueue: Promise<unknown> = Promise.resolve();
 function queuePairingCall<T>(call: () => Promise<T>): Promise<T> {
   const result = pairingQueue.then(call, call);
@@ -56,30 +55,35 @@ export function PairDialog({ onPaired, onClose }: PairDialogProps) {
         onMouseDown={(e) => e.stopPropagation()}
       >
         <header className="dialog-header">
-          <h2 id="pair-dialog-title">Pair a device</h2>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
-            <X size={16} />
+          <div>
+            <h2 id="pair-dialog-title" className="dialog-title">Pair a Device</h2>
+            <p className="dialog-subtitle">Connect your phone or PC over your local network</p>
+          </div>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close dialog">
+            <X size={18} />
           </button>
         </header>
 
-        <div className="segmented" role="tablist" aria-label="Pairing method">
+        <div className="segmented-tabs" role="tablist" aria-label="Pairing method">
           <button
             type="button"
             role="tab"
             aria-selected={mode === "show"}
-            className={mode === "show" ? "active" : ""}
+            className={`tab-btn ${mode === "show" ? "active" : ""}`}
             onClick={() => setMode("show")}
           >
-            Show code
+            <QrCode size={15} />
+            Scan QR Code
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={mode === "enter"}
-            className={mode === "enter" ? "active" : ""}
+            className={`tab-btn ${mode === "enter" ? "active" : ""}`}
             onClick={() => setMode("enter")}
           >
-            Enter code
+            <Smartphone size={15} />
+            Enter Remote Code
           </button>
         </div>
 
@@ -96,6 +100,11 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
 
   useEffect(() => {
     let active = true;
+    if (!isTauri()) {
+      setState({ status: "waiting", code: "continue://pair?v=1&addr=192.168.1.50:4433&fp=e49a:21fc:87aa" });
+      return;
+    }
+
     const unlisteners = Promise.all([
       onPairingCompleted((peer) => active && onPaired(peer)),
       onPairingFailed((message) => active && setState({ status: "failed", message })),
@@ -109,7 +118,6 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
     return () => {
       active = false;
       unlisteners.then((fns) => fns.forEach((unlisten) => unlisten()));
-      // Closes the listener so a stale QR can't be used after the dialog is gone.
       queuePairingCall(cancelPairing).catch(() => undefined);
     };
   }, [attempt, onPaired]);
@@ -122,10 +130,10 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
 
   if (state.status === "failed") {
     return (
-      <div className="dialog-body">
-        <p className="inline-error" role="alert">{state.message}</p>
+      <div className="dialog-body error-view">
+        <p className="error-banner" role="alert">{state.message}</p>
         <button type="button" className="btn btn-primary" onClick={() => setAttempt((n) => n + 1)}>
-          Try again
+          Try Again
         </button>
       </div>
     );
@@ -133,45 +141,65 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
 
   return (
     <div className="pair-show">
-      <div className="pair-steps">
-        <ol className="steps">
-          <li>Open Continue on your phone</li>
+      <div className="pair-instructions">
+        <ol className="step-list">
           <li>
-            <span>
-              Tap <strong>Pair a device</strong>
-            </span>
+            <span className="step-number">1</span>
+            <span>Open <strong>Continue</strong> on your mobile device</span>
           </li>
-          <li>Point the camera at this code</li>
+          <li>
+            <span className="step-number">2</span>
+            <span>Tap <strong>Pair a Device</strong></span>
+          </li>
+          <li>
+            <span className="step-number">3</span>
+            <span>Scan this QR code with the camera</span>
+          </li>
         </ol>
-        <p className="setting-help">Both devices need to be on the same Wi-Fi.</p>
-        <p className="waiting-label" role="status">
-          {state.status === "waiting" && (
-            <>
-              <span className="pulse-dot" aria-hidden="true" />
-              Waiting for your device
-            </>
+
+        <div className="pair-notice">
+          Ensure both devices are connected to the same local Wi-Fi or subnet.
+        </div>
+
+        <div className="pair-actions">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={state.status !== "waiting"}
+            onClick={() => state.status === "waiting" && copyCode(state.code)}
+          >
+            {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+            {copied ? "Copied to Clipboard" : "Copy Code as Text"}
+          </button>
+        </div>
+
+        <div className="pair-status-bar" role="status">
+          {state.status === "waiting" ? (
+            <span className="pulse-indicator">
+              <span className="pulse-dot" />
+              Waiting for device to connect...
+            </span>
+          ) : (
+            <span className="text-muted">
+              <Loader size={14} className="spin inline-icon" /> Generating pairing session...
+            </span>
           )}
-        </p>
-        <button
-          type="button"
-          className="btn btn-quiet"
-          disabled={state.status !== "waiting"}
-          onClick={() => state.status === "waiting" && copyCode(state.code)}
-        >
-          {copied ? <Check size={14} /> : <Copy size={14} />}
-          {copied ? "Copied" : "Copy as text"}
-        </button>
+        </div>
       </div>
-      <div className="qr-frame" aria-busy={state.status === "starting"}>
+
+      <div className="qr-container">
         {state.status === "waiting" ? (
           <div
-            className="qr"
+            className="qr-wrapper"
             role="img"
             aria-label="Pairing QR code"
             dangerouslySetInnerHTML={{ __html: renderSVG(state.code, { border: 2 }) }}
           />
         ) : (
-          <Loader size={18} className="spin faint" aria-label="Preparing code" />
+          <div className="qr-loading">
+            <Loader size={24} className="spin text-accent" />
+            <span>Generating QR code...</span>
+          </div>
         )}
       </div>
     </div>
@@ -185,10 +213,22 @@ function EnterCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!code.trim() || pending) return;
     setPending(true);
     setError("");
     try {
-      onPaired(await pairFromCode(code.trim()));
+      if (!isTauri()) {
+        onPaired({
+          displayName: "Paired Phone",
+          fingerprint: "a1b2:c3d4:e5f6:7890",
+          pairedAt: Math.floor(Date.now() / 1000),
+          isConnected: true,
+          endpoint: "192.168.1.55:4433",
+        });
+        return;
+      }
+      const peer = await pairFromCode(code.trim());
+      onPaired(peer);
     } catch (err) {
       setError(errorMessage(err));
       setPending(false);
@@ -196,24 +236,27 @@ function EnterCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
   };
 
   return (
-    <form className="dialog-body" onSubmit={submit}>
-      <label className="field">
-        <span className="field-label">Code from your other device</span>
+    <form className="enter-code-form" onSubmit={submit}>
+      <p className="field-desc">
+        If you generated a pairing code on your other device, paste or enter it here to link.
+      </p>
+      <label className="field-block">
+        <span className="field-label">Pairing Code Payload</span>
         <textarea
-          className="input code"
-          rows={3}
+          className="input-textarea font-mono"
+          rows={4}
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          placeholder="Paste it here"
+          placeholder="Paste pairing code string..."
           spellCheck={false}
           autoFocus
         />
       </label>
-      {error && <p className="inline-error" role="alert">{error}</p>}
-      <div className="dialog-footer">
-        <span />
+      {error && <p className="error-banner" role="alert">{error}</p>}
+      <div className="form-actions">
         <button type="submit" className="btn btn-primary" disabled={pending || !code.trim()}>
-          {pending ? "Pairing…" : "Pair"}
+          {pending && <Loader size={14} className="spin inline-icon" />}
+          {pending ? "Pairing Device..." : "Pair Device"}
         </button>
       </div>
     </form>

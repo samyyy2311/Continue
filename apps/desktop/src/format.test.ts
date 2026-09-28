@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { fileNameFromPath, formatBytes, formatRelativeTime } from "./format.ts";
+import { fileNameFromPath, formatBytes, formatRelativeTime, getFileCategory } from "./format.ts";
 
 describe("formatBytes", () => {
   it("picks the largest unit below the value", () => {
@@ -34,5 +34,17 @@ describe("formatRelativeTime", () => {
   it("uses minutes and hours for the same day", () => {
     expect(formatRelativeTime(now - 5 * 60_000, now)).toBe("5 min ago");
     expect(formatRelativeTime(now - 3 * 3_600_000, now)).toBe("3 h ago");
+  });
+});
+
+describe("getFileCategory", () => {
+  it("classifies file extensions accurately", () => {
+    expect(getFileCategory("photo.JPEG")).toBe("image");
+    expect(getFileCategory("movie.mp4")).toBe("video");
+    expect(getFileCategory("podcast.flac")).toBe("audio");
+    expect(getFileCategory("backup.tar.gz")).toBe("archive");
+    expect(getFileCategory("main.rs")).toBe("code");
+    expect(getFileCategory("invoice.pdf")).toBe("document");
+    expect(getFileCategory("unknown.xyz123")).toBe("other");
   });
 });

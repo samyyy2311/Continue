@@ -14,6 +14,8 @@ Continue focuses on everyday cross-device features built directly on top of secu
 * **Notification Forwarding**: Mirror incoming notifications to your desktop with quick actions and dismiss syncing.
 * **Local Discovery and Pairing**: Find nearby devices automatically using mDNS with rotating ephemeral IDs to prevent tracking. Pair once with a QR code handshake verified through mutual TLS and cryptographic transcripts.
 
+For the project development plan, see the [Feature Roadmap](docs/feature-roadmap.md).
+
 ## Security and Privacy
 
 * **Local-first by design**: All traffic stays on your local network. No external relay or cloud server is required for everyday operation.

@@ -17,4 +17,7 @@ pub use error::TransportError;
 pub use framed::{read_msg, write_msg};
 pub use session::{AuthenticatedPeerSession, ConnectionPath};
 pub use spki::{compute_spki_hash, extract_and_hash_spki, extract_spki_bytes};
-pub use verifier::{PairingClientCertVerifier, PinnedClientCertVerifier, PinnedServerCertVerifier};
+pub use verifier::{
+    extract_peer_spki_hash, PairingClientCertVerifier, PinnedClientCertVerifier,
+    PinnedServerCertVerifier, TrustedPeersClientCertVerifier,
+};

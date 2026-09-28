@@ -31,3 +31,29 @@ export function formatRelativeTime(timestamp: number, now = Date.now()): string 
   if (hours < 24) return `${hours} h ago`;
   return new Date(timestamp).toLocaleDateString();
 }
+
+export type FileCategory = "image" | "video" | "audio" | "archive" | "code" | "document" | "other";
+
+export function getFileCategory(name: string): FileCategory {
+  const ext = name.includes(".") ? (name.split(".").pop() ?? "").toLowerCase() : "";
+  if (["png", "jpg", "jpeg", "gif", "webp", "heic", "svg", "dng", "bmp"].includes(ext)) {
+    return "image";
+  }
+  if (["mp4", "mov", "mkv", "avi", "webm", "flv"].includes(ext)) {
+    return "video";
+  }
+  if (["mp3", "m4a", "wav", "flac", "ogg", "aac"].includes(ext)) {
+    return "audio";
+  }
+  if (["zip", "rar", "7z", "tar", "gz", "apk", "dmg"].includes(ext)) {
+    return "archive";
+  }
+  if (["rs", "ts", "tsx", "js", "jsx", "html", "css", "py", "json", "c", "cpp", "go", "toml", "yaml", "yml"].includes(ext)) {
+    return "code";
+  }
+  if (["pdf", "doc", "docx", "txt", "md", "rtf", "xls", "xlsx", "csv"].includes(ext)) {
+    return "document";
+  }
+  return "other";
+}
+

@@ -45,3 +45,45 @@ export const ACCENT_PALETTE: AccentColor[] = [
   // Follows the theme: dark on light, light on dark.
   { id: "silver", label: "Mono", base: "var(--text)", onBase: "var(--bg)" },
 ];
+
+export type View = "transfer" | "devices" | "history" | "settings";
+export type Theme = "system" | "light" | "dark";
+export type HistoryFilter = "all" | "file" | "text" | "failed";
+
+export interface Toast {
+  message: string;
+  tone: "info" | "error";
+}
+
+export interface Activity {
+  id: string;
+  kind: "file" | "text";
+  label: string;
+  peerId: string;
+  peerName: string;
+  status: "sending" | "sent" | "failed";
+  timestamp: number;
+  path?: string;
+  bytesSent?: number;
+  totalBytes?: number;
+  error?: string;
+}
+
+export const PERMISSIONS: Record<string, { label: string; description: string }> = {
+  "File Transfer": { label: "Files", description: "Allow sending and receiving files" },
+  "Clipboard Sync": { label: "Clipboard", description: "Share copied text and links" },
+  "Notification Relay": { label: "Notifications", description: "Show phone notifications on desktop" },
+};
+
+export const GRANT_OPTIONS: { value: Grant; label: string }[] = [
+  { value: "Allow", label: "Allow" },
+  { value: "Ask", label: "Ask" },
+  { value: "Deny", label: "Block" },
+];
+
+export const isMac =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/.test(navigator.platform);
+
+export const MOD_KEY = isMac ? "⌘" : "Ctrl+";
+export const MOD_SHIFT_KEY = isMac ? "⌘⇧" : "Ctrl+Shift+";
+

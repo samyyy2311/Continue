@@ -23,6 +23,16 @@ fn main() {
         println!("cargo:rerun-if-changed={}", file.display());
     }
 
+    if std::env::var("PROTOC").is_err() {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let winget_protoc = PathBuf::from(local_app_data)
+                .join(r"Microsoft\WinGet\Packages\Google.Protobuf_Microsoft.Winget.Source_8wekyb3d8bbwe\bin\protoc.exe");
+            if winget_protoc.exists() {
+                std::env::set_var("PROTOC", winget_protoc);
+            }
+        }
+    }
+
     prost_build::Config::new()
         .compile_protos(&proto_files, &[proto_dir])
         .expect("Failed to compile protobuf files");

@@ -126,6 +126,12 @@ impl PermissionStore {
         set.retain(|(peer, _)| peer != peer_fingerprint);
     }
 
+    /// Consume an AllowOnce grant if one is present, returning true if consumed.
+    pub fn consume_if_allow_once(&self, peer_fingerprint: &str, capability: CapabilityId) -> bool {
+        let mut set = self.allow_once_grants.lock().unwrap();
+        set.remove(&(peer_fingerprint.to_string(), capability.raw()))
+    }
+
     /// Query the effective runtime permission state.
     pub fn query_state(
         &self,
@@ -170,6 +176,13 @@ mod tests {
 
         // Verify DB still has NO row
         assert_eq!(store.get_persisted_grant(peer, cap).unwrap(), None);
+
+        // Consume AllowOnce
+        assert!(store.consume_if_allow_once(peer, cap));
+        assert!(!store.consume_if_allow_once(peer, cap));
+        assert_eq!(store.query_state(peer, cap).unwrap(), PermissionState::Ask);
+
+        store.grant_allow_once(peer, cap);
 
         // Session drops -> clear in-memory grants
         store.clear_allow_once_for_peer(peer);
