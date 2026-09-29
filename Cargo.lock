@@ -466,6 +466,7 @@ dependencies = [
 name = "discovery"
 version = "0.1.0"
 dependencies = [
+ "flume",
  "limits",
  "mdns-sd",
  "protocol",
@@ -1801,6 +1802,7 @@ dependencies = [
  "capabilities",
  "clipboard",
  "crypto",
+ "discovery",
  "identity",
  "limits",
  "notifications",

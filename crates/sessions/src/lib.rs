@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod auto_connect;
 pub mod backoff;
 pub mod capabilities_router;
 pub mod error;
@@ -10,6 +11,7 @@ pub mod registry;
 pub mod session;
 pub mod state;
 
+pub use auto_connect::connect_discovered_peers;
 pub use backoff::ReconnectPolicy;
 pub use capabilities_router::{spawn_capabilities_dispatcher, SessionCapabilityHandlers};
 pub use error::SessionError;

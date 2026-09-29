@@ -3,11 +3,16 @@
 
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::collections::HashMap;
+use std::time::Duration;
+use tracing::warn;
 
-use crate::ephemeral::EphemeralDiscoveryId;
+use crate::ephemeral::{EphemeralDiscoveryId, ROTATION_PERIOD};
 use crate::error::DiscoveryError;
 
 pub const SERVICE_TYPE: &str = "_continue._udp.local.";
+
+/// How long to wait before trying again when the network isn't available.
+pub const RESTART_DELAY: Duration = Duration::from_millis(limits::RETRY_MAX_DELAY_MS);
 
 /// Advertises local device presence over mDNS with an ephemeral discovery ID.
 pub struct DiscoveryAdvertiser {
@@ -37,7 +42,9 @@ impl DiscoveryAdvertiser {
             "",
             port,
             properties,
-        )?;
+        )?
+        // Without addresses the service is announced but browsers can never resolve it.
+        .enable_addr_auto();
 
         let fullname = service_info.get_fullname().to_string();
         daemon.register(service_info)?;
@@ -49,6 +56,26 @@ impl DiscoveryAdvertiser {
     pub fn unregister(self) -> Result<(), DiscoveryError> {
         let receiver = self.daemon.unregister(&self.fullname)?;
         let _ = receiver.recv();
+        self.daemon.shutdown()?;
         Ok(())
+    }
+}
+
+/// Keeps this device advertised on `port` for as long as the future runs. Retries when
+/// advertising fails, e.g. with no network at startup, and switches to a fresh ID once
+/// a day so the device can't be tracked across networks.
+pub async fn advertise(port: u16, protocol_version: u32) {
+    loop {
+        match DiscoveryAdvertiser::start(port, EphemeralDiscoveryId::generate(), protocol_version) {
+            Ok(advertiser) => {
+                tokio::time::sleep(ROTATION_PERIOD).await;
+                // Unregistering waits for the daemon to confirm.
+                let _ = tokio::task::spawn_blocking(move || advertiser.unregister()).await;
+            }
+            Err(error) => {
+                warn!("Advertising on the local network failed: {error}");
+                tokio::time::sleep(RESTART_DELAY).await;
+            }
+        }
     }
 }

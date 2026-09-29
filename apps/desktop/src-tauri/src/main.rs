@@ -65,7 +65,6 @@ pub struct DesktopRuntimeState {
     allowed_spki_hashes: Arc<std::sync::RwLock<HashSet<[u8; 32]>>>,
     active_pairing: Arc<Mutex<Option<Arc<ActivePairingServer>>>>,
     sessions: SessionRegistry,
-    advertiser: Arc<Mutex<Option<discovery::DiscoveryAdvertiser>>>,
 }
 
 fn session_handlers(
@@ -661,7 +660,6 @@ fn initialize_desktop_runtime(
         allowed_spki_hashes,
         active_pairing: Arc::new(Mutex::new(None)),
         sessions,
-        advertiser: Arc::new(Mutex::new(None)),
     })
 }
 
@@ -702,13 +700,11 @@ fn main() {
                 };
                 if let Ok(server_endpoint) = bind_to(DEFAULT_LISTEN_PORT).or_else(|_| bind_to(0)) {
                     if let Ok(local_addr) = server_endpoint.local_addr() {
-                        let bound_port = local_addr.port();
-                        let ephemeral_id = discovery::EphemeralDiscoveryId::generate();
-                        if let Ok(adv) =
-                            discovery::DiscoveryAdvertiser::start(bound_port, ephemeral_id, 1)
-                        {
-                            *runtime_state.advertiser.lock() = Some(adv);
-                        }
+                        tauri::async_runtime::spawn(discovery::advertise(local_addr.port(), 1));
+                        tauri::async_runtime::spawn(sessions::connect_discovered_peers(
+                            runtime_state.sessions.clone(),
+                            runtime_state.trust_store.clone(),
+                        ));
 
                         let accept_endpoint = server_endpoint;
                         let trust_store = runtime_state.trust_store.clone();

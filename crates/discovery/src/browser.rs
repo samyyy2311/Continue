@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use mdns_sd::{Receiver, ServiceDaemon, ServiceEvent};
+use mdns_sd::{Receiver, ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 
@@ -35,41 +35,51 @@ impl DiscoveryBrowser {
         Ok(Self { daemon, receiver })
     }
 
-    /// Receive the next discovery event, extracting peer details if a service was resolved.
-    pub fn recv(&self) -> Result<Option<DiscoveredPeer>, DiscoveryError> {
-        match self.receiver.recv() {
-            Ok(ServiceEvent::ServiceResolved(info)) => {
-                let port = info.get_port();
-                let ips: &HashSet<IpAddr> = info.get_addresses();
-                let addresses: Vec<SocketAddr> =
-                    ips.iter().map(|&ip| SocketAddr::new(ip, port)).collect();
-
-                let ephemeral_id = info
-                    .get_property_val_str("id")
-                    .unwrap_or_else(|| info.get_fullname())
-                    .to_string();
-
-                let protocol_version = info
-                    .get_property_val_str("v")
-                    .and_then(|v| v.parse::<u32>().ok())
-                    .unwrap_or(1);
-
-                Ok(Some(DiscoveredPeer {
-                    ephemeral_id,
-                    addresses,
-                    port,
-                    protocol_version,
-                }))
+    /// Wait for the next peer to be seen on the network. Returns `None` once browsing
+    /// has stopped.
+    pub async fn next_peer(&self) -> Option<DiscoveredPeer> {
+        loop {
+            match self.receiver.recv_async().await {
+                Ok(ServiceEvent::ServiceResolved(info)) => {
+                    return Some(DiscoveredPeer::from(&info))
+                }
+                Ok(_) => continue,
+                Err(_) => return None,
             }
-            Ok(ServiceEvent::ServiceRemoved(_, _)) => Ok(None),
-            Ok(_) => Ok(None),
-            Err(_) => Err(DiscoveryError::Shutdown),
         }
     }
+}
 
-    /// Stop browsing for peers.
-    pub fn stop(self) -> Result<(), DiscoveryError> {
-        self.daemon.stop_browse(SERVICE_TYPE)?;
-        Ok(())
+impl Drop for DiscoveryBrowser {
+    fn drop(&mut self) {
+        let _ = self.daemon.shutdown();
+    }
+}
+
+impl From<&ServiceInfo> for DiscoveredPeer {
+    fn from(info: &ServiceInfo) -> Self {
+        let port = info.get_port();
+        let ips: &HashSet<IpAddr> = info.get_addresses();
+        let mut addresses: Vec<SocketAddr> =
+            ips.iter().map(|&ip| SocketAddr::new(ip, port)).collect();
+        // IPv4 first: IPv6 link-local addresses often can't be dialed and only time out.
+        addresses.sort_by_key(|addr| addr.is_ipv6());
+
+        let ephemeral_id = info
+            .get_property_val_str("id")
+            .unwrap_or_else(|| info.get_fullname())
+            .to_string();
+
+        let protocol_version = info
+            .get_property_val_str("v")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(1);
+
+        Self {
+            ephemeral_id,
+            addresses,
+            port,
+            protocol_version,
+        }
     }
 }

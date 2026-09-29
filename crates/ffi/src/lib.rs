@@ -51,6 +51,7 @@ struct CoreState {
     identity_signer: Arc<dyn IdentitySigner>,
     replay_cache: Arc<ReplayCache>,
     advertiser: Option<DiscoveryAdvertiser>,
+    auto_connect: Option<tokio::task::JoinHandle<()>>,
     active_pairing: Option<ActivePairing>,
     sessions: SessionRegistry,
 }
@@ -123,6 +124,7 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
         identity_signer,
         replay_cache: Arc::new(ReplayCache::new()),
         advertiser: None,
+        auto_connect: None,
         active_pairing: None,
         sessions,
     };
@@ -175,6 +177,7 @@ pub fn get_device_spki_hash() -> Result<String, ContinueFfiError> {
     Ok(hex_encode(state.transport_cert.spki_hash))
 }
 
+/// Advertises this device and connects to paired devices as they appear on the network.
 pub fn start_discovery(port: u16, protocol_version: u32) -> Result<(), ContinueFfiError> {
     let mut lock = CORE.lock().unwrap();
     let state = lock.as_mut().ok_or(ContinueFfiError::NotInitialized)?;
@@ -183,7 +186,16 @@ pub fn start_discovery(port: u16, protocol_version: u32) -> Result<(), ContinueF
     let advertiser = DiscoveryAdvertiser::start(port, ephemeral_id, protocol_version)
         .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
 
-    state.advertiser = Some(advertiser);
+    if let Some(previous) = state.advertiser.replace(advertiser) {
+        let _ = previous.unregister();
+    }
+    if let Some(task) = state.auto_connect.take() {
+        task.abort();
+    }
+    state.auto_connect = Some(state.runtime.spawn(sessions::connect_discovered_peers(
+        state.sessions.clone(),
+        state.trust_store.clone(),
+    )));
     Ok(())
 }
 
@@ -191,6 +203,9 @@ pub fn stop_discovery() -> Result<(), ContinueFfiError> {
     let mut lock = CORE.lock().unwrap();
     let state = lock.as_mut().ok_or(ContinueFfiError::NotInitialized)?;
 
+    if let Some(task) = state.auto_connect.take() {
+        task.abort();
+    }
     if let Some(adv) = state.advertiser.take() {
         adv.unregister()
             .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;

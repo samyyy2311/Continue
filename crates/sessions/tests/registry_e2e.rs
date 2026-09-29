@@ -389,6 +389,57 @@ async fn peer_disconnect_does_not_reconnect() {
 }
 
 #[tokio::test]
+async fn discovery_connects_only_to_the_peer_whose_key_matches() {
+    let (low, high) = pair();
+    let stranger = node(
+        "stranger",
+        TransportCertificate::generate().unwrap(),
+        vec![],
+    );
+
+    let reached = low
+        .registry
+        .connect_discovered(
+            HIGH,
+            high.cert.spki_hash,
+            &[stranger.listen_addr, high.listen_addr],
+        )
+        .await;
+
+    assert_eq!(reached, Some(high.listen_addr));
+    assert_eq!(low.registry.state(HIGH), SessionState::Connected);
+    eventually("accepted", || high.registry.get(LOW).is_some()).await;
+    assert!(stranger.registry.get(LOW).is_none());
+}
+
+#[tokio::test]
+async fn discovery_leaves_deliberate_disconnects_alone() {
+    let (low, high) = pair();
+    low.registry
+        .connect(HIGH, high.cert.spki_hash, high.listen_addr)
+        .await
+        .unwrap();
+    eventually("accepted", || high.registry.get(LOW).is_some()).await;
+
+    high.registry.disconnect(LOW).await;
+    eventually("dialer saw the disconnect", || {
+        low.registry.get(HIGH).is_none()
+    })
+    .await;
+
+    let from_low = low
+        .registry
+        .connect_discovered(HIGH, high.cert.spki_hash, &[high.listen_addr])
+        .await;
+    let from_high = high
+        .registry
+        .connect_discovered(LOW, low.cert.spki_hash, &[low.listen_addr])
+        .await;
+    assert_eq!((from_low, from_high), (None, None));
+    assert!(low.registry.get(HIGH).is_none() && high.registry.get(LOW).is_none());
+}
+
+#[tokio::test]
 async fn simultaneous_dials_leave_exactly_one_session() {
     let (low, high) = pair();
     let (a, b) = tokio::join!(
