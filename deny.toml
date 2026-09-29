@@ -6,15 +6,23 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
-    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
     "CC0-1.0",
     "Zlib",
-    "OpenSSL",
 ]
-deny = []
-copyleft = "deny"
-allow-osi-fsf-free = "neither"
-default = "deny"
+# UniFFI generates the Android bindings. MPL-2.0 only applies to its own files.
+exceptions = [
+    { crate = "uniffi", allow = ["MPL-2.0"] },
+    { crate = "uniffi_bindgen", allow = ["MPL-2.0"] },
+    { crate = "uniffi_build", allow = ["MPL-2.0"] },
+    { crate = "uniffi_checksum_derive", allow = ["MPL-2.0"] },
+    { crate = "uniffi_core", allow = ["MPL-2.0"] },
+    { crate = "uniffi_macros", allow = ["MPL-2.0"] },
+    { crate = "uniffi_meta", allow = ["MPL-2.0"] },
+    { crate = "uniffi_testing", allow = ["MPL-2.0"] },
+    { crate = "uniffi_udl", allow = ["MPL-2.0"] },
+]
 
 [bans]
 multiple-versions = "warn"
@@ -29,10 +37,8 @@ deny = [
 [advisories]
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-vulnerability = "deny"
-unmaintained = "warn"
+unmaintained = "workspace"
 yanked = "deny"
-notice = "warn"
 ignore = []
 
 [sources]

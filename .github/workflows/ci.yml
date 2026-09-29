@@ -42,9 +42,9 @@ jobs:
         run: cargo test --workspace
 
       - name: cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v1
+        uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          arguments: check licenses bans advisories sources
+          command-arguments: licenses bans advisories sources
 
       - name: cargo-audit
         run: |
@@ -57,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: REUSE compliance check
-        uses: fsfe/reuse-action@v3
+        uses: fsfe/reuse-action@v5
 
   secrets:
     name: Secret scan
