@@ -36,3 +36,5 @@ local.properties
 
 # Local AI tool files
 skills-lock.json
+AGENTS.md
+GEMINI.md
