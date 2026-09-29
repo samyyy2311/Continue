@@ -76,7 +76,6 @@ import {
 
 const ACCENT_KEY = "continue.accent";
 const THEME_KEY = "continue.theme";
-const ENDPOINTS_KEY = "continue.peerEndpoints";
 const ACTIVITY_STORAGE_KEY = "continue.activity_log";
 
 function readStored<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -94,18 +93,6 @@ function writeStored(key: string, value: string) {
   } catch {
     // Storage can be unavailable in restrictive environments.
   }
-}
-
-function loadSavedEndpoints(): Record<string, string> {
-  try {
-    return JSON.parse(localStorage.getItem(ENDPOINTS_KEY) ?? "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveEndpoint(fingerprint: string, endpoint: string) {
-  writeStored(ENDPOINTS_KEY, JSON.stringify({ ...loadSavedEndpoints(), [fingerprint]: endpoint }));
 }
 
 function loadSavedActivity(): Activity[] {
@@ -168,10 +155,7 @@ export default function App() {
 
   const selectedPeer = peers?.find((p) => p.fingerprint === selectedPeerId) ?? peers?.[0] ?? null;
   const endpoint = selectedPeer
-    ? (endpointDrafts[selectedPeer.fingerprint] ??
-      selectedPeer.endpoint ??
-      loadSavedEndpoints()[selectedPeer.fingerprint] ??
-      "")
+    ? (endpointDrafts[selectedPeer.fingerprint] ?? selectedPeer.endpoint ?? "")
     : "";
 
   const showToast = useCallback((message: string, tone: Toast["tone"] = "info") => {
@@ -327,7 +311,7 @@ export default function App() {
   }, [refreshPeers, showToast]);
 
   const handleConnect = async (peer: TrustedPeer, targetEndpoint?: string) => {
-    const address = (targetEndpoint ?? endpointDrafts[peer.fingerprint] ?? loadSavedEndpoints()[peer.fingerprint] ?? "").trim();
+    const address = (targetEndpoint ?? endpointDrafts[peer.fingerprint] ?? peer.endpoint ?? "").trim();
     if (!address) {
       showError("Enter a valid IP and port address to connect.");
       return;
@@ -340,7 +324,6 @@ export default function App() {
             p.fingerprint === peer.fingerprint ? { ...p, isConnected: true, endpoint: address } : p,
           ) ?? null,
         );
-        saveEndpoint(peer.fingerprint, address);
         setConnecting(null);
         showToast(`Connected to ${peer.displayName}`);
       }, 500);
@@ -348,7 +331,6 @@ export default function App() {
     }
     try {
       await connectToPeer(peer.fingerprint, address);
-      saveEndpoint(peer.fingerprint, address);
       await refreshPeers();
       showToast(`Connected to ${peer.displayName}`);
     } catch (error) {
@@ -1280,7 +1262,7 @@ function DeviceEntry(props: {
 }) {
   const { peer, isConnecting, onSelect, onConnect, onDisconnect, onUnpair, onError } = props;
   const [permissions, setPermissions] = useState<PeerPermission[] | null>(null);
-  const [addressDraft, setAddressDraft] = useState(() => loadSavedEndpoints()[peer.fingerprint] ?? "");
+  const [addressDraft, setAddressDraft] = useState(peer.endpoint ?? "");
   const [unpairingConfirm, setUnpairingConfirm] = useState(false);
 
   useEffect(() => {

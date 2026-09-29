@@ -9,14 +9,17 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
-use zeroize::Zeroizing;
 
-use identity::{FileSecretStore, IdentitySigner, SecretStore};
-use pairing::{InitiatorPairing, ReplayCache, TrustStore};
+use identity::{FileSecretStore, IdentitySigner};
+use pairing::{DeviceKeys, InitiatorPairing, ReplayCache, TrustStore};
 use permissions::PermissionStore;
 use protocol::CapabilityId;
 use sessions::{Direction, SessionRegistry, SessionState};
 use transport::{DialConfig, TransportCertificate};
+
+/// Paired peers find the desktop here across restarts. If another program holds
+/// it, the listener falls back to a random port for that launch.
+const DEFAULT_LISTEN_PORT: u16 = 47470;
 
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
     bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
@@ -159,12 +162,13 @@ fn get_trusted_peers(state: State<DesktopRuntimeState>) -> Result<Vec<TrustedPee
         .into_iter()
         .map(|p| {
             let is_connected = state.sessions.state(&p.fingerprint) == SessionState::Connected;
+            let endpoint = state.trust_store.last_endpoint(&p.fingerprint).ok().flatten();
             TrustedPeerDto {
                 fingerprint: p.fingerprint,
                 display_name: p.display_name,
                 paired_at: p.paired_at,
                 is_connected,
-                endpoint: None,
+                endpoint,
             }
         })
         .collect();
@@ -466,7 +470,12 @@ async fn connect_to_peer(
         .sessions
         .connect(&peer_fingerprint, peer.transport_spki_hash, addr)
         .await
-        .map_err(|e| format!("Connect failed: {e}"))
+        .map_err(|e| format!("Connect failed: {e}"))?;
+
+    state
+        .trust_store
+        .set_last_endpoint(&peer_fingerprint, &addr.to_string())
+        .map_err(|e| format!("Database error: {e}"))
 }
 
 #[tauri::command]
@@ -612,20 +621,10 @@ fn initialize_desktop_runtime(
     let trust_store = TrustStore::open(db_path)?;
     let permission_store = Arc::new(PermissionStore::open(db_path)?);
 
-    let secret_store = FileSecretStore::new(secrets_dir)?;
-    let identity_signer: Arc<dyn IdentitySigner> = Arc::from(identity::load_or_create_identity(
-        &secret_store,
-        "device_identity",
-    )?);
-
-    let transport_cert = Arc::new(match secret_store.load("transport_cert")? {
-        Some(pem_bytes) => TransportCertificate::from_pem_bytes(&pem_bytes)?,
-        None => {
-            let cert = TransportCertificate::generate()?;
-            secret_store.store("transport_cert", Zeroizing::new(cert.pkcs8_der.clone()))?;
-            cert
-        }
-    });
+    let DeviceKeys {
+        identity_signer,
+        transport_cert,
+    } = DeviceKeys::load_or_create(&FileSecretStore::new(secrets_dir)?)?;
 
     let peers = trust_store.list_peers()?;
     let initial_hashes: HashSet<[u8; 32]> = peers.iter().map(|p| p.transport_spki_hash).collect();
@@ -691,10 +690,13 @@ fn main() {
                 .transport_cert
                 .build_trusted_peers_server_tls(runtime_state.allowed_spki_hashes.clone())
             {
-                let bind_addr = std::net::SocketAddr::from(([0, 0, 0, 0], 0));
-                if let Ok(server_endpoint) =
-                    transport::create_server_endpoint(bind_addr, server_tls)
-                {
+                let bind_to = |port: u16| {
+                    transport::create_server_endpoint(
+                        std::net::SocketAddr::from(([0, 0, 0, 0], port)),
+                        server_tls.clone(),
+                    )
+                };
+                if let Ok(server_endpoint) = bind_to(DEFAULT_LISTEN_PORT).or_else(|_| bind_to(0)) {
                     if let Ok(local_addr) = server_endpoint.local_addr() {
                         let bound_port = local_addr.port();
                         let ephemeral_id = discovery::EphemeralDiscoveryId::generate();

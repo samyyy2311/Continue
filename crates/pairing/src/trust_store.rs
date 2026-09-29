@@ -49,10 +49,40 @@ impl TrustStore {
                 identity_pubkey     BLOB NOT NULL,
                 transport_spki_hash BLOB NOT NULL,
                 display_name        TEXT NOT NULL DEFAULT '',
-                paired_at           INTEGER NOT NULL
+                paired_at           INTEGER NOT NULL,
+                last_endpoint       TEXT
             );",
         )?;
+        // Databases created before last_endpoint existed need the column added.
+        if conn
+            .prepare("SELECT last_endpoint FROM trusted_peers LIMIT 0;")
+            .is_err()
+        {
+            conn.execute_batch("ALTER TABLE trusted_peers ADD COLUMN last_endpoint TEXT;")?;
+        }
         Ok(())
+    }
+
+    /// Remembers the address a peer was last reached at, so it can be dialed again later.
+    pub fn set_last_endpoint(&self, fingerprint: &str, endpoint: &str) -> Result<(), PairingError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE trusted_peers SET last_endpoint = ?2 WHERE fingerprint = ?1;",
+            params![fingerprint, endpoint],
+        )?;
+        Ok(())
+    }
+
+    pub fn last_endpoint(&self, fingerprint: &str) -> Result<Option<String>, PairingError> {
+        let conn = self.conn.lock().unwrap();
+        let endpoint = conn
+            .query_row(
+                "SELECT last_endpoint FROM trusted_peers WHERE fingerprint = ?1;",
+                params![fingerprint],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(endpoint.flatten())
     }
 
     pub fn add_peer(&self, peer: &TrustedPeer) -> Result<(), PairingError> {
@@ -234,7 +264,41 @@ mod tests {
         let list = store.list_peers().unwrap();
         assert_eq!(list.len(), 1);
 
+        assert_eq!(store.last_endpoint(&peer.fingerprint).unwrap(), None);
+        store
+            .set_last_endpoint(&peer.fingerprint, "192.168.1.50:47470")
+            .unwrap();
+        store.add_peer(&peer).unwrap();
+        assert_eq!(
+            store.last_endpoint(&peer.fingerprint).unwrap().as_deref(),
+            Some("192.168.1.50:47470")
+        );
+
         assert!(store.remove_peer(&peer.fingerprint).unwrap());
         assert!(store.get_peer(&peer.fingerprint).unwrap().is_none());
+    }
+
+    #[test]
+    fn adds_last_endpoint_to_old_databases() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE trusted_peers (
+                fingerprint         TEXT PRIMARY KEY,
+                identity_pubkey     BLOB NOT NULL,
+                transport_spki_hash BLOB NOT NULL,
+                display_name        TEXT NOT NULL DEFAULT '',
+                paired_at           INTEGER NOT NULL
+            );
+            INSERT INTO trusted_peers VALUES ('fp', x'00', x'00', 'Phone', 1);",
+        )
+        .unwrap();
+
+        let store = TrustStore::new(conn).unwrap();
+        assert_eq!(store.last_endpoint("fp").unwrap(), None);
+        store.set_last_endpoint("fp", "10.0.0.2:47470").unwrap();
+        assert_eq!(
+            store.last_endpoint("fp").unwrap().as_deref(),
+            Some("10.0.0.2:47470")
+        );
     }
 }
