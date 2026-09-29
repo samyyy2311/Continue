@@ -279,37 +279,48 @@ private fun PairingCard(onPair: suspend (String) -> String?) {
 
             message?.let { Text(text = it, fontSize = 14.sp, color = Rose500) }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(
-                    onClick = { if (mode == PairMode.Scan) mode = PairMode.Type else startScanning() },
-                    enabled = !pairing,
-                ) {
-                    Text(if (mode == PairMode.Scan) "Type the code" else "Scan instead")
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(
-                    onClick = {
-                        mode = PairMode.Closed
-                        message = null
-                    },
-                    enabled = !pairing,
-                    colors = ButtonDefaults.buttonColors(containerColor = Slate700),
-                ) {
-                    Text("Cancel")
-                }
-                if (mode == PairMode.Type) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = { pair(typedCode.trim()) },
-                        enabled = !pairing && typedCode.isNotBlank(),
-                    ) {
-                        Text("Pair")
-                    }
-                }
+            PairingButtons(
+                scanning = mode == PairMode.Scan,
+                enabled = !pairing,
+                canPairTypedCode = typedCode.isNotBlank(),
+                onSwitchMode = { if (mode == PairMode.Scan) mode = PairMode.Type else startScanning() },
+                onCancel = {
+                    mode = PairMode.Closed
+                    message = null
+                },
+                onPairTypedCode = { pair(typedCode.trim()) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun PairingButtons(
+    scanning: Boolean,
+    enabled: Boolean,
+    canPairTypedCode: Boolean,
+    onSwitchMode: () -> Unit,
+    onCancel: () -> Unit,
+    onPairTypedCode: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(onClick = onSwitchMode, enabled = enabled) {
+            Text(if (scanning) "Type the code" else "Scan instead")
+        }
+        Button(
+            onClick = onCancel,
+            enabled = enabled,
+            colors = ButtonDefaults.buttonColors(containerColor = Slate700),
+        ) {
+            Text("Cancel")
+        }
+        if (!scanning) {
+            Button(onClick = onPairTypedCode, enabled = enabled && canPairTypedCode) {
+                Text("Pair")
             }
         }
     }
