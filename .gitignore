@@ -33,3 +33,6 @@ apps/desktop/src-tauri/gen/
 local.properties
 *.apk
 *.aab
+
+# Local AI tool files
+skills-lock.json
