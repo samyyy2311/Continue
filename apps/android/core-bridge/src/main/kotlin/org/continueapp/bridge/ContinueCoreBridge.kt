@@ -1,5 +1,29 @@
 package org.continueapp.bridge
 
+import org.continueapp.bridge.ffi.ContinueFfiException
+import org.continueapp.bridge.ffi.TrustedPeerFfi
+import org.continueapp.bridge.ffi.awaitPairingResult as coreAwaitPairingResult
+import org.continueapp.bridge.ffi.cancelPairing as coreCancelPairing
+import org.continueapp.bridge.ffi.connectToPeer as coreConnectToPeer
+import org.continueapp.bridge.ffi.disconnect as coreDisconnect
+import org.continueapp.bridge.ffi.generateQrPayload as coreGenerateQrPayload
+import org.continueapp.bridge.ffi.getCapabilities as coreGetCapabilities
+import org.continueapp.bridge.ffi.getDeviceFingerprint as coreGetDeviceFingerprint
+import org.continueapp.bridge.ffi.getDeviceSpkiHash as coreGetDeviceSpkiHash
+import org.continueapp.bridge.ffi.initCore as coreInitCore
+import org.continueapp.bridge.ffi.isPeerConnected as coreIsPeerConnected
+import org.continueapp.bridge.ffi.listTrustedPeers as coreListTrustedPeers
+import org.continueapp.bridge.ffi.pairFromQr as corePairFromQr
+import org.continueapp.bridge.ffi.queryPermission as coreQueryPermission
+import org.continueapp.bridge.ffi.removeTrustedPeer as coreRemoveTrustedPeer
+import org.continueapp.bridge.ffi.revokePermission as coreRevokePermission
+import org.continueapp.bridge.ffi.sendClipboardText as coreSendClipboardText
+import org.continueapp.bridge.ffi.sendFile as coreSendFile
+import org.continueapp.bridge.ffi.sendNotification as coreSendNotification
+import org.continueapp.bridge.ffi.setPermission as coreSetPermission
+import org.continueapp.bridge.ffi.startDiscovery as coreStartDiscovery
+import org.continueapp.bridge.ffi.startPairingServer as coreStartPairingServer
+import org.continueapp.bridge.ffi.stopDiscovery as coreStopDiscovery
 import java.util.concurrent.ConcurrentHashMap
 
 private const val SECONDS_DIVISOR = 1000L
@@ -82,18 +106,7 @@ interface ContinueCoreBridge {
     )
 
     companion object {
-        fun create(forceMock: Boolean = false): ContinueCoreBridge {
-            if (forceMock) {
-                return MockContinueCoreBridge()
-            }
-            return try {
-                NativeContinueCoreBridge()
-            } catch (_: UnsatisfiedLinkError) {
-                MockContinueCoreBridge()
-            } catch (_: NoClassDefFoundError) {
-                MockContinueCoreBridge()
-            }
-        }
+        fun create(): ContinueCoreBridge = NativeContinueCoreBridge()
 
         fun mock(): MockContinueCoreBridge = MockContinueCoreBridge()
     }
@@ -202,7 +215,7 @@ class MockContinueCoreBridge : ContinueCoreBridge {
     ): String {
         checkInitialized()
         val key = "$peerFingerprint:$capabilityId"
-        return permissions[key] ?: PermissionGrant.PROMPT.rawValue
+        return permissions[key] ?: PermissionGrant.ASK.rawValue
     }
 
     override fun setPermission(
@@ -273,177 +286,115 @@ class MockContinueCoreBridge : ContinueCoreBridge {
     }
 }
 
+/** Calls the Rust core through the UniFFI bindings generated at build time. */
 @Suppress("TooManyFunctions")
 class NativeContinueCoreBridge : ContinueCoreBridge {
-    init {
-        System.loadLibrary("continue_ffi")
-    }
+    override fun initCore(dbPath: String) = native { coreInitCore(dbPath) }
 
-    override fun initCore(dbPath: String) {
-        initCoreNative(dbPath)
-    }
+    override fun getDeviceFingerprint(): String = native { coreGetDeviceFingerprint() }
 
-    override fun getDeviceFingerprint(): String = getDeviceFingerprintNative()
-
-    override fun getDeviceSpkiHash(): String = getDeviceSpkiHashNative()
+    override fun getDeviceSpkiHash(): String = native { coreGetDeviceSpkiHash() }
 
     override fun startDiscovery(
         port: Int,
         protocolVersion: Long,
-    ) {
-        startDiscoveryNative(port, protocolVersion)
-    }
+    ) = native { coreStartDiscovery(port.toUShort(), protocolVersion.toUInt()) }
 
-    override fun stopDiscovery() {
-        stopDiscoveryNative()
-    }
+    override fun stopDiscovery() = native { coreStopDiscovery() }
 
-    override fun generateQrPayload(endpoint: String): String = generateQrPayloadNative(endpoint)
+    override fun generateQrPayload(endpoint: String): String =
+        native { coreGenerateQrPayload(endpoint) }
 
     override fun startPairingServer(
         listenPort: Int,
         advertisedEndpoint: String,
-    ): String = startPairingServerNative(listenPort, advertisedEndpoint)
+    ): String = native { coreStartPairingServer(listenPort.toUShort(), advertisedEndpoint) }
 
-    override fun awaitPairingResult(timeoutSecs: Long): TrustedPeer = awaitPairingResultNative(timeoutSecs)
+    override fun awaitPairingResult(timeoutSecs: Long): TrustedPeer =
+        native { coreAwaitPairingResult(timeoutSecs.toUInt()).toTrustedPeer() }
 
-    override fun cancelPairing() {
-        cancelPairingNative()
-    }
+    override fun cancelPairing() = native { coreCancelPairing() }
 
-    override fun pairFromQr(qrPayload: String): TrustedPeer = pairFromQrNative(qrPayload)
+    override fun pairFromQr(qrPayload: String): TrustedPeer =
+        native { corePairFromQr(qrPayload).toTrustedPeer() }
 
-    override fun listTrustedPeers(): List<TrustedPeer> = listTrustedPeersNative().toList()
+    override fun listTrustedPeers(): List<TrustedPeer> =
+        native { coreListTrustedPeers().map { it.toTrustedPeer() } }
 
-    override fun removeTrustedPeer(fingerprint: String): Boolean = removeTrustedPeerNative(fingerprint)
+    override fun removeTrustedPeer(fingerprint: String): Boolean =
+        native { coreRemoveTrustedPeer(fingerprint) }
 
-    override fun getCapabilities(): List<Int> = getCapabilitiesNative().toList()
+    override fun getCapabilities(): List<Int> = native { coreGetCapabilities().map { it.toInt() } }
 
     override fun queryPermission(
         peerFingerprint: String,
         capabilityId: Int,
-    ): String = queryPermissionNative(peerFingerprint, capabilityId)
+    ): String = native { coreQueryPermission(peerFingerprint, capabilityId.toUInt()) }
 
     override fun setPermission(
         peerFingerprint: String,
         capabilityId: Int,
         grant: String,
-    ) {
-        setPermissionNative(peerFingerprint, capabilityId, grant)
-    }
+    ) = native { coreSetPermission(peerFingerprint, capabilityId.toUInt(), grant) }
 
     override fun revokePermission(
         peerFingerprint: String,
         capabilityId: Int,
-    ) {
-        revokePermissionNative(peerFingerprint, capabilityId)
-    }
+    ) = native { coreRevokePermission(peerFingerprint, capabilityId.toUInt()) }
 
     override fun connectToPeer(
         peerFingerprint: String,
         endpoint: String,
-    ) {
-        connectToPeerNative(peerFingerprint, endpoint)
-    }
+    ) = native { coreConnectToPeer(peerFingerprint, endpoint) }
 
-    override fun isPeerConnected(peerFingerprint: String): Boolean = isPeerConnectedNative(peerFingerprint)
+    override fun isPeerConnected(peerFingerprint: String): Boolean =
+        native { coreIsPeerConnected(peerFingerprint) }
 
-    override fun disconnect(peerFingerprint: String) {
-        disconnectNative(peerFingerprint)
-    }
+    override fun disconnect(peerFingerprint: String) = native { coreDisconnect(peerFingerprint) }
 
     override fun sendFile(
         peerFingerprint: String,
         filePath: String,
-    ): Long = sendFileNative(peerFingerprint, filePath)
+    ): Long = native { coreSendFile(peerFingerprint, filePath).toLong() }
 
     override fun sendClipboardText(
         peerFingerprint: String,
         text: String,
-    ) {
-        sendClipboardTextNative(peerFingerprint, text)
-    }
+    ) = native { coreSendClipboardText(peerFingerprint, text) }
 
     override fun sendNotification(
         peerFingerprint: String,
         title: String,
         body: String,
         appName: String,
-    ) {
-        sendNotificationNative(peerFingerprint, title, body, appName)
-    }
-
-    private external fun initCoreNative(dbPath: String)
-
-    private external fun getDeviceFingerprintNative(): String
-
-    private external fun getDeviceSpkiHashNative(): String
-
-    private external fun startDiscoveryNative(
-        port: Int,
-        protocolVersion: Long,
-    )
-
-    private external fun stopDiscoveryNative()
-
-    private external fun generateQrPayloadNative(endpoint: String): String
-
-    private external fun startPairingServerNative(
-        listenPort: Int,
-        advertisedEndpoint: String,
-    ): String
-
-    private external fun awaitPairingResultNative(timeoutSecs: Long): TrustedPeer
-
-    private external fun cancelPairingNative()
-
-    private external fun pairFromQrNative(qrPayload: String): TrustedPeer
-
-    private external fun listTrustedPeersNative(): Array<TrustedPeer>
-
-    private external fun removeTrustedPeerNative(fingerprint: String): Boolean
-
-    private external fun getCapabilitiesNative(): IntArray
-
-    private external fun queryPermissionNative(
-        peerFingerprint: String,
-        capabilityId: Int,
-    ): String
-
-    private external fun setPermissionNative(
-        peerFingerprint: String,
-        capabilityId: Int,
-        grant: String,
-    )
-
-    private external fun revokePermissionNative(
-        peerFingerprint: String,
-        capabilityId: Int,
-    )
-
-    private external fun connectToPeerNative(
-        peerFingerprint: String,
-        endpoint: String,
-    )
-
-    private external fun isPeerConnectedNative(peerFingerprint: String): Boolean
-
-    private external fun disconnectNative(peerFingerprint: String)
-
-    private external fun sendFileNative(
-        peerFingerprint: String,
-        filePath: String,
-    ): Long
-
-    private external fun sendClipboardTextNative(
-        peerFingerprint: String,
-        text: String,
-    )
-
-    private external fun sendNotificationNative(
-        peerFingerprint: String,
-        title: String,
-        body: String,
-        appName: String,
-    )
+    ) = native { coreSendNotification(peerFingerprint, title, body, appName) }
 }
+
+private fun TrustedPeerFfi.toTrustedPeer() =
+    TrustedPeer(
+        fingerprint = fingerprint,
+        displayName = displayName,
+        pairedAt = pairedAt.toLong(),
+    )
+
+/** Runs a core call, turning its errors into the bridge's own exception types. */
+private inline fun <T> native(call: () -> T): T =
+    try {
+        call()
+    } catch (e: ContinueFfiException) {
+        val message = e.message.orEmpty()
+        throw when (e) {
+            is ContinueFfiException.InternalException ->
+                ContinueException.InternalErrorException(message)
+            is ContinueFfiException.InvalidQr ->
+                ContinueException.InvalidQrException(message)
+            is ContinueFfiException.PairingFailed ->
+                ContinueException.PairingFailedException(message)
+            is ContinueFfiException.PairingTimeout ->
+                ContinueException.PairingTimeoutException(message)
+            is ContinueFfiException.DatabaseException ->
+                ContinueException.DatabaseErrorException(message)
+            is ContinueFfiException.NotInitialized ->
+                ContinueException.NotInitializedException(message)
+        }
+    }

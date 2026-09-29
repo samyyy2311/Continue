@@ -5,6 +5,9 @@ plugins {
     id("io.gitlab.arturbosch.detekt")
 }
 
+val uniffiBindingsDir = layout.buildDirectory.dir("generated/uniffi")
+val rustLibsDir = layout.buildDirectory.dir("rustJniLibs")
+
 android {
     namespace = "org.continueapp.bridge"
     compileSdk = 34
@@ -42,6 +45,65 @@ android {
         checkReleaseBuilds = false
         warningsAsErrors = false
     }
+
+    sourceSets["main"].java.srcDir(uniffiBindingsDir)
+    sourceSets["main"].jniLibs.srcDir(rustLibsDir)
+}
+
+// The Rust core lives at the repository root and is built for each Android ABI with cargo-ndk.
+// Cargo skips work that is already up to date, so these always run and stay cheap.
+val repoRoot = rootDir.resolve("../..")
+
+val buildRustCore by tasks.registering(Exec::class) {
+    description = "Builds the Rust core library for each Android ABI."
+    workingDir = repoRoot
+    commandLine(
+        "cargo",
+        "ndk",
+        "-t",
+        "arm64-v8a",
+        "-t",
+        "armeabi-v7a",
+        "-t",
+        "x86_64",
+        "--platform",
+        android.defaultConfig.minSdk.toString(),
+        "-o",
+        rustLibsDir.get().asFile.absolutePath,
+        "build",
+        "--release",
+        "-p",
+        "ffi",
+    )
+}
+
+val generateUniffiBindings by tasks.registering(Exec::class) {
+    description = "Generates the Kotlin bindings for the Rust core."
+    workingDir = repoRoot
+    commandLine(
+        "cargo",
+        "run",
+        "-p",
+        "ffi",
+        "--features",
+        "bindgen",
+        "--bin",
+        "uniffi-bindgen",
+        "--",
+        "generate",
+        "crates/ffi/src/continue.udl",
+        "--language",
+        "kotlin",
+        "--config",
+        "crates/ffi/uniffi.toml",
+        "--no-format",
+        "--out-dir",
+        uniffiBindingsDir.get().asFile.absolutePath,
+    )
+}
+
+tasks.named("preBuild") {
+    dependsOn(buildRustCore, generateUniffiBindings)
 }
 
 ktlint {
@@ -49,6 +111,9 @@ ktlint {
     android.set(true)
     outputToConsole.set(true)
     ignoreFailures.set(false)
+    filter {
+        exclude { it.file.path.contains("generated") }
+    }
 }
 
 detekt {

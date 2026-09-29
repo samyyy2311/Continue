@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Contributors to the Continue project
+# SPDX-License-Identifier: Apache-2.0
+
+# `continue` is a Kotlin keyword, so the default package name can't be used.
+[bindings.kotlin]
+package_name = "org.continueapp.bridge.ffi"
+cdylib_name = "continue_ffi"
