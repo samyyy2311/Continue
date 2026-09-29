@@ -29,6 +29,9 @@ pub enum PairingError {
     #[error("Cryptographic operation error: {0}")]
     Crypto(#[from] crypto::CryptoError),
 
+    #[error("Device key storage error: {0}")]
+    Identity(#[from] identity::IdentityError),
+
     #[error("Identity signer error: {0}")]
     Signer(#[from] identity::SignerError),
 

@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 use discovery::{DiscoveryAdvertiser, EphemeralDiscoveryId};
-use identity::IdentitySigner;
-use pairing::{InitiatorPairing, ReplayCache, TrustStore, TrustedPeer};
+use identity::{FileSecretStore, IdentitySigner};
+use pairing::{DeviceKeys, InitiatorPairing, ReplayCache, TrustStore, TrustedPeer};
 use permissions::{PermissionStore, PersistedGrant};
 use protocol::CapabilityId;
 use sessions::{SessionMultiplexer, SessionRegistry, SessionState};
@@ -86,15 +86,10 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
     let permission_store = PermissionStore::open(&db_path)
         .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;
 
-    let transport_cert = Arc::new(
-        TransportCertificate::generate()
-            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?,
-    );
-
-    let seed = crypto::keys::generate_ed25519_seed();
-    let signing_key = crypto::keys::signing_key_from_seed(&seed.0);
-    let identity_signer: Arc<dyn IdentitySigner> =
-        Arc::new(identity::InMemorySigner::new(signing_key));
+    let DeviceKeys {
+        identity_signer,
+        transport_cert,
+    } = load_device_keys(&db_path)?;
 
     let local_fingerprint = identity::Fingerprint::from_verifying_key(
         &identity_signer
@@ -135,6 +130,31 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
     let mut lock = CORE.lock().unwrap();
     *lock = Some(state);
     Ok(())
+}
+
+/// Keys live in a `secrets` folder beside the database so pairings survive a
+/// restart. An in-memory database (used by tests) gets throwaway keys.
+// The files sit in app-private storage. Wrapping them with the Android Keystore comes later.
+fn load_device_keys(db_path: &str) -> Result<DeviceKeys, ContinueFfiError> {
+    let internal = |e: String| ContinueFfiError::InternalError(e);
+
+    if db_path == ":memory:" {
+        let seed = crypto::keys::generate_ed25519_seed();
+        let signing_key = crypto::keys::signing_key_from_seed(&seed.0);
+        let transport_cert =
+            TransportCertificate::generate().map_err(|e| internal(e.to_string()))?;
+        return Ok(DeviceKeys {
+            identity_signer: Arc::new(identity::InMemorySigner::new(signing_key)),
+            transport_cert: Arc::new(transport_cert),
+        });
+    }
+
+    let secrets_dir = std::path::Path::new(db_path)
+        .parent()
+        .ok_or_else(|| internal(format!("Database path has no folder: {db_path}")))?
+        .join("secrets");
+    let store = FileSecretStore::new(secrets_dir).map_err(|e| internal(e.to_string()))?;
+    DeviceKeys::load_or_create(&store).map_err(|e| internal(e.to_string()))
 }
 
 pub fn get_device_fingerprint() -> Result<String, ContinueFfiError> {
