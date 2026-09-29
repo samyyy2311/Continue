@@ -10,7 +10,7 @@ limits = { path = "../limits" }
 protocol = { path = "../protocol" }
 mdns-sd = "0.11"
 flume = { version = "0.11", default-features = false, features = ["async"] }
-tokio = { workspace = true, features = ["sync", "time", "rt"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 rand = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

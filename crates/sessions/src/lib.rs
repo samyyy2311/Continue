@@ -6,6 +6,7 @@ pub mod backoff;
 pub mod capabilities_router;
 pub mod error;
 pub mod keepalive;
+pub mod listener;
 pub mod multiplexer;
 pub mod registry;
 pub mod session;
@@ -16,6 +17,7 @@ pub use backoff::ReconnectPolicy;
 pub use capabilities_router::{spawn_capabilities_dispatcher, SessionCapabilityHandlers};
 pub use error::SessionError;
 pub use keepalive::KeepaliveTracker;
+pub use listener::{accept_peers, listen_for_peers, DEFAULT_LISTEN_PORT};
 pub use multiplexer::{
     close_code, open_capability_stream, read_capability_stream_header, IncomingCapabilityStream,
     SessionMultiplexer,

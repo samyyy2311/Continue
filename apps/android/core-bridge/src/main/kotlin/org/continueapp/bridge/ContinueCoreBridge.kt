@@ -37,10 +37,8 @@ interface ContinueCoreBridge {
 
     fun getDeviceSpkiHash(): String
 
-    fun startDiscovery(
-        port: Int = 41234,
-        protocolVersion: Long = 1L,
-    )
+    /** Advertises this device's listener and connects to paired devices as they appear. */
+    fun startDiscovery(protocolVersion: Long = 1L)
 
     fun stopDiscovery()
 
@@ -134,10 +132,7 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         return "mock-device-spki-hash-0001"
     }
 
-    override fun startDiscovery(
-        port: Int,
-        protocolVersion: Long,
-    ) {
+    override fun startDiscovery(protocolVersion: Long) {
         checkInitialized()
         isDiscovering = true
     }
@@ -295,10 +290,7 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
 
     override fun getDeviceSpkiHash(): String = native { coreGetDeviceSpkiHash() }
 
-    override fun startDiscovery(
-        port: Int,
-        protocolVersion: Long,
-    ) = native { coreStartDiscovery(port.toUShort(), protocolVersion.toUInt()) }
+    override fun startDiscovery(protocolVersion: Long) = native { coreStartDiscovery(protocolVersion.toUInt()) }
 
     override fun stopDiscovery() = native { coreStopDiscovery() }
 

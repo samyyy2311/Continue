@@ -6,10 +6,10 @@
 
 uniffi::include_scaffolding!("continue");
 
-use std::sync::{Arc, Mutex};
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, RwLock};
 use thiserror::Error;
 
-use discovery::{DiscoveryAdvertiser, EphemeralDiscoveryId};
 use identity::{FileSecretStore, IdentitySigner};
 use pairing::{DeviceKeys, InitiatorPairing, ReplayCache, TrustStore, TrustedPeer};
 use permissions::{PermissionStore, PersistedGrant};
@@ -50,10 +50,12 @@ struct CoreState {
     transport_cert: Arc<TransportCertificate>,
     identity_signer: Arc<dyn IdentitySigner>,
     replay_cache: Arc<ReplayCache>,
-    advertiser: Option<DiscoveryAdvertiser>,
-    auto_connect: Option<tokio::task::JoinHandle<()>>,
     active_pairing: Option<ActivePairing>,
     sessions: SessionRegistry,
+    /// Transport keys of paired devices; only these may connect to `listener`.
+    trusted_keys: Arc<RwLock<HashSet<[u8; 32]>>>,
+    listener: quinn::Endpoint,
+    discovery_tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -75,6 +77,12 @@ impl From<TrustedPeer> for TrustedPeerFfi {
 }
 
 pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
+    // Shut the previous core down first so its listener gives up the port.
+    let previous = CORE.lock().unwrap().take();
+    if let Some(previous) = previous {
+        previous.listener.close(0u32.into(), b"restarting");
+    }
+
     let runtime = Arc::new(
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -116,6 +124,24 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
         })),
     );
 
+    let paired_keys = trust_store
+        .list_peers()
+        .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?
+        .into_iter()
+        .map(|peer| peer.transport_spki_hash)
+        .collect();
+    let trusted_keys = Arc::new(RwLock::new(paired_keys));
+    let listener = {
+        let _runtime = runtime.enter();
+        sessions::listen_for_peers(&transport_cert, trusted_keys.clone())
+            .map_err(|e| ContinueFfiError::InternalError(format!("Could not listen: {e}")))?
+    };
+    runtime.spawn(sessions::accept_peers(
+        listener.clone(),
+        sessions.clone(),
+        trust_store.clone(),
+    ));
+
     let state = CoreState {
         runtime,
         trust_store,
@@ -123,10 +149,11 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
         transport_cert,
         identity_signer,
         replay_cache: Arc::new(ReplayCache::new()),
-        advertiser: None,
-        auto_connect: None,
         active_pairing: None,
         sessions,
+        trusted_keys,
+        listener,
+        discovery_tasks: Vec::new(),
     };
 
     let mut lock = CORE.lock().unwrap();
@@ -177,40 +204,41 @@ pub fn get_device_spki_hash() -> Result<String, ContinueFfiError> {
     Ok(hex_encode(state.transport_cert.spki_hash))
 }
 
-/// Advertises this device and connects to paired devices as they appear on the network.
-pub fn start_discovery(port: u16, protocol_version: u32) -> Result<(), ContinueFfiError> {
+/// Advertises this device's listener and connects to paired devices as they appear on
+/// the network, until `stop_discovery`.
+pub fn start_discovery(protocol_version: u32) -> Result<(), ContinueFfiError> {
     let mut lock = CORE.lock().unwrap();
     let state = lock.as_mut().ok_or(ContinueFfiError::NotInitialized)?;
+    let port = state
+        .listener
+        .local_addr()
+        .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?
+        .port();
 
-    let ephemeral_id = EphemeralDiscoveryId::generate();
-    let advertiser = DiscoveryAdvertiser::start(port, ephemeral_id, protocol_version)
-        .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
-
-    if let Some(previous) = state.advertiser.replace(advertiser) {
-        let _ = previous.unregister();
-    }
-    if let Some(task) = state.auto_connect.take() {
-        task.abort();
-    }
-    state.auto_connect = Some(state.runtime.spawn(sessions::connect_discovered_peers(
-        state.sessions.clone(),
-        state.trust_store.clone(),
-    )));
+    stop_tasks(&mut state.discovery_tasks);
+    state.discovery_tasks = vec![
+        state
+            .runtime
+            .spawn(discovery::advertise(port, protocol_version)),
+        state.runtime.spawn(sessions::connect_discovered_peers(
+            state.sessions.clone(),
+            state.trust_store.clone(),
+        )),
+    ];
     Ok(())
 }
 
 pub fn stop_discovery() -> Result<(), ContinueFfiError> {
     let mut lock = CORE.lock().unwrap();
     let state = lock.as_mut().ok_or(ContinueFfiError::NotInitialized)?;
+    stop_tasks(&mut state.discovery_tasks);
+    Ok(())
+}
 
-    if let Some(task) = state.auto_connect.take() {
+fn stop_tasks(tasks: &mut Vec<tokio::task::JoinHandle<()>>) {
+    for task in tasks.drain(..) {
         task.abort();
     }
-    if let Some(adv) = state.advertiser.take() {
-        adv.unregister()
-            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
-    }
-    Ok(())
 }
 
 pub fn generate_qr_payload(endpoint: String) -> Result<String, ContinueFfiError> {
@@ -323,13 +351,13 @@ pub fn start_pairing_server(
 }
 
 pub fn await_pairing_result(timeout_secs: u32) -> Result<TrustedPeerFfi, ContinueFfiError> {
-    let (runtime, mut active_pairing) = {
+    let (runtime, trusted_keys, mut active_pairing) = {
         let mut lock = CORE.lock().unwrap();
         let state = lock.as_mut().ok_or(ContinueFfiError::NotInitialized)?;
         let pairing = state.active_pairing.take().ok_or_else(|| {
             ContinueFfiError::InternalError("No active pairing server".to_string())
         })?;
-        (state.runtime.clone(), pairing)
+        (state.runtime.clone(), state.trusted_keys.clone(), pairing)
     };
 
     let result = runtime.block_on(async {
@@ -345,7 +373,10 @@ pub fn await_pairing_result(timeout_secs: u32) -> Result<TrustedPeerFfi, Continu
         .close(0u32.into(), b"complete");
 
     match result {
-        Ok(Ok(Ok(peer))) => Ok(peer.into()),
+        Ok(Ok(Ok(peer))) => {
+            trust_key(&trusted_keys, peer.transport_spki_hash);
+            Ok(peer.into())
+        }
         Ok(Ok(Err(pairing_err))) => Err(ContinueFfiError::PairingFailed(pairing_err.to_string())),
         Ok(Err(_channel_closed)) => Err(ContinueFfiError::PairingFailed(
             "Pairing cancelled or aborted".to_string(),
@@ -365,7 +396,7 @@ pub fn cancel_pairing() -> Result<(), ContinueFfiError> {
 }
 
 pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiError> {
-    let (runtime, transport_cert, identity_signer, trust_store) = {
+    let (runtime, transport_cert, identity_signer, trust_store, trusted_keys) = {
         let lock = CORE.lock().unwrap();
         let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
         (
@@ -373,6 +404,7 @@ pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiErr
             state.transport_cert.clone(),
             state.identity_signer.clone(),
             state.trust_store.clone(),
+            state.trusted_keys.clone(),
         )
     };
 
@@ -406,8 +438,16 @@ pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiErr
             .await
             .map_err(|e| ContinueFfiError::PairingFailed(e.to_string()))?;
 
+        trust_key(&trusted_keys, trusted_peer.transport_spki_hash);
         Ok(trusted_peer.into())
     })
+}
+
+fn trust_key(trusted_keys: &RwLock<HashSet<[u8; 32]>>, key: [u8; 32]) {
+    trusted_keys
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key);
 }
 
 pub fn list_trusted_peers() -> Result<Vec<TrustedPeerFfi>, ContinueFfiError> {
@@ -423,16 +463,24 @@ pub fn list_trusted_peers() -> Result<Vec<TrustedPeerFfi>, ContinueFfiError> {
 }
 
 pub fn remove_trusted_peer(fingerprint: String) -> Result<bool, ContinueFfiError> {
-    let (runtime, trust_store, sessions) = {
+    let (runtime, trust_store, sessions, trusted_keys) = {
         let lock = CORE.lock().unwrap();
         let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
         (
             state.runtime.clone(),
             state.trust_store.clone(),
             state.sessions.clone(),
+            state.trusted_keys.clone(),
         )
     };
 
+    // Revoke the key before closing the session so the device can't reconnect in between.
+    if let Ok(Some(peer)) = trust_store.get_peer(&fingerprint) {
+        trusted_keys
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&peer.transport_spki_hash);
+    }
     let removed = trust_store
         .remove_peer(&fingerprint)
         .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;

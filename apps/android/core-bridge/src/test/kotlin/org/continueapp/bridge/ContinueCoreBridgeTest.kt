@@ -38,7 +38,7 @@ class ContinueCoreBridgeTest {
     @Test
     fun discoveryLifecycle() {
         bridge.initCore(":memory:")
-        bridge.startDiscovery(41234, 1L)
+        bridge.startDiscovery()
         bridge.stopDiscovery()
     }
 

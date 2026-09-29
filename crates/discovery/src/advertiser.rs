@@ -51,17 +51,17 @@ impl DiscoveryAdvertiser {
 
         Ok(Self { daemon, fullname })
     }
+}
 
-    /// Stop advertising and unregister the service from the local network.
-    pub fn unregister(self) -> Result<(), DiscoveryError> {
-        let receiver = self.daemon.unregister(&self.fullname)?;
-        let _ = receiver.recv();
-        self.daemon.shutdown()?;
-        Ok(())
+/// Dropping the advertiser tells the network the device is gone and stops its daemon.
+impl Drop for DiscoveryAdvertiser {
+    fn drop(&mut self) {
+        let _ = self.daemon.unregister(&self.fullname);
+        let _ = self.daemon.shutdown();
     }
 }
 
-/// Keeps this device advertised on `port` for as long as the future runs. Retries when
+/// Keeps this device advertised on `port` until the future is dropped. Retries when
 /// advertising fails, e.g. with no network at startup, and switches to a fresh ID once
 /// a day so the device can't be tracked across networks.
 pub async fn advertise(port: u16, protocol_version: u32) {
@@ -69,8 +69,7 @@ pub async fn advertise(port: u16, protocol_version: u32) {
         match DiscoveryAdvertiser::start(port, EphemeralDiscoveryId::generate(), protocol_version) {
             Ok(advertiser) => {
                 tokio::time::sleep(ROTATION_PERIOD).await;
-                // Unregistering waits for the daemon to confirm.
-                let _ = tokio::task::spawn_blocking(move || advertiser.unregister()).await;
+                drop(advertiser);
             }
             Err(error) => {
                 warn!("Advertising on the local network failed: {error}");

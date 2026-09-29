@@ -14,12 +14,8 @@ use identity::{FileSecretStore, IdentitySigner};
 use pairing::{DeviceKeys, InitiatorPairing, ReplayCache, TrustStore};
 use permissions::PermissionStore;
 use protocol::CapabilityId;
-use sessions::{Direction, SessionRegistry, SessionState};
+use sessions::{SessionRegistry, SessionState};
 use transport::{DialConfig, TransportCertificate};
-
-/// Paired peers find the desktop here across restarts. If another program holds
-/// it, the listener falls back to a random port for that launch.
-const DEFAULT_LISTEN_PORT: u16 = 47470;
 
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
     bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
@@ -687,62 +683,26 @@ fn main() {
                 initialize_desktop_runtime(app.handle(), &db_path, &secrets_dir, download_dir)
                     .expect("Failed to initialize Continue desktop runtime engine");
 
-            // Setup always-listening QUIC endpoint for paired peers
-            if let Ok(server_tls) = runtime_state
-                .transport_cert
-                .build_trusted_peers_server_tls(runtime_state.allowed_spki_hashes.clone())
+            // Paired devices connect here; discovery advertises it and dials them back.
+            match sessions::listen_for_peers(
+                &runtime_state.transport_cert,
+                runtime_state.allowed_spki_hashes.clone(),
+            )
+            .and_then(|endpoint| Ok((endpoint.local_addr()?.port(), endpoint)))
             {
-                let bind_to = |port: u16| {
-                    transport::create_server_endpoint(
-                        std::net::SocketAddr::from(([0, 0, 0, 0], port)),
-                        server_tls.clone(),
-                    )
-                };
-                if let Ok(server_endpoint) = bind_to(DEFAULT_LISTEN_PORT).or_else(|_| bind_to(0)) {
-                    if let Ok(local_addr) = server_endpoint.local_addr() {
-                        tauri::async_runtime::spawn(discovery::advertise(local_addr.port(), 1));
-                        tauri::async_runtime::spawn(sessions::connect_discovered_peers(
-                            runtime_state.sessions.clone(),
-                            runtime_state.trust_store.clone(),
-                        ));
-
-                        let accept_endpoint = server_endpoint;
-                        let trust_store = runtime_state.trust_store.clone();
-                        let sessions = runtime_state.sessions.clone();
-
-                        tauri::async_runtime::spawn(async move {
-                            while let Some(incoming) = accept_endpoint.accept().await {
-                                let conn = match incoming.await {
-                                    Ok(c) => c,
-                                    Err(_) => continue,
-                                };
-
-                                let spki_hash = match transport::extract_peer_spki_hash(&conn) {
-                                    Some(h) => h,
-                                    None => {
-                                        conn.close(0u32.into(), b"unknown_peer");
-                                        continue;
-                                    }
-                                };
-
-                                let peer = match trust_store.get_peer_by_spki_hash(&spki_hash) {
-                                    Ok(Some(p)) => p,
-                                    _ => {
-                                        conn.close(0u32.into(), b"untrusted_peer");
-                                        continue;
-                                    }
-                                };
-
-                                sessions.attach(
-                                    &peer.fingerprint,
-                                    spki_hash,
-                                    conn,
-                                    Direction::Inbound,
-                                );
-                            }
-                        });
-                    }
+                Ok((port, endpoint)) => {
+                    tauri::async_runtime::spawn(discovery::advertise(port, 1));
+                    tauri::async_runtime::spawn(sessions::connect_discovered_peers(
+                        runtime_state.sessions.clone(),
+                        runtime_state.trust_store.clone(),
+                    ));
+                    tauri::async_runtime::spawn(sessions::accept_peers(
+                        endpoint,
+                        runtime_state.sessions.clone(),
+                        runtime_state.trust_store.clone(),
+                    ));
                 }
+                Err(error) => tracing::error!("Could not listen for paired devices: {error}"),
             }
 
             app.manage(runtime_state);

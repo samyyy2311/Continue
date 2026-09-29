@@ -37,6 +37,17 @@ class ContinueInstrumentationTest {
     }
 
     @Test
+    fun nativeCoreStartsAndStopsDiscovery() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val bridge = ContinueCoreBridge.create()
+        bridge.initCore(File(context.cacheDir, "discovery-test.db").absolutePath)
+
+        bridge.startDiscovery()
+        bridge.startDiscovery()
+        bridge.stopDiscovery()
+    }
+
+    @Test
     fun nativeCoreReportsInvalidQrCodes() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val bridge = ContinueCoreBridge.create()
