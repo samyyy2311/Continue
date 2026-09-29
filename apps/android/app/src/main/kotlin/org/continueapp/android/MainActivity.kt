@@ -22,6 +22,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.continueapp.android.ui.screens.DevicesScreen
 import org.continueapp.android.ui.screens.PermissionsScreen
 import org.continueapp.android.ui.screens.TransfersScreen
@@ -29,6 +31,7 @@ import org.continueapp.android.ui.theme.ContinueTheme
 import org.continueapp.android.ui.theme.Slate800
 import org.continueapp.android.ui.theme.Slate900
 import org.continueapp.bridge.ContinueCoreBridge
+import org.continueapp.bridge.ContinueException
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,13 +74,13 @@ fun MainAppContent(bridge: ContinueCoreBridge) {
             }
         }
 
-    val handlePairQr: (String) -> Unit = { payload ->
-        try {
-            bridge.pairFromQr(payload)
+    // Pairing connects over the network, so it runs off the main thread.
+    val handlePair: suspend (String) -> String? = { code ->
+        val error = withContext(Dispatchers.IO) { pairingError { bridge.pairFromQr(code) } }
+        if (error == null) {
             peers = bridge.listTrustedPeers()
-        } catch (_: Exception) {
-            // Handled gracefully in UI
         }
+        error
     }
 
     val handleRemovePeer: (String) -> Unit = { fp ->
@@ -131,7 +134,7 @@ fun MainAppContent(bridge: ContinueCoreBridge) {
                     deviceFingerprint = fingerprint,
                     deviceSpkiHash = spkiHash,
                     peers = peers,
-                    onPairQr = handlePairQr,
+                    onPair = handlePair,
                     onRemovePeer = handleRemovePeer,
                     modifier = screenModifier,
                 )
@@ -140,3 +143,18 @@ fun MainAppContent(bridge: ContinueCoreBridge) {
         }
     }
 }
+
+/** Runs a pairing attempt and returns what to tell the user if it failed, or null. */
+private fun pairingError(attempt: () -> Unit): String? =
+    try {
+        attempt()
+        null
+    } catch (e: ContinueException) {
+        when (e) {
+            is ContinueException.InvalidQrException -> "That isn't a Continue pairing code."
+            is ContinueException.PairingTimeoutException -> "Pairing took too long. Try again."
+            is ContinueException.PairingFailedException ->
+                "Couldn't pair. Check that both devices are on the same Wi-Fi and try again."
+            else -> "Something went wrong while pairing. Try again."
+        }
+    }
