@@ -162,7 +162,11 @@ fn get_trusted_peers(state: State<DesktopRuntimeState>) -> Result<Vec<TrustedPee
         .into_iter()
         .map(|p| {
             let is_connected = state.sessions.state(&p.fingerprint) == SessionState::Connected;
-            let endpoint = state.trust_store.last_endpoint(&p.fingerprint).ok().flatten();
+            let endpoint = state
+                .trust_store
+                .last_endpoint(&p.fingerprint)
+                .ok()
+                .flatten();
             TrustedPeerDto {
                 fingerprint: p.fingerprint,
                 display_name: p.display_name,
