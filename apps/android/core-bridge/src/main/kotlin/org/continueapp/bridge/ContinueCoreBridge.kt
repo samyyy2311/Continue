@@ -2,6 +2,7 @@ package org.continueapp.bridge
 
 import org.continueapp.bridge.ffi.ContinueFfiException
 import org.continueapp.bridge.ffi.TrustedPeerFfi
+import java.util.concurrent.ConcurrentHashMap
 import org.continueapp.bridge.ffi.awaitPairingResult as coreAwaitPairingResult
 import org.continueapp.bridge.ffi.cancelPairing as coreCancelPairing
 import org.continueapp.bridge.ffi.connectToPeer as coreConnectToPeer
@@ -24,7 +25,6 @@ import org.continueapp.bridge.ffi.setPermission as coreSetPermission
 import org.continueapp.bridge.ffi.startDiscovery as coreStartDiscovery
 import org.continueapp.bridge.ffi.startPairingServer as coreStartPairingServer
 import org.continueapp.bridge.ffi.stopDiscovery as coreStopDiscovery
-import java.util.concurrent.ConcurrentHashMap
 
 private const val SECONDS_DIVISOR = 1000L
 private const val QR_SUFFIX_LENGTH = 4
@@ -302,8 +302,7 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
 
     override fun stopDiscovery() = native { coreStopDiscovery() }
 
-    override fun generateQrPayload(endpoint: String): String =
-        native { coreGenerateQrPayload(endpoint) }
+    override fun generateQrPayload(endpoint: String): String = native { coreGenerateQrPayload(endpoint) }
 
     override fun startPairingServer(
         listenPort: Int,
@@ -315,14 +314,11 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
 
     override fun cancelPairing() = native { coreCancelPairing() }
 
-    override fun pairFromQr(qrPayload: String): TrustedPeer =
-        native { corePairFromQr(qrPayload).toTrustedPeer() }
+    override fun pairFromQr(qrPayload: String): TrustedPeer = native { corePairFromQr(qrPayload).toTrustedPeer() }
 
-    override fun listTrustedPeers(): List<TrustedPeer> =
-        native { coreListTrustedPeers().map { it.toTrustedPeer() } }
+    override fun listTrustedPeers(): List<TrustedPeer> = native { coreListTrustedPeers().map { it.toTrustedPeer() } }
 
-    override fun removeTrustedPeer(fingerprint: String): Boolean =
-        native { coreRemoveTrustedPeer(fingerprint) }
+    override fun removeTrustedPeer(fingerprint: String): Boolean = native { coreRemoveTrustedPeer(fingerprint) }
 
     override fun getCapabilities(): List<Int> = native { coreGetCapabilities().map { it.toInt() } }
 
@@ -347,8 +343,7 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
         endpoint: String,
     ) = native { coreConnectToPeer(peerFingerprint, endpoint) }
 
-    override fun isPeerConnected(peerFingerprint: String): Boolean =
-        native { coreIsPeerConnected(peerFingerprint) }
+    override fun isPeerConnected(peerFingerprint: String): Boolean = native { coreIsPeerConnected(peerFingerprint) }
 
     override fun disconnect(peerFingerprint: String) = native { coreDisconnect(peerFingerprint) }
 
