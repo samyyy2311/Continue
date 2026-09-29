@@ -74,7 +74,6 @@ fun MainAppContent(bridge: ContinueCoreBridge) {
             }
         }
 
-    // Pairing connects over the network, so it runs off the main thread.
     val handlePair: suspend (String) -> String? = { code ->
         val error = withContext(Dispatchers.IO) { pairingError { bridge.pairFromQr(code) } }
         if (error == null) {
@@ -144,7 +143,6 @@ fun MainAppContent(bridge: ContinueCoreBridge) {
     }
 }
 
-/** Runs a pairing attempt and returns what to tell the user if it failed, or null. */
 private fun pairingError(attempt: () -> Unit): String? =
     try {
         attempt()

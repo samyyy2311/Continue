@@ -173,10 +173,7 @@ fun DevicesScreen(
 
 private enum class PairMode { Closed, Scan, Type }
 
-/**
- * Pairs with a computer by scanning the code it shows, or by typing it when the camera
- * isn't available. [onPair] returns an error message, or null once paired.
- */
+/** [onPair] returns an error message, or null once paired. */
 @Composable
 private fun PairingCard(onPair: suspend (String) -> String?) {
     val context = LocalContext.current
@@ -185,7 +182,7 @@ private fun PairingCard(onPair: suspend (String) -> String?) {
     var typedCode by remember { mutableStateOf("") }
     var pairing by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
-    // A new value restarts the scanner after a failed attempt.
+    // Changing this restarts the scanner after a failed attempt.
     var scanAttempt by remember { mutableIntStateOf(0) }
 
     val requestCamera =

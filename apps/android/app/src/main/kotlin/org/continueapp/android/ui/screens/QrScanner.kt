@@ -25,10 +25,7 @@ import com.google.zxing.qrcode.QRCodeReader
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Live preview from the back camera that reports the first QR code it reads, once.
- * Needs the camera permission; to scan again, give it a new `key`.
- */
+/** Reports the first QR code the back camera reads, once. Wrap it in a new `key` to scan again. */
 @Composable
 fun QrScanner(
     onScanned: (String) -> Unit,
@@ -85,7 +82,6 @@ private fun decodeQr(
     return decodeQr(reader, bytes, plane.rowStride, image.width, image.height)
 }
 
-/** Reads a QR code from a greyscale frame whose rows are `rowStride` bytes apart. */
 internal fun decodeQr(
     reader: QRCodeReader,
     luminance: ByteArray,
