@@ -660,6 +660,13 @@ fn initialize_desktop_runtime(
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -683,27 +690,29 @@ fn main() {
                 initialize_desktop_runtime(app.handle(), &db_path, &secrets_dir, download_dir)
                     .expect("Failed to initialize Continue desktop runtime engine");
 
-            // Paired devices connect here; discovery advertises it and dials them back.
-            match sessions::listen_for_peers(
-                &runtime_state.transport_cert,
-                runtime_state.allowed_spki_hashes.clone(),
-            )
-            .and_then(|endpoint| Ok((endpoint.local_addr()?.port(), endpoint)))
-            {
-                Ok((port, endpoint)) => {
-                    tauri::async_runtime::spawn(discovery::advertise(port, 1));
-                    tauri::async_runtime::spawn(sessions::connect_discovered_peers(
-                        runtime_state.sessions.clone(),
-                        runtime_state.trust_store.clone(),
-                    ));
-                    tauri::async_runtime::spawn(sessions::accept_peers(
-                        endpoint,
-                        runtime_state.sessions.clone(),
-                        runtime_state.trust_store.clone(),
-                    ));
-                }
-                Err(error) => tracing::error!("Could not listen for paired devices: {error}"),
-            }
+            // quinn needs a running async runtime to open the endpoint, which `setup` doesn't have.
+            let cert = runtime_state.transport_cert.clone();
+            let trusted_keys = runtime_state.allowed_spki_hashes.clone();
+            let sessions = runtime_state.sessions.clone();
+            let trust_store = runtime_state.trust_store.clone();
+            tauri::async_runtime::spawn(async move {
+                let listener = sessions::listen_for_peers(&cert, trusted_keys)
+                    .and_then(|endpoint| Ok((endpoint.local_addr()?.port(), endpoint)));
+                let (port, endpoint) = match listener {
+                    Ok(listener) => listener,
+                    Err(error) => {
+                        tracing::error!("Could not listen for paired devices: {error}");
+                        return;
+                    }
+                };
+                tracing::info!("Listening for paired devices on port {port}");
+                tauri::async_runtime::spawn(discovery::advertise(port, 1));
+                tauri::async_runtime::spawn(sessions::connect_discovered_peers(
+                    sessions.clone(),
+                    trust_store.clone(),
+                ));
+                sessions::accept_peers(endpoint, sessions, trust_store).await;
+            });
 
             app.manage(runtime_state);
             Ok(())
