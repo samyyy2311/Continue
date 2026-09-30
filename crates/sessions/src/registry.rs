@@ -52,6 +52,7 @@ struct Inner {
     config: RegistryConfig,
     on_state_change: Option<StateListener>,
     peers: Mutex<HashMap<String, Entry>>,
+    redial: tokio::sync::Notify,
 }
 
 impl Entry {
@@ -85,8 +86,19 @@ impl SessionRegistry {
                 config,
                 on_state_change,
                 peers: Mutex::new(HashMap::new()),
+                redial: tokio::sync::Notify::new(),
             }),
         }
+    }
+
+    /// Asks `connect_paired_peers` to dial saved addresses now instead of at its next round,
+    /// e.g. right after pairing.
+    pub fn redial_now(&self) {
+        self.inner.redial.notify_one();
+    }
+
+    pub(crate) async fn redial_requested(&self) {
+        self.inner.redial.notified().await;
     }
 
     /// The live multiplexer for a peer, if it is connected.

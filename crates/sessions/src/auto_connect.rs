@@ -14,25 +14,22 @@ use crate::registry::SessionRegistry;
 
 const REDIAL_INTERVAL: Duration = Duration::from_secs(10);
 
-/// Fingerprints of peers with a dial in progress, so each is dialed once at a time.
+/// Fingerprints of peers with a dial in progress. Each loop keeps its own, so a discovered
+/// address that turns out to be another device doesn't hold up dialing the saved one.
 type Dialing = Arc<Mutex<HashSet<String>>>;
 
 /// Keeps paired devices connected until the future is dropped. Dials them when they show up
 /// over mDNS, and every few seconds at the address they were last reached at, which covers
 /// networks where discovery doesn't get through, such as a phone's hotspot.
 pub async fn connect_paired_peers(registry: SessionRegistry, trust_store: TrustStore) {
-    let dialing = Dialing::default();
     tokio::join!(
-        dial_discovered_peers(&registry, &trust_store, &dialing),
-        dial_known_addresses(&registry, &trust_store, &dialing),
+        dial_discovered_peers(&registry, &trust_store),
+        dial_known_addresses(&registry, &trust_store),
     );
 }
 
-async fn dial_discovered_peers(
-    registry: &SessionRegistry,
-    trust_store: &TrustStore,
-    dialing: &Dialing,
-) {
+async fn dial_discovered_peers(registry: &SessionRegistry, trust_store: &TrustStore) {
+    let dialing = Dialing::default();
     loop {
         let browser = match DiscoveryBrowser::start() {
             Ok(browser) => browser,
@@ -48,7 +45,7 @@ async fn dial_discovered_peers(
                 dial(
                     registry,
                     trust_store,
-                    dialing,
+                    &dialing,
                     peer,
                     found.addresses.clone(),
                 );
@@ -59,11 +56,8 @@ async fn dial_discovered_peers(
     }
 }
 
-async fn dial_known_addresses(
-    registry: &SessionRegistry,
-    trust_store: &TrustStore,
-    dialing: &Dialing,
-) {
+async fn dial_known_addresses(registry: &SessionRegistry, trust_store: &TrustStore) {
+    let dialing = Dialing::default();
     loop {
         for peer in paired_peers(trust_store) {
             let known = trust_store
@@ -72,10 +66,13 @@ async fn dial_known_addresses(
                 .flatten()
                 .and_then(|endpoint| endpoint.parse::<SocketAddr>().ok());
             if let Some(addr) = known {
-                dial(registry, trust_store, dialing, peer, vec![addr]);
+                dial(registry, trust_store, &dialing, peer, vec![addr]);
             }
         }
-        tokio::time::sleep(REDIAL_INTERVAL).await;
+        tokio::select! {
+            _ = tokio::time::sleep(REDIAL_INTERVAL) => {}
+            _ = registry.redial_requested() => {}
+        }
     }
 }
 

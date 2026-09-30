@@ -259,6 +259,7 @@ async fn start_pairing(
     let active_pairing = state.active_pairing.clone();
     let allowed_hashes = state.allowed_spki_hashes.clone();
     let trust_store = state.trust_store.clone();
+    let registry = state.sessions.clone();
     tokio::spawn(async move {
         let incoming = match endpoint_for_worker.accept().await {
             Some(inc) => inc,
@@ -289,6 +290,7 @@ async fn start_pairing(
                 &peer.fingerprint,
                 conn.remote_address().ip(),
             );
+            registry.redial_now();
         }
 
         endpoint_for_worker.close(0u32.into(), b"pairing_finished");
@@ -379,6 +381,7 @@ async fn pair_from_qr(
         allowed.insert(trusted_peer.transport_spki_hash);
     }
     sessions::remember_peer_address(&state.trust_store, &trusted_peer.fingerprint, addr.ip());
+    state.sessions.redial_now();
 
     // The pairing connection is dropped here; the session is dialed at the saved address.
     Ok(TrustedPeerDto {

@@ -294,6 +294,7 @@ pub fn start_pairing_server(
     let (tx, rx) = tokio::sync::oneshot::channel();
     let endpoint_clone = server_endpoint.clone();
     let trust_store = state.trust_store.clone();
+    let registry = state.sessions.clone();
 
     state.runtime.spawn(async move {
         let incoming = match endpoint_clone.accept().await {
@@ -346,6 +347,7 @@ pub fn start_pairing_server(
                 &peer.fingerprint,
                 conn.remote_address().ip(),
             );
+            registry.redial_now();
         }
         let _ = tx.send(result);
     });
@@ -404,7 +406,7 @@ pub fn cancel_pairing() -> Result<(), ContinueFfiError> {
 }
 
 pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiError> {
-    let (runtime, transport_cert, identity_signer, trust_store, trusted_keys) = {
+    let (runtime, transport_cert, identity_signer, trust_store, trusted_keys, registry) = {
         let lock = CORE.lock().unwrap();
         let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
         (
@@ -413,6 +415,7 @@ pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiErr
             state.identity_signer.clone(),
             state.trust_store.clone(),
             state.trusted_keys.clone(),
+            state.sessions.clone(),
         )
     };
 
@@ -448,6 +451,7 @@ pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiErr
 
         trust_key(&trusted_keys, trusted_peer.transport_spki_hash);
         sessions::remember_peer_address(&trust_store, &trusted_peer.fingerprint, addr.ip());
+        registry.redial_now();
         Ok(trusted_peer.into())
     })
 }

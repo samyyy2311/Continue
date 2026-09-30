@@ -501,7 +501,7 @@ async fn listener_admits_paired_devices_only() {
 }
 
 #[tokio::test]
-async fn paired_peer_is_dialed_at_its_saved_address() {
+async fn paired_peer_is_dialed_at_its_saved_address_right_after_pairing() {
     let (low, high) = pair();
     let trust_store = TrustStore::in_memory().unwrap();
     trust_store
@@ -513,11 +513,17 @@ async fn paired_peer_is_dialed_at_its_saved_address() {
             paired_at: 1,
         })
         .unwrap();
+    let dialer = tokio::spawn(connect_paired_peers(
+        low.registry.clone(),
+        trust_store.clone(),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Saved after the loop's first round, as after pairing; waking it avoids the 10 s wait.
     trust_store
         .set_last_endpoint(HIGH, &high.listen_addr.to_string())
         .unwrap();
-
-    let dialer = tokio::spawn(connect_paired_peers(low.registry.clone(), trust_store));
+    low.registry.redial_now();
     eventually("connected without discovery", || {
         low.registry.state(HIGH) == SessionState::Connected && high.registry.get(LOW).is_some()
     })
