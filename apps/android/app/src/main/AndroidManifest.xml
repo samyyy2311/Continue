@@ -11,6 +11,7 @@
     <application
         android:name=".ContinueApplication"
         android:allowBackup="true"
+        android:enableOnBackInvokedCallback="true"
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="Continue"
         android:roundIcon="@android:drawable/sym_def_app_icon"

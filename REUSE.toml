@@ -16,3 +16,9 @@ path = "apps/**"
 precedence = "closest"
 SPDX-FileCopyrightText = "Contributors to the Continue project"
 SPDX-License-Identifier = "GPL-3.0-only"
+
+[[annotations]]
+path = "apps/android/app/src/main/res/font/instrument_sans.ttf"
+precedence = "override"
+SPDX-FileCopyrightText = "2022 The Instrument Sans Project Authors"
+SPDX-License-Identifier = "OFL-1.1"

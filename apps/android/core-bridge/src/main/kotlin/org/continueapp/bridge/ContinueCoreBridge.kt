@@ -16,6 +16,7 @@ import org.continueapp.bridge.ffi.isPeerConnected as coreIsPeerConnected
 import org.continueapp.bridge.ffi.listTrustedPeers as coreListTrustedPeers
 import org.continueapp.bridge.ffi.pairFromQr as corePairFromQr
 import org.continueapp.bridge.ffi.queryPermission as coreQueryPermission
+import org.continueapp.bridge.ffi.reconnect as coreReconnect
 import org.continueapp.bridge.ffi.removeTrustedPeer as coreRemoveTrustedPeer
 import org.continueapp.bridge.ffi.revokePermission as coreRevokePermission
 import org.continueapp.bridge.ffi.sendClipboardText as coreSendClipboardText
@@ -85,6 +86,9 @@ interface ContinueCoreBridge {
     fun isPeerConnected(peerFingerprint: String): Boolean
 
     fun disconnect(peerFingerprint: String)
+
+    /** Lets a device disconnected with [disconnect] connect automatically again. */
+    fun reconnect(peerFingerprint: String)
 
     fun sendFile(
         peerFingerprint: String,
@@ -250,6 +254,11 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         connectedPeers.remove(peerFingerprint)
     }
 
+    override fun reconnect(peerFingerprint: String) {
+        checkInitialized()
+        connectedPeers[peerFingerprint] = "reconnected"
+    }
+
     override fun sendFile(
         peerFingerprint: String,
         filePath: String,
@@ -338,6 +347,8 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
     override fun isPeerConnected(peerFingerprint: String): Boolean = native { coreIsPeerConnected(peerFingerprint) }
 
     override fun disconnect(peerFingerprint: String) = native { coreDisconnect(peerFingerprint) }
+
+    override fun reconnect(peerFingerprint: String) = native { coreReconnect(peerFingerprint) }
 
     override fun sendFile(
         peerFingerprint: String,

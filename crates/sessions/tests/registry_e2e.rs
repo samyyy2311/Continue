@@ -438,6 +438,13 @@ async fn discovery_leaves_deliberate_disconnects_alone() {
         .await;
     assert_eq!((from_low, from_high), (None, None));
     assert!(low.registry.get(HIGH).is_none() && high.registry.get(LOW).is_none());
+
+    low.registry.resume_auto_connect(HIGH);
+    let resumed = low
+        .registry
+        .connect_discovered(HIGH, high.cert.spki_hash, &[high.listen_addr])
+        .await;
+    assert_eq!(resumed, Some(high.listen_addr));
 }
 
 #[tokio::test]

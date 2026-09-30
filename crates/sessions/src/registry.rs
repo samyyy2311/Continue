@@ -91,6 +91,15 @@ impl SessionRegistry {
         }
     }
 
+    /// Lets a peer that was disconnected on purpose be connected automatically again, and
+    /// dials it now.
+    pub fn resume_auto_connect(&self, peer: &str) {
+        if let Some(entry) = self.peers().get_mut(peer) {
+            entry.ended_on_purpose = false;
+        }
+        self.redial_now();
+    }
+
     /// Asks `connect_paired_peers` to dial saved addresses now instead of at its next round,
     /// e.g. right after pairing.
     pub fn redial_now(&self) {

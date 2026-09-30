@@ -498,6 +498,11 @@ async fn disconnect_peer(
     Ok(())
 }
 
+#[tauri::command]
+fn reconnect_peer(state: State<DesktopRuntimeState>, peer_fingerprint: String) {
+    state.sessions.resume_auto_connect(&peer_fingerprint);
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferProgressDto {
@@ -740,6 +745,7 @@ fn main() {
             set_permission,
             connect_to_peer,
             disconnect_peer,
+            reconnect_peer,
             send_file_to_peer,
             send_clipboard_text,
             send_notification

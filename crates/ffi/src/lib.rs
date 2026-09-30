@@ -627,6 +627,13 @@ pub fn is_peer_connected(peer_fingerprint: String) -> Result<bool, ContinueFfiEr
     Ok(state.sessions.state(&peer_fingerprint) == SessionState::Connected)
 }
 
+pub fn reconnect(peer_fingerprint: String) -> Result<(), ContinueFfiError> {
+    let lock = CORE.lock().unwrap();
+    let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+    state.sessions.resume_auto_connect(&peer_fingerprint);
+    Ok(())
+}
+
 pub fn disconnect(peer_fingerprint: String) -> Result<(), ContinueFfiError> {
     let (runtime, sessions) = {
         let lock = CORE.lock().unwrap();
