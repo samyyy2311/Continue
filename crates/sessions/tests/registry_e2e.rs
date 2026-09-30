@@ -12,8 +12,8 @@ use clipboard::ClipboardFormat;
 use pairing::{TrustStore, TrustedPeer};
 use protocol::CapabilityId;
 use sessions::{
-    accept_peers, listen_for_peers, Direction, ReconnectPolicy, RegistryConfig,
-    SessionCapabilityHandlers, SessionRegistry, SessionState,
+    accept_peers, connect_paired_peers, listen_for_peers, Direction, ReconnectPolicy,
+    RegistryConfig, SessionCapabilityHandlers, SessionRegistry, SessionState,
 };
 use tokio::net::UdpSocket;
 use transport::{
@@ -498,6 +498,31 @@ async fn listener_admits_paired_devices_only() {
     assert!(
         matches!(closed, quinn::ConnectionError::ApplicationClosed(ref close) if &close.reason[..] == b"untrusted_peer")
     );
+}
+
+#[tokio::test]
+async fn paired_peer_is_dialed_at_its_saved_address() {
+    let (low, high) = pair();
+    let trust_store = TrustStore::in_memory().unwrap();
+    trust_store
+        .add_peer(&TrustedPeer {
+            fingerprint: HIGH.to_string(),
+            identity_pubkey: [1u8; 32],
+            transport_spki_hash: high.cert.spki_hash,
+            display_name: "Desktop".to_string(),
+            paired_at: 1,
+        })
+        .unwrap();
+    trust_store
+        .set_last_endpoint(HIGH, &high.listen_addr.to_string())
+        .unwrap();
+
+    let dialer = tokio::spawn(connect_paired_peers(low.registry.clone(), trust_store));
+    eventually("connected without discovery", || {
+        low.registry.state(HIGH) == SessionState::Connected && high.registry.get(LOW).is_some()
+    })
+    .await;
+    dialer.abort();
 }
 
 #[tokio::test]

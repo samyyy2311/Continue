@@ -258,6 +258,7 @@ async fn start_pairing(
     let endpoint_for_worker = server_endpoint.clone();
     let active_pairing = state.active_pairing.clone();
     let allowed_hashes = state.allowed_spki_hashes.clone();
+    let trust_store = state.trust_store.clone();
     tokio::spawn(async move {
         let incoming = match endpoint_for_worker.accept().await {
             Some(inc) => inc,
@@ -282,6 +283,13 @@ async fn start_pairing(
         let result = initiator
             .complete_handshake(&mut send_stream, &mut recv_stream, recorded_hash)
             .await;
+        if let Ok(peer) = &result {
+            sessions::remember_peer_address(
+                &trust_store,
+                &peer.fingerprint,
+                conn.remote_address().ip(),
+            );
+        }
 
         endpoint_for_worker.close(0u32.into(), b"pairing_finished");
 
@@ -370,8 +378,9 @@ async fn pair_from_qr(
     if let Ok(mut allowed) = state.allowed_spki_hashes.write() {
         allowed.insert(trusted_peer.transport_spki_hash);
     }
+    sessions::remember_peer_address(&state.trust_store, &trusted_peer.fingerprint, addr.ip());
 
-    // The pairing connection is dropped here; a session needs a separate connect_to_peer.
+    // The pairing connection is dropped here; the session is dialed at the saved address.
     Ok(TrustedPeerDto {
         fingerprint: trusted_peer.fingerprint,
         display_name: trusted_peer.display_name,
@@ -707,7 +716,7 @@ fn main() {
                 };
                 tracing::info!("Listening for paired devices on port {port}");
                 tauri::async_runtime::spawn(discovery::advertise(port, 1));
-                tauri::async_runtime::spawn(sessions::connect_discovered_peers(
+                tauri::async_runtime::spawn(sessions::connect_paired_peers(
                     sessions.clone(),
                     trust_store.clone(),
                 ));

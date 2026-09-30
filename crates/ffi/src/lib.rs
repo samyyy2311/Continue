@@ -220,7 +220,7 @@ pub fn start_discovery(protocol_version: u32) -> Result<(), ContinueFfiError> {
         state
             .runtime
             .spawn(discovery::advertise(port, protocol_version)),
-        state.runtime.spawn(sessions::connect_discovered_peers(
+        state.runtime.spawn(sessions::connect_paired_peers(
             state.sessions.clone(),
             state.trust_store.clone(),
         )),
@@ -293,6 +293,7 @@ pub fn start_pairing_server(
 
     let (tx, rx) = tokio::sync::oneshot::channel();
     let endpoint_clone = server_endpoint.clone();
+    let trust_store = state.trust_store.clone();
 
     state.runtime.spawn(async move {
         let incoming = match endpoint_clone.accept().await {
@@ -339,6 +340,13 @@ pub fn start_pairing_server(
         let result = initiator
             .complete_handshake(&mut send_stream, &mut recv_stream, recorded_hash)
             .await;
+        if let Ok(peer) = &result {
+            sessions::remember_peer_address(
+                &trust_store,
+                &peer.fingerprint,
+                conn.remote_address().ip(),
+            );
+        }
         let _ = tx.send(result);
     });
 
@@ -432,13 +440,14 @@ pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiErr
             .map_err(|e| ContinueFfiError::PairingFailed(format!("Stream open failed: {e}")))?;
 
         let responder =
-            pairing::ResponderPairing::new(identity_signer, transport_cert, trust_store);
+            pairing::ResponderPairing::new(identity_signer, transport_cert, trust_store.clone());
         let trusted_peer = responder
             .complete_handshake(&qr, &mut send_stream, &mut recv_stream)
             .await
             .map_err(|e| ContinueFfiError::PairingFailed(e.to_string()))?;
 
         trust_key(&trusted_keys, trusted_peer.transport_spki_hash);
+        sessions::remember_peer_address(&trust_store, &trusted_peer.fingerprint, addr.ip());
         Ok(trusted_peer.into())
     })
 }
