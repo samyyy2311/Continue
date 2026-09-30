@@ -32,3 +32,4 @@ parking_lot = "0.12"
 thiserror = "1"
 zeroize = "1"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
