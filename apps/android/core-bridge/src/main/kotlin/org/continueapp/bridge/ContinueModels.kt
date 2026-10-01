@@ -23,15 +23,17 @@ enum class Capability(val id: Int) {
     }
 }
 
+/** Grant strings as the Rust core reads and writes them. */
 enum class PermissionGrant(val rawValue: String) {
-    ALWAYS_ALLOW("AlwaysAllow"),
-    PROMPT("Prompt"),
+    ALLOW("Allow"),
+    ALLOW_ONCE("AllowOnce"),
+    ASK("Ask"),
     DENY("Deny"),
     ;
 
     companion object {
         fun fromRaw(raw: String): PermissionGrant {
-            return entries.firstOrNull { it.rawValue.equals(raw, ignoreCase = true) } ?: PROMPT
+            return entries.firstOrNull { it.rawValue.equals(raw, ignoreCase = true) } ?: ASK
         }
     }
 }

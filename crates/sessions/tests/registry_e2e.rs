@@ -9,15 +9,16 @@ use std::time::{Duration, Instant};
 
 use capabilities::CapabilityQuery;
 use clipboard::ClipboardFormat;
+use pairing::{TrustStore, TrustedPeer};
 use protocol::CapabilityId;
 use sessions::{
-    Direction, ReconnectPolicy, RegistryConfig, SessionCapabilityHandlers, SessionRegistry,
-    SessionState,
+    accept_peers, connect_paired_peers, listen_for_peers, Direction, ReconnectPolicy,
+    RegistryConfig, SessionCapabilityHandlers, SessionRegistry, SessionState,
 };
 use tokio::net::UdpSocket;
 use transport::{
-    create_server_endpoint, extract_peer_spki_hash, DialConfig, TransportCertificate,
-    TransportError,
+    connect_pinned, create_server_endpoint, extract_peer_spki_hash, DialConfig,
+    TransportCertificate, TransportError,
 };
 
 const LOW: &str = "aaaa-low-fingerprint";
@@ -386,6 +387,148 @@ async fn peer_disconnect_does_not_reconnect() {
         },
     )
     .await;
+}
+
+#[tokio::test]
+async fn discovery_connects_only_to_the_peer_whose_key_matches() {
+    let (low, high) = pair();
+    let stranger = node(
+        "stranger",
+        TransportCertificate::generate().unwrap(),
+        vec![],
+    );
+
+    let reached = low
+        .registry
+        .connect_discovered(
+            HIGH,
+            high.cert.spki_hash,
+            &[stranger.listen_addr, high.listen_addr],
+        )
+        .await;
+
+    assert_eq!(reached, Some(high.listen_addr));
+    assert_eq!(low.registry.state(HIGH), SessionState::Connected);
+    eventually("accepted", || high.registry.get(LOW).is_some()).await;
+    assert!(stranger.registry.get(LOW).is_none());
+}
+
+#[tokio::test]
+async fn discovery_leaves_deliberate_disconnects_alone() {
+    let (low, high) = pair();
+    low.registry
+        .connect(HIGH, high.cert.spki_hash, high.listen_addr)
+        .await
+        .unwrap();
+    eventually("accepted", || high.registry.get(LOW).is_some()).await;
+
+    high.registry.disconnect(LOW).await;
+    eventually("dialer saw the disconnect", || {
+        low.registry.get(HIGH).is_none()
+    })
+    .await;
+
+    let from_low = low
+        .registry
+        .connect_discovered(HIGH, high.cert.spki_hash, &[high.listen_addr])
+        .await;
+    let from_high = high
+        .registry
+        .connect_discovered(LOW, low.cert.spki_hash, &[low.listen_addr])
+        .await;
+    assert_eq!((from_low, from_high), (None, None));
+    assert!(low.registry.get(HIGH).is_none() && high.registry.get(LOW).is_none());
+}
+
+#[tokio::test]
+async fn listener_admits_paired_devices_only() {
+    let desktop_cert = Arc::new(TransportCertificate::generate().unwrap());
+    let phone = node(LOW, TransportCertificate::generate().unwrap(), vec![]);
+    let stranger_cert = TransportCertificate::generate().unwrap();
+
+    let trust_store = TrustStore::in_memory().unwrap();
+    trust_store
+        .add_peer(&TrustedPeer {
+            fingerprint: LOW.to_string(),
+            identity_pubkey: [1u8; 32],
+            transport_spki_hash: phone.cert.spki_hash,
+            display_name: "Phone".to_string(),
+            paired_at: 1,
+        })
+        .unwrap();
+    // The stranger passes the TLS check but isn't in the trust store, as if it was
+    // unpaired while connecting.
+    let trusted_keys = Arc::new(RwLock::new(HashSet::from([
+        phone.cert.spki_hash,
+        stranger_cert.spki_hash,
+    ])));
+
+    let desktop = SessionRegistry::new(
+        HIGH.to_string(),
+        desktop_cert.clone(),
+        SessionCapabilityHandlers::new(std::env::temp_dir()),
+        fast_config(),
+        None,
+    );
+    let endpoint = listen_for_peers(&desktop_cert, trusted_keys).unwrap();
+    let addr = SocketAddr::from(([127, 0, 0, 1], endpoint.local_addr().unwrap().port()));
+    tokio::spawn(accept_peers(endpoint, desktop.clone(), trust_store));
+
+    phone
+        .registry
+        .connect(HIGH, desktop_cert.spki_hash, addr)
+        .await
+        .unwrap();
+    eventually("desktop adopted the phone's connection", || {
+        desktop.get(LOW).is_some()
+    })
+    .await;
+
+    let stranger = connect_pinned(
+        &stranger_cert,
+        desktop_cert.spki_hash,
+        addr,
+        &DialConfig::default(),
+    )
+    .await
+    .unwrap();
+    let closed = tokio::time::timeout(Duration::from_secs(5), stranger.closed())
+        .await
+        .expect("stranger was disconnected");
+    assert!(
+        matches!(closed, quinn::ConnectionError::ApplicationClosed(ref close) if &close.reason[..] == b"untrusted_peer")
+    );
+}
+
+#[tokio::test]
+async fn paired_peer_is_dialed_at_its_saved_address_right_after_pairing() {
+    let (low, high) = pair();
+    let trust_store = TrustStore::in_memory().unwrap();
+    trust_store
+        .add_peer(&TrustedPeer {
+            fingerprint: HIGH.to_string(),
+            identity_pubkey: [1u8; 32],
+            transport_spki_hash: high.cert.spki_hash,
+            display_name: "Desktop".to_string(),
+            paired_at: 1,
+        })
+        .unwrap();
+    let dialer = tokio::spawn(connect_paired_peers(
+        low.registry.clone(),
+        trust_store.clone(),
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Saved after the loop's first round, as after pairing; waking it avoids the 10 s wait.
+    trust_store
+        .set_last_endpoint(HIGH, &high.listen_addr.to_string())
+        .unwrap();
+    low.registry.redial_now();
+    eventually("connected without discovery", || {
+        low.registry.state(HIGH) == SessionState::Connected && high.registry.get(LOW).is_some()
+    })
+    .await;
+    dialer.abort();
 }
 
 #[tokio::test]

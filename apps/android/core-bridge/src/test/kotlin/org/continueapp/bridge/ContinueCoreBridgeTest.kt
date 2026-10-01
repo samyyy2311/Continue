@@ -38,7 +38,7 @@ class ContinueCoreBridgeTest {
     @Test
     fun discoveryLifecycle() {
         bridge.initCore(":memory:")
-        bridge.startDiscovery(41234, 1L)
+        bridge.startDiscovery()
         bridge.stopDiscovery()
     }
 
@@ -74,15 +74,15 @@ class ContinueCoreBridgeTest {
         val peerFp = "peer-test-123"
 
         val defaultGrant = bridge.queryPermission(peerFp, Capability.FILE_TRANSFER.id)
-        assertEquals(PermissionGrant.PROMPT.rawValue, defaultGrant)
+        assertEquals(PermissionGrant.ASK.rawValue, defaultGrant)
 
-        bridge.setPermission(peerFp, Capability.FILE_TRANSFER.id, PermissionGrant.ALWAYS_ALLOW.rawValue)
+        bridge.setPermission(peerFp, Capability.FILE_TRANSFER.id, PermissionGrant.ALLOW.rawValue)
         val updatedGrant = bridge.queryPermission(peerFp, Capability.FILE_TRANSFER.id)
-        assertEquals(PermissionGrant.ALWAYS_ALLOW.rawValue, updatedGrant)
+        assertEquals(PermissionGrant.ALLOW.rawValue, updatedGrant)
 
         bridge.revokePermission(peerFp, Capability.FILE_TRANSFER.id)
         val revokedGrant = bridge.queryPermission(peerFp, Capability.FILE_TRANSFER.id)
-        assertEquals(PermissionGrant.PROMPT.rawValue, revokedGrant)
+        assertEquals(PermissionGrant.ASK.rawValue, revokedGrant)
     }
 
     @Test

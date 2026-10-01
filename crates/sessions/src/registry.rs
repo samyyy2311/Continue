@@ -41,6 +41,8 @@ struct Entry {
     established: Instant,
     /// Identifies the current reconnect episode so a superseded loop stops.
     reconnect_episode: u64,
+    /// Set when either user ended the session, so discovery doesn't reconnect it.
+    ended_on_purpose: bool,
 }
 
 struct Inner {
@@ -50,6 +52,15 @@ struct Inner {
     config: RegistryConfig,
     on_state_change: Option<StateListener>,
     peers: Mutex<HashMap<String, Entry>>,
+    redial: tokio::sync::Notify,
+}
+
+impl Entry {
+    /// Puts `addr` first in the list reconnects try.
+    fn remember_address(&mut self, addr: SocketAddr) {
+        self.session.known_addresses.retain(|known| *known != addr);
+        self.session.known_addresses.insert(0, addr);
+    }
 }
 
 /// Owns every peer session: connecting, replacing duplicates, noticing when a connection
@@ -75,8 +86,19 @@ impl SessionRegistry {
                 config,
                 on_state_change,
                 peers: Mutex::new(HashMap::new()),
+                redial: tokio::sync::Notify::new(),
             }),
         }
+    }
+
+    /// Asks `connect_paired_peers` to dial saved addresses now instead of at its next round,
+    /// e.g. right after pairing.
+    pub fn redial_now(&self) {
+        self.inner.redial.notify_one();
+    }
+
+    pub(crate) async fn redial_requested(&self) {
+        self.inner.redial.notified().await;
     }
 
     /// The live multiplexer for a peer, if it is connected.
@@ -107,8 +129,7 @@ impl SessionRegistry {
             let mut peers = self.peers();
             let entry = self.entry(&mut peers, peer, spki_hash);
             entry.session.peer_transport_spki_hash = spki_hash;
-            entry.session.known_addresses.retain(|known| *known != addr);
-            entry.session.known_addresses.insert(0, addr);
+            entry.remember_address(addr);
             entry.session.state = SessionState::Connecting;
         }
         self.notify(peer, SessionState::Connecting);
@@ -144,6 +165,51 @@ impl SessionRegistry {
         }
     }
 
+    /// Dial a trusted peer at addresses just seen on the network. The advertisement doesn't
+    /// say which device it is, so only a pinned handshake with the right peer succeeds and
+    /// failures are expected and not reported. Skips peers that are connected, being dialed,
+    /// or were disconnected on purpose. Returns the address that worked.
+    pub async fn connect_discovered(
+        &self,
+        peer: &str,
+        spki_hash: [u8; 32],
+        addresses: &[SocketAddr],
+    ) -> Option<SocketAddr> {
+        for &addr in addresses {
+            if !self.wants_discovered(peer) {
+                return None;
+            }
+            match connect_pinned(
+                &self.inner.transport_cert,
+                spki_hash,
+                addr,
+                &self.inner.config.dial,
+            )
+            .await
+            {
+                Ok(connection) => {
+                    if !self.wants_discovered(peer) {
+                        connection.close(close_code(DisconnectReason::Normal), b"not needed");
+                        return None;
+                    }
+                    self.entry(&mut self.peers(), peer, spki_hash)
+                        .remember_address(addr);
+                    self.attach(peer, spki_hash, connection, Direction::Outbound);
+                    return Some(addr);
+                }
+                Err(error) => debug!("{peer} is not at {addr}: {error}"),
+            }
+        }
+        None
+    }
+
+    fn wants_discovered(&self, peer: &str) -> bool {
+        self.get(peer).is_none()
+            && self.peers().get(peer).is_none_or(|entry| {
+                !entry.ended_on_purpose && entry.session.state != SessionState::Connecting
+            })
+    }
+
     /// Adopt an authenticated connection as the peer's session. Returns false if an existing
     /// live connection was kept instead and this one was closed.
     pub fn attach(
@@ -177,6 +243,7 @@ impl SessionRegistry {
             entry.session.attach_connection(mux.clone());
             entry.direction = direction;
             entry.established = Instant::now();
+            entry.ended_on_purpose = false;
         }
 
         mux.spawn_keepalive_sender();
@@ -196,6 +263,7 @@ impl SessionRegistry {
             };
             let mux = entry.session.active.take();
             entry.session.close();
+            entry.ended_on_purpose = true;
             mux
         };
         self.clear_connection_grants(peer);
@@ -230,6 +298,7 @@ impl SessionRegistry {
                 direction: Direction::Outbound,
                 established: Instant::now(),
                 reconnect_episode: 0,
+                ended_on_purpose: false,
             }
         })
     }
@@ -282,6 +351,7 @@ impl SessionRegistry {
                 return;
             }
             if mux.ended_by_peer(error) || entry.session.known_addresses.is_empty() {
+                entry.ended_on_purpose = mux.ended_by_peer(error);
                 entry.session.active = None;
                 entry.session.state = SessionState::Disconnected;
                 (SessionState::Disconnected, None)

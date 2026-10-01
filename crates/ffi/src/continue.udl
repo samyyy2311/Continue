@@ -12,7 +12,7 @@ namespace continue {
     string get_device_spki_hash();
 
     [Throws=ContinueFfiError]
-    void start_discovery(u16 port, u32 protocol_version);
+    void start_discovery(u32 protocol_version);
 
     [Throws=ContinueFfiError]
     void stop_discovery();

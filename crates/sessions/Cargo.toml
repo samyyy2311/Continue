@@ -10,6 +10,7 @@ limits = { path = "../limits" }
 protocol = { path = "../protocol" }
 transport = { path = "../transport" }
 pairing = { path = "../pairing" }
+discovery = { path = "../discovery" }
 identity = { path = "../identity" }
 capabilities = { path = "../capabilities" }
 permissions = { path = "../permissions" }

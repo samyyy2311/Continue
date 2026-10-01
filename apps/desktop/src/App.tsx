@@ -20,7 +20,6 @@ import {
   Link2,
   Loader,
   Plus,
-  RefreshCw,
   Search,
   Send,
   Settings,
@@ -76,7 +75,6 @@ import {
 
 const ACCENT_KEY = "continue.accent";
 const THEME_KEY = "continue.theme";
-const ENDPOINTS_KEY = "continue.peerEndpoints";
 const ACTIVITY_STORAGE_KEY = "continue.activity_log";
 
 function readStored<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
@@ -94,18 +92,6 @@ function writeStored(key: string, value: string) {
   } catch {
     // Storage can be unavailable in restrictive environments.
   }
-}
-
-function loadSavedEndpoints(): Record<string, string> {
-  try {
-    return JSON.parse(localStorage.getItem(ENDPOINTS_KEY) ?? "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveEndpoint(fingerprint: string, endpoint: string) {
-  writeStored(ENDPOINTS_KEY, JSON.stringify({ ...loadSavedEndpoints(), [fingerprint]: endpoint }));
 }
 
 function loadSavedActivity(): Activity[] {
@@ -162,17 +148,10 @@ export default function App() {
   const [activity, setActivity] = useState<Activity[]>(() => loadSavedActivity());
   const [connecting, setConnecting] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
-  const [endpointDrafts, setEndpointDrafts] = useState<Record<string, string>>({});
   const [dragCount, setDragCount] = useState<number | null>(null);
   const [textInput, setTextInput] = useState("");
 
   const selectedPeer = peers?.find((p) => p.fingerprint === selectedPeerId) ?? peers?.[0] ?? null;
-  const endpoint = selectedPeer
-    ? (endpointDrafts[selectedPeer.fingerprint] ??
-      selectedPeer.endpoint ??
-      loadSavedEndpoints()[selectedPeer.fingerprint] ??
-      "")
-    : "";
 
   const showToast = useCallback((message: string, tone: Toast["tone"] = "info") => {
     setToast({ message, tone });
@@ -326,10 +305,10 @@ export default function App() {
     };
   }, [refreshPeers, showToast]);
 
-  const handleConnect = async (peer: TrustedPeer, targetEndpoint?: string) => {
-    const address = (targetEndpoint ?? endpointDrafts[peer.fingerprint] ?? loadSavedEndpoints()[peer.fingerprint] ?? "").trim();
+  const handleConnect = async (peer: TrustedPeer, rawAddress: string) => {
+    const address = rawAddress.trim();
     if (!address) {
-      showError("Enter a valid IP and port address to connect.");
+      showError("Enter the device's address, like 192.168.1.20:47470.");
       return;
     }
     setConnecting(peer.fingerprint);
@@ -340,7 +319,6 @@ export default function App() {
             p.fingerprint === peer.fingerprint ? { ...p, isConnected: true, endpoint: address } : p,
           ) ?? null,
         );
-        saveEndpoint(peer.fingerprint, address);
         setConnecting(null);
         showToast(`Connected to ${peer.displayName}`);
       }, 500);
@@ -348,7 +326,6 @@ export default function App() {
     }
     try {
       await connectToPeer(peer.fingerprint, address);
-      saveEndpoint(peer.fingerprint, address);
       await refreshPeers();
       showToast(`Connected to ${peer.displayName}`);
     } catch (error) {
@@ -718,30 +695,14 @@ export default function App() {
         </nav>
 
         <div className="top-nav-right">
-          {view === "transfer" && selectedPeer && (
-            selectedPeer.isConnected ? (
-              <button
-                type="button"
-                className="btn btn-ghost btn-xs"
-                onClick={() => handleDisconnect(selectedPeer)}
-              >
-                Disconnect
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-secondary btn-xs"
-                disabled={connecting === selectedPeer.fingerprint}
-                onClick={() => handleConnect(selectedPeer)}
-              >
-                {connecting === selectedPeer.fingerprint ? (
-                  <Loader size={11} className="spin inline-icon" />
-                ) : (
-                  <RefreshCw size={11} className="inline-icon" />
-                )}
-                Connect
-              </button>
-            )
+          {view === "transfer" && selectedPeer?.isConnected && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
+              onClick={() => handleDisconnect(selectedPeer)}
+            >
+              Disconnect
+            </button>
           )}
 
           {identity && (
@@ -778,13 +739,7 @@ export default function App() {
               textInput={textInput}
               onTextInputChange={setTextInput}
               onSendText={handleSendText}
-              endpointDraft={endpoint}
-              onEndpointChange={(val) => {
-                if (selectedPeer) {
-                  setEndpointDrafts((prev) => ({ ...prev, [selectedPeer.fingerprint]: val }));
-                }
-              }}
-              onConnect={() => selectedPeer && handleConnect(selectedPeer)}
+              onConnect={(address) => selectedPeer && handleConnect(selectedPeer, address)}
               isConnecting={connecting === selectedPeer?.fingerprint}
               activeTransfers={activeTransfers}
               recentActivity={recentActivity}
@@ -881,9 +836,7 @@ interface TransferViewProps {
   textInput: string;
   onTextInputChange: (val: string) => void;
   onSendText: () => void;
-  endpointDraft: string;
-  onEndpointChange: (val: string) => void;
-  onConnect: () => void;
+  onConnect: (address: string) => void;
   isConnecting: boolean;
   activeTransfers: Activity[];
   recentActivity: Activity[];
@@ -903,8 +856,6 @@ function TransferView(props: TransferViewProps) {
     textInput,
     onTextInputChange,
     onSendText,
-    endpointDraft,
-    onEndpointChange,
     onConnect,
     isConnecting,
     activeTransfers,
@@ -962,8 +913,8 @@ function TransferView(props: TransferViewProps) {
 
           <p className="beacon-subtitle">
             {isOnline
-              ? `Local Network · ${peer.endpoint || "192.168.1.45:4433"} · Pinned TLS 1.3 · Zero Cloud`
-              : "Device disconnected · Connect via local address below"}
+              ? `Local network${peer.endpoint ? ` · ${peer.endpoint}` : ""} · Pinned TLS 1.3 · Zero cloud`
+              : "Connects automatically when both devices are on the same network"}
           </p>
         </div>
 
@@ -987,26 +938,14 @@ function TransferView(props: TransferViewProps) {
           </div>
         )}
 
-        {/* Offline Address Input */}
         {!isOnline && (
           <div className="beacon-offline-connect" onClick={(e) => e.stopPropagation()}>
-            <input
-              type="text"
-              className="input-sm font-mono"
-              placeholder="192.168.1.X:4433"
-              value={endpointDraft}
-              onChange={(e) => onEndpointChange(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && onConnect()}
+            <ManualConnect
+              key={peer.fingerprint}
+              initialAddress={peer.endpoint}
+              isConnecting={isConnecting}
+              onConnect={onConnect}
             />
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={onConnect}
-              disabled={isConnecting || !endpointDraft.trim()}
-            >
-              {isConnecting ? <Loader size={12} className="spin inline-icon" /> : null}
-              {isConnecting ? "Connecting" : "Connect"}
-            </button>
           </div>
         )}
       </div>
@@ -1202,7 +1141,7 @@ interface DevicesViewProps {
   selectedPeerId: string | null;
   onSelectPeer: (id: string) => void;
   onOpenPair: () => void;
-  onConnect: (peer: TrustedPeer, endpoint?: string) => Promise<void>;
+  onConnect: (peer: TrustedPeer, address: string) => Promise<void>;
   onDisconnect: (peer: TrustedPeer) => Promise<void>;
   onUnpair: (peer: TrustedPeer) => Promise<void>;
   connectingId: string | null;
@@ -1273,14 +1212,13 @@ function DeviceEntry(props: {
   isSelected: boolean;
   isConnecting: boolean;
   onSelect: () => void;
-  onConnect: (address?: string) => void;
+  onConnect: (address: string) => void;
   onDisconnect: () => void;
   onUnpair: () => void;
   onError: (msg: string) => void;
 }) {
   const { peer, isConnecting, onSelect, onConnect, onDisconnect, onUnpair, onError } = props;
   const [permissions, setPermissions] = useState<PeerPermission[] | null>(null);
-  const [addressDraft, setAddressDraft] = useState(() => loadSavedEndpoints()[peer.fingerprint] ?? "");
   const [unpairingConfirm, setUnpairingConfirm] = useState(false);
 
   useEffect(() => {
@@ -1341,25 +1279,7 @@ function DeviceEntry(props: {
               Disconnect
             </button>
           ) : (
-            <div className="inline-connect">
-              <input
-                type="text"
-                className="input-sm font-mono"
-                placeholder="192.168.1.X:4433"
-                value={addressDraft}
-                onChange={(e) => setAddressDraft(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && onConnect(addressDraft)}
-              />
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                disabled={isConnecting || !addressDraft.trim()}
-                onClick={() => onConnect(addressDraft)}
-              >
-                {isConnecting ? <Loader size={12} className="spin inline-icon" /> : null}
-                {isConnecting ? "Connecting" : "Connect"}
-              </button>
-            </div>
+            <ManualConnect initialAddress={peer.endpoint} isConnecting={isConnecting} onConnect={onConnect} />
           )}
 
           <button type="button" className="btn btn-secondary btn-sm" onClick={onSelect}>
@@ -1700,6 +1620,48 @@ function SettingsView(props: SettingsViewProps) {
           <span className="text-muted" style={{ fontSize: "12px" }}>Open Source</span>
         </div>
       </section>
+    </div>
+  );
+}
+
+/** Paired devices connect on their own; this is the fallback for when they can't find each other. */
+function ManualConnect(props: {
+  initialAddress?: string;
+  isConnecting: boolean;
+  onConnect: (address: string) => void;
+}) {
+  const { initialAddress, isConnecting, onConnect } = props;
+  const [open, setOpen] = useState(false);
+  const [address, setAddress] = useState(initialAddress ?? "");
+
+  if (!open) {
+    return (
+      <button type="button" className="btn btn-ghost btn-xs" onClick={() => setOpen(true)}>
+        Connect manually
+      </button>
+    );
+  }
+
+  return (
+    <div className="inline-connect">
+      <input
+        type="text"
+        className="input-sm font-mono"
+        placeholder="192.168.1.20:47470"
+        autoFocus
+        value={address}
+        onChange={(e) => setAddress(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && onConnect(address)}
+      />
+      <button
+        type="button"
+        className="btn btn-primary btn-sm"
+        disabled={isConnecting || !address.trim()}
+        onClick={() => onConnect(address)}
+      >
+        {isConnecting ? <Loader size={12} className="spin inline-icon" /> : null}
+        {isConnecting ? "Connecting" : "Connect"}
+      </button>
     </div>
   );
 }

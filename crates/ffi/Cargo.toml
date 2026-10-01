@@ -9,6 +9,14 @@ publish = false
 crate-type = ["lib", "cdylib", "staticlib"]
 name = "continue_ffi"
 
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
 [dependencies]
 crypto = { path = "../crypto" }
 identity = { path = "../identity" }

@@ -1,5 +1,18 @@
 # SPDX-FileCopyrightText: Contributors to the Continue project
 # SPDX-License-Identifier: Apache-2.0
 
-[REUSE compliance]
-version = "3.0"
+version = 1
+
+# Defaults for files that can't carry a header (config, lockfiles, icons).
+# A header in the file itself always wins.
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "Contributors to the Continue project"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "apps/**"
+precedence = "closest"
+SPDX-FileCopyrightText = "Contributors to the Continue project"
+SPDX-License-Identifier = "GPL-3.0-only"

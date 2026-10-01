@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
-// SPDX-License-Identifier: GPL-3.0
+// SPDX-License-Identifier: GPL-3.0-only
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -9,13 +9,12 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
-use zeroize::Zeroizing;
 
-use identity::{FileSecretStore, IdentitySigner, SecretStore};
-use pairing::{InitiatorPairing, ReplayCache, TrustStore};
+use identity::{FileSecretStore, IdentitySigner};
+use pairing::{DeviceKeys, InitiatorPairing, ReplayCache, TrustStore};
 use permissions::PermissionStore;
 use protocol::CapabilityId;
-use sessions::{Direction, SessionRegistry, SessionState};
+use sessions::{SessionRegistry, SessionState};
 use transport::{DialConfig, TransportCertificate};
 
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
@@ -62,7 +61,6 @@ pub struct DesktopRuntimeState {
     allowed_spki_hashes: Arc<std::sync::RwLock<HashSet<[u8; 32]>>>,
     active_pairing: Arc<Mutex<Option<Arc<ActivePairingServer>>>>,
     sessions: SessionRegistry,
-    advertiser: Arc<Mutex<Option<discovery::DiscoveryAdvertiser>>>,
 }
 
 fn session_handlers(
@@ -159,12 +157,17 @@ fn get_trusted_peers(state: State<DesktopRuntimeState>) -> Result<Vec<TrustedPee
         .into_iter()
         .map(|p| {
             let is_connected = state.sessions.state(&p.fingerprint) == SessionState::Connected;
+            let endpoint = state
+                .trust_store
+                .last_endpoint(&p.fingerprint)
+                .ok()
+                .flatten();
             TrustedPeerDto {
                 fingerprint: p.fingerprint,
                 display_name: p.display_name,
                 paired_at: p.paired_at,
                 is_connected,
-                endpoint: None,
+                endpoint,
             }
         })
         .collect();
@@ -255,6 +258,8 @@ async fn start_pairing(
     let endpoint_for_worker = server_endpoint.clone();
     let active_pairing = state.active_pairing.clone();
     let allowed_hashes = state.allowed_spki_hashes.clone();
+    let trust_store = state.trust_store.clone();
+    let registry = state.sessions.clone();
     tokio::spawn(async move {
         let incoming = match endpoint_for_worker.accept().await {
             Some(inc) => inc,
@@ -279,6 +284,14 @@ async fn start_pairing(
         let result = initiator
             .complete_handshake(&mut send_stream, &mut recv_stream, recorded_hash)
             .await;
+        if let Ok(peer) = &result {
+            sessions::remember_peer_address(
+                &trust_store,
+                &peer.fingerprint,
+                conn.remote_address().ip(),
+            );
+            registry.redial_now();
+        }
 
         endpoint_for_worker.close(0u32.into(), b"pairing_finished");
 
@@ -367,8 +380,10 @@ async fn pair_from_qr(
     if let Ok(mut allowed) = state.allowed_spki_hashes.write() {
         allowed.insert(trusted_peer.transport_spki_hash);
     }
+    sessions::remember_peer_address(&state.trust_store, &trusted_peer.fingerprint, addr.ip());
+    state.sessions.redial_now();
 
-    // The pairing connection is dropped here; a session needs a separate connect_to_peer.
+    // The pairing connection is dropped here; the session is dialed at the saved address.
     Ok(TrustedPeerDto {
         fingerprint: trusted_peer.fingerprint,
         display_name: trusted_peer.display_name,
@@ -466,7 +481,12 @@ async fn connect_to_peer(
         .sessions
         .connect(&peer_fingerprint, peer.transport_spki_hash, addr)
         .await
-        .map_err(|e| format!("Connect failed: {e}"))
+        .map_err(|e| format!("Connect failed: {e}"))?;
+
+    state
+        .trust_store
+        .set_last_endpoint(&peer_fingerprint, &addr.to_string())
+        .map_err(|e| format!("Database error: {e}"))
 }
 
 #[tauri::command]
@@ -612,20 +632,10 @@ fn initialize_desktop_runtime(
     let trust_store = TrustStore::open(db_path)?;
     let permission_store = Arc::new(PermissionStore::open(db_path)?);
 
-    let secret_store = FileSecretStore::new(secrets_dir)?;
-    let identity_signer: Arc<dyn IdentitySigner> = Arc::from(identity::load_or_create_identity(
-        &secret_store,
-        "device_identity",
-    )?);
-
-    let transport_cert = Arc::new(match secret_store.load("transport_cert")? {
-        Some(pem_bytes) => TransportCertificate::from_pem_bytes(&pem_bytes)?,
-        None => {
-            let cert = TransportCertificate::generate()?;
-            secret_store.store("transport_cert", Zeroizing::new(cert.pkcs8_der.clone()))?;
-            cert
-        }
-    });
+    let DeviceKeys {
+        identity_signer,
+        transport_cert,
+    } = DeviceKeys::load_or_create(&FileSecretStore::new(secrets_dir)?)?;
 
     let peers = trust_store.list_peers()?;
     let initial_hashes: HashSet<[u8; 32]> = peers.iter().map(|p| p.transport_spki_hash).collect();
@@ -658,11 +668,17 @@ fn initialize_desktop_runtime(
         allowed_spki_hashes,
         active_pairing: Arc::new(Mutex::new(None)),
         sessions,
-        advertiser: Arc::new(Mutex::new(None)),
     })
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -686,62 +702,29 @@ fn main() {
                 initialize_desktop_runtime(app.handle(), &db_path, &secrets_dir, download_dir)
                     .expect("Failed to initialize Continue desktop runtime engine");
 
-            // Setup always-listening QUIC endpoint for paired peers
-            if let Ok(server_tls) = runtime_state
-                .transport_cert
-                .build_trusted_peers_server_tls(runtime_state.allowed_spki_hashes.clone())
-            {
-                let bind_addr = std::net::SocketAddr::from(([0, 0, 0, 0], 0));
-                if let Ok(server_endpoint) =
-                    transport::create_server_endpoint(bind_addr, server_tls)
-                {
-                    if let Ok(local_addr) = server_endpoint.local_addr() {
-                        let bound_port = local_addr.port();
-                        let ephemeral_id = discovery::EphemeralDiscoveryId::generate();
-                        if let Ok(adv) =
-                            discovery::DiscoveryAdvertiser::start(bound_port, ephemeral_id, 1)
-                        {
-                            *runtime_state.advertiser.lock() = Some(adv);
-                        }
-
-                        let accept_endpoint = server_endpoint;
-                        let trust_store = runtime_state.trust_store.clone();
-                        let sessions = runtime_state.sessions.clone();
-
-                        tauri::async_runtime::spawn(async move {
-                            while let Some(incoming) = accept_endpoint.accept().await {
-                                let conn = match incoming.await {
-                                    Ok(c) => c,
-                                    Err(_) => continue,
-                                };
-
-                                let spki_hash = match transport::extract_peer_spki_hash(&conn) {
-                                    Some(h) => h,
-                                    None => {
-                                        conn.close(0u32.into(), b"unknown_peer");
-                                        continue;
-                                    }
-                                };
-
-                                let peer = match trust_store.get_peer_by_spki_hash(&spki_hash) {
-                                    Ok(Some(p)) => p,
-                                    _ => {
-                                        conn.close(0u32.into(), b"untrusted_peer");
-                                        continue;
-                                    }
-                                };
-
-                                sessions.attach(
-                                    &peer.fingerprint,
-                                    spki_hash,
-                                    conn,
-                                    Direction::Inbound,
-                                );
-                            }
-                        });
+            // quinn needs a running async runtime to open the endpoint, which `setup` doesn't have.
+            let cert = runtime_state.transport_cert.clone();
+            let trusted_keys = runtime_state.allowed_spki_hashes.clone();
+            let sessions = runtime_state.sessions.clone();
+            let trust_store = runtime_state.trust_store.clone();
+            tauri::async_runtime::spawn(async move {
+                let listener = sessions::listen_for_peers(&cert, trusted_keys)
+                    .and_then(|endpoint| Ok((endpoint.local_addr()?.port(), endpoint)));
+                let (port, endpoint) = match listener {
+                    Ok(listener) => listener,
+                    Err(error) => {
+                        tracing::error!("Could not listen for paired devices: {error}");
+                        return;
                     }
-                }
-            }
+                };
+                tracing::info!("Listening for paired devices on port {port}");
+                tauri::async_runtime::spawn(discovery::advertise(port, 1));
+                tauri::async_runtime::spawn(sessions::connect_paired_peers(
+                    sessions.clone(),
+                    trust_store.clone(),
+                ));
+                sessions::accept_peers(endpoint, sessions, trust_store).await;
+            });
 
             app.manage(runtime_state);
             Ok(())
