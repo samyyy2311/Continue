@@ -642,9 +642,6 @@ export default function App() {
     <div className="shell">
       <nav className="rail" aria-label="Main">
         <img src="/icon.svg" alt="Continue" className="rail-logo" />
-        <button type="button" className="rail-fab" onClick={() => setShowPairDialog(true)} title="Pair a device">
-          <Plus size={24} />
-        </button>
         <div className="rail-items">
           {destinations.map((item, index) => (
             <button

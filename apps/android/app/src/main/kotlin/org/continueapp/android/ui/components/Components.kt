@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import org.continueapp.android.ui.theme.success
 
 val ScreenPadding = 20.dp
 
@@ -182,7 +183,7 @@ fun StatusLabel(
     connected: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val color = if (connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    val color = if (connected) MaterialTheme.colorScheme.success else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,

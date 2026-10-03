@@ -5,6 +5,7 @@ package org.continueapp.android.ui.theme
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.Shapes
@@ -15,6 +16,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
@@ -57,7 +59,7 @@ private val LightColors =
         onPrimary = Color.White,
         primaryContainer = Color(0xFFDAE8E8),
         onPrimaryContainer = Color(0xFF0E4847),
-        secondaryContainer = Color(0xFFD8E3EE),
+        secondaryContainer = Color(0xFFE2E6EB),
         onSecondaryContainer = Color(0xFF16202B),
         background = Color(0xFFF3F6F9),
         onBackground = Color(0xFF16202B),
@@ -71,6 +73,10 @@ private val LightColors =
         outlineVariant = Color(0xFFD3D9E1),
         error = Color(0xFFB3261E),
     )
+
+/** Green for "connected", which Material's colour scheme has no slot for. Same values as desktop. */
+val ColorScheme.success: Color
+    get() = if (background.luminance() > 0.5f) Color(0xFF1E7A45) else Color(0xFF6CC795)
 
 @OptIn(ExperimentalTextApi::class)
 private fun instrumentSans(weight: Int) =
