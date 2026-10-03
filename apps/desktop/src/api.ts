@@ -7,6 +7,7 @@ import type {
   DeviceIdentity,
   Grant,
   HistoryEntry,
+  IncomingTransfer,
   PeerPermission,
   PermissionAnswer,
   PermissionQuestion,
@@ -59,6 +60,21 @@ export const setClipboardSyncEnabled = (enabled: boolean) => invoke<void>("set_c
 export const getAutostart = () => invoke<boolean>("get_autostart");
 
 export const setAutostart = (enabled: boolean) => invoke<void>("set_autostart", { enabled });
+
+export const listIncoming = () => invoke<IncomingTransfer[]>("list_incoming");
+
+export const cancelIncoming = (transferId: string) => invoke<void>("cancel_incoming", { transferId });
+
+export const onIncomingProgress = (handler: (file: IncomingTransfer) => void): Promise<UnlistenFn> =>
+  listen<IncomingTransfer>("incoming-progress", (event) => handler(event.payload));
+
+export const onIncomingEnded = (handler: (transferId: string) => void): Promise<UnlistenFn> =>
+  listen<string>("incoming-ended", (event) => handler(event.payload));
+
+export const getSaveFolder = () => invoke<string>("get_save_folder");
+
+/** Saves received files to `folder` from now on, or to Downloads when it's null. */
+export const setSaveFolder = (folder: string | null) => invoke<string>("set_save_folder", { folder });
 
 /** Opens a web link in the default browser. */
 export const openLink = (url: string) => invoke<void>("open_link", { url });
