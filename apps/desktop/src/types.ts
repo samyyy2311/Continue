@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export interface DeviceIdentity {
-  fingerprint: string;
-  spkiHash: string;
   deviceName: string;
 }
 

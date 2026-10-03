@@ -33,16 +33,10 @@ const UNREACHABLE: &str = "Couldn't reach the other device. Check that both are 
 const NO_NETWORK: &str = "This computer isn't on a network. Connect to Wi-Fi and try again.";
 const SAVE_FAILED: &str = "Couldn't save that change. Try again.";
 
-fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
-    bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceIdentityDto {
     pub device_name: String,
-    pub fingerprint: String,
-    pub spki_hash: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -145,21 +139,10 @@ fn session_state_listener(
 }
 
 #[tauri::command]
-fn get_device_identity(state: State<DesktopRuntimeState>) -> Result<DeviceIdentityDto, String> {
-    let verifying_key = state
-        .identity_signer
-        .verifying_key()
-        .map_err(user_error("Couldn't load this computer's details."))?;
-    let fingerprint = identity::Fingerprint::from_verifying_key(&verifying_key)
-        .as_str()
-        .to_string();
-    let spki_hash = hex_encode(state.transport_cert.spki_hash);
-
-    Ok(DeviceIdentityDto {
+fn get_device_identity(state: State<DesktopRuntimeState>) -> DeviceIdentityDto {
+    DeviceIdentityDto {
         device_name: state.device_name.clone(),
-        fingerprint,
-        spki_hash,
-    })
+    }
 }
 
 #[tauri::command]

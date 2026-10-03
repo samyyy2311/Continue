@@ -41,6 +41,7 @@ import { ButtonGroup, DeviceGlyph, ProgressBar } from "./components.tsx";
 import {
   connectToPeer,
   disconnectPeer,
+  reconnectPeer,
   errorMessage,
   getDeviceIdentity,
   getPermissions,
@@ -299,6 +300,15 @@ export default function App() {
       showError(errorMessage(error));
     } finally {
       setConnecting(null);
+    }
+  };
+
+  const handleReconnect = async (peer: TrustedPeer) => {
+    try {
+      await reconnectPeer(peer.fingerprint);
+      showToast(`Looking for ${peer.displayName}`);
+    } catch (error) {
+      showError(errorMessage(error));
     }
   };
 
@@ -592,6 +602,7 @@ export default function App() {
               onTextInputChange={setTextInput}
               onSendText={handleSendText}
               onConnect={(address) => selectedPeer && handleConnect(selectedPeer, address)}
+              onReconnect={() => selectedPeer && handleReconnect(selectedPeer)}
               onDisconnect={() => selectedPeer && handleDisconnect(selectedPeer)}
               isConnecting={connecting === selectedPeer?.fingerprint}
               activeTransfers={activeTransfers}
@@ -611,6 +622,7 @@ export default function App() {
               }}
               onOpenPair={() => setShowPairDialog(true)}
               onConnect={handleConnect}
+              onReconnect={handleReconnect}
               onDisconnect={handleDisconnect}
               onUnpair={handleRemovePeer}
               connectingId={connecting}
@@ -721,6 +733,7 @@ interface HomeViewProps {
   onTextInputChange: (val: string) => void;
   onSendText: () => void;
   onConnect: (address: string) => void;
+  onReconnect: () => void;
   onDisconnect: () => void;
   isConnecting: boolean;
   activeTransfers: Activity[];
@@ -732,7 +745,7 @@ interface HomeViewProps {
 
 function HomeView(props: HomeViewProps) {
   const { peer, peers, onSelectPeer, onOpenPair, onChooseFiles, onSendClipboard, textInput } = props;
-  const { onTextInputChange, onSendText, onConnect, onDisconnect, isConnecting } = props;
+  const { onTextInputChange, onSendText, onConnect, onReconnect, onDisconnect, isConnecting } = props;
   const { activeTransfers, recentActivity, onRetry, onCopy, onNavigateHistory } = props;
 
   if (!peer) {
@@ -813,6 +826,7 @@ function HomeView(props: HomeViewProps) {
               initialAddress={peer.endpoint}
               isConnecting={isConnecting}
               onConnect={onConnect}
+              onReconnect={onReconnect}
             />
           </div>
         )}
@@ -861,6 +875,7 @@ interface DevicesViewProps {
   onSelectPeer: (id: string) => void;
   onOpenPair: () => void;
   onConnect: (peer: TrustedPeer, address: string) => Promise<void>;
+  onReconnect: (peer: TrustedPeer) => Promise<void>;
   onDisconnect: (peer: TrustedPeer) => Promise<void>;
   onUnpair: (peer: TrustedPeer) => Promise<void>;
   connectingId: string | null;
@@ -868,7 +883,8 @@ interface DevicesViewProps {
 }
 
 function DevicesView(props: DevicesViewProps) {
-  const { peers, onSelectPeer, onOpenPair, onConnect, onDisconnect, onUnpair, connectingId, onError } = props;
+  const { peers, onSelectPeer, onOpenPair, onConnect, onReconnect, onDisconnect, onUnpair, connectingId, onError } =
+    props;
   return (
     <div className="page">
       <header className="page-head">
@@ -888,6 +904,7 @@ function DevicesView(props: DevicesViewProps) {
             isConnecting={connectingId === peer.fingerprint}
             onSelect={() => onSelectPeer(peer.fingerprint)}
             onConnect={(addr) => onConnect(peer, addr)}
+            onReconnect={() => onReconnect(peer)}
             onDisconnect={() => onDisconnect(peer)}
             onUnpair={() => onUnpair(peer)}
             onError={onError}
@@ -903,11 +920,12 @@ function DeviceCard(props: {
   isConnecting: boolean;
   onSelect: () => void;
   onConnect: (address: string) => void;
+  onReconnect: () => void;
   onDisconnect: () => void;
   onUnpair: () => void;
   onError: (msg: string) => void;
 }) {
-  const { peer, isConnecting, onSelect, onConnect, onDisconnect, onUnpair, onError } = props;
+  const { peer, isConnecting, onSelect, onConnect, onReconnect, onDisconnect, onUnpair, onError } = props;
   const [permissions, setPermissions] = useState<PeerPermission[] | null>(null);
   const [confirmingForget, setConfirmingForget] = useState(false);
 
@@ -958,7 +976,12 @@ function DeviceCard(props: {
               </button>
             </>
           ) : (
-            <ManualConnect initialAddress={peer.endpoint} isConnecting={isConnecting} onConnect={onConnect} />
+            <ManualConnect
+              initialAddress={peer.endpoint}
+              isConnecting={isConnecting}
+              onConnect={onConnect}
+              onReconnect={onReconnect}
+            />
           )}
         </div>
       </div>
@@ -1191,16 +1214,27 @@ function SettingsView(props: SettingsViewProps) {
 }
 
 /** Paired devices connect on their own; this is the fallback for when they can't find each other. */
-function ManualConnect(props: { initialAddress?: string; isConnecting: boolean; onConnect: (address: string) => void }) {
-  const { initialAddress, isConnecting, onConnect } = props;
+/** Connect normally, or by typing the address when the devices can't find each other. */
+function ManualConnect(props: {
+  initialAddress?: string;
+  isConnecting: boolean;
+  onConnect: (address: string) => void;
+  onReconnect: () => void;
+}) {
+  const { initialAddress, isConnecting, onConnect, onReconnect } = props;
   const [open, setOpen] = useState(false);
   const [address, setAddress] = useState(initialAddress ?? "");
 
   if (!open) {
     return (
-      <button type="button" className="btn btn-outlined" onClick={() => setOpen(true)}>
-        Connect by address
-      </button>
+      <>
+        <button type="button" className="btn btn-filled" onClick={onReconnect}>
+          Connect
+        </button>
+        <button type="button" className="btn btn-text" onClick={() => setOpen(true)}>
+          Connect by address
+        </button>
+      </>
     );
   }
 
