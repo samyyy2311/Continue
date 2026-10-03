@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use history::{Direction, HistoryStore, Kind};
 use identity::{FileSecretStore, IdentitySigner};
 use pairing::{DeviceKeys, InitiatorPairing, ReplayCache, TrustStore};
 use permissions::PermissionStore;
@@ -76,6 +77,63 @@ pub struct DesktopRuntimeState {
     active_pairing: Arc<Mutex<Option<Arc<ActivePairingServer>>>>,
     sessions: SessionRegistry,
     pending_answers: PendingAnswers,
+    history: HistoryStore,
+}
+
+/// Saves to history; a failure there shouldn't fail what was actually done.
+fn remember(history: &HistoryStore, item: history::Item) {
+    if let Err(error) = history.record(&item) {
+        tracing::warn!("Couldn't save to history: {error}");
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntryDto {
+    pub id: i64,
+    pub at: u64,
+    pub received: bool,
+    pub kind: &'static str,
+    pub label: String,
+    pub peer_id: String,
+    pub peer_name: String,
+    pub size: u64,
+    pub failed: bool,
+    pub location: Option<String>,
+}
+
+#[tauri::command]
+fn get_history(state: State<DesktopRuntimeState>) -> Result<Vec<HistoryEntryDto>, String> {
+    let entries = state
+        .history
+        .list(history::HISTORY_LIMIT)
+        .map_err(user_error("Couldn't load your history."))?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| HistoryEntryDto {
+            id: entry.id,
+            at: entry.at,
+            received: entry.item.direction == Direction::Received,
+            kind: match entry.item.kind {
+                Kind::File => "file",
+                Kind::Text => "text",
+            },
+            label: entry.item.label,
+            peer_id: entry.item.peer_fingerprint,
+            peer_name: entry.item.peer_name,
+            size: entry.item.size,
+            failed: entry.item.failed,
+            location: entry.item.location,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn clear_history(state: State<DesktopRuntimeState>) -> Result<(), String> {
+    state
+        .history
+        .clear()
+        .map_err(user_error("Couldn't clear your history."))
 }
 
 fn peer_name(trust_store: &TrustStore, fingerprint: &str) -> String {
@@ -92,6 +150,7 @@ fn session_handlers(
     permission_store: Arc<PermissionStore>,
     trust_store: TrustStore,
     pending_answers: PendingAnswers,
+    history: HistoryStore,
     app_handle: &AppHandle,
 ) -> sessions::SessionCapabilityHandlers {
     let mut handlers = sessions::SessionCapabilityHandlers::new(download_dir)
@@ -102,8 +161,21 @@ fn session_handlers(
             pending_answers,
         ));
 
-    let (app, peers) = (app_handle.clone(), trust_store.clone());
+    let (app, peers, saved) = (app_handle.clone(), trust_store.clone(), history.clone());
     handlers.on_file_received = Some(Arc::new(move |peer, file| {
+        remember(
+            &saved,
+            history::Item {
+                direction: Direction::Received,
+                kind: Kind::File,
+                label: file.file_name.clone(),
+                peer_fingerprint: peer.to_string(),
+                peer_name: peer_name(&peers, peer),
+                size: file.bytes_received,
+                failed: false,
+                location: Some(file.path.to_string_lossy().into_owned()),
+            },
+        );
         let _ = app.emit(
             "file-received",
             serde_json::json!({
@@ -118,12 +190,26 @@ fn session_handlers(
 
     let app = app_handle.clone();
     handlers.on_clipboard_received = Some(Arc::new(move |peer, update| {
+        let text = String::from_utf8_lossy(&update.payload);
+        remember(
+            &history,
+            history::Item {
+                direction: Direction::Received,
+                kind: Kind::Text,
+                label: text.to_string(),
+                peer_fingerprint: peer.to_string(),
+                peer_name: peer_name(&trust_store, peer),
+                size: update.payload.len() as u64,
+                failed: false,
+                location: None,
+            },
+        );
         let _ = app.emit(
             "clipboard-received",
             serde_json::json!({
                 "peerId": peer,
                 "peerName": peer_name(&trust_store, peer),
-                "content": String::from_utf8_lossy(&update.payload),
+                "content": text,
             }),
         );
     }));
@@ -619,9 +705,26 @@ async fn send_file_to_peer(
         });
     };
 
-    mux.send_file_to_peer(&path, transfer_id, Some(report))
-        .await
-        .map_err(user_error("Couldn't send the file."))
+    let result = mux
+        .send_file_to_peer(&path, transfer_id, Some(report))
+        .await;
+    remember(
+        &state.history,
+        history::Item {
+            direction: Direction::Sent,
+            kind: Kind::File,
+            label: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            peer_fingerprint: peer_fingerprint.clone(),
+            peer_name: peer_name(&state.trust_store, &peer_fingerprint),
+            size: std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
+            failed: result.is_err(),
+            location: Some(path.to_string_lossy().into_owned()),
+        },
+    );
+    result.map_err(user_error("Couldn't send the file."))
 }
 
 #[tauri::command]
@@ -645,15 +748,29 @@ async fn send_clipboard_text(
         negotiated_session_capabilities: caps,
     };
 
-    mux.send_clipboard_to_peer(
-        clipboard::ClipboardFormat::TextPlain,
-        text.into_bytes(),
-        &query,
-    )
-    .await
-    .map_err(user_error("Couldn't send the text."))?;
-
-    Ok(())
+    let result = mux
+        .send_clipboard_to_peer(
+            clipboard::ClipboardFormat::TextPlain,
+            text.clone().into_bytes(),
+            &query,
+        )
+        .await;
+    remember(
+        &state.history,
+        history::Item {
+            direction: Direction::Sent,
+            kind: Kind::Text,
+            size: text.len() as u64,
+            label: text,
+            peer_name: peer_name(&state.trust_store, &peer_fingerprint),
+            peer_fingerprint,
+            failed: result.is_err(),
+            location: None,
+        },
+    );
+    result
+        .map(|_| ())
+        .map_err(user_error("Couldn't send the text."))
 }
 
 #[tauri::command]
@@ -710,6 +827,7 @@ fn initialize_desktop_runtime(
 ) -> Result<DesktopRuntimeState, Box<dyn std::error::Error>> {
     let trust_store = TrustStore::open(db_path)?;
     let permission_store = Arc::new(PermissionStore::open(db_path)?);
+    let history = HistoryStore::open(db_path)?;
 
     let DeviceKeys {
         identity_signer,
@@ -731,6 +849,7 @@ fn initialize_desktop_runtime(
             permission_store.clone(),
             trust_store.clone(),
             pending_answers.clone(),
+            history.clone(),
             app_handle,
         ),
         sessions::RegistryConfig::default(),
@@ -755,6 +874,7 @@ fn initialize_desktop_runtime(
         active_pairing: Arc::new(Mutex::new(None)),
         sessions,
         pending_answers,
+        history,
     })
 }
 
@@ -826,6 +946,8 @@ fn main() {
             get_permissions,
             set_permission,
             answer_permission,
+            get_history,
+            clear_history,
             connect_to_peer,
             disconnect_peer,
             reconnect_peer,

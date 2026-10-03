@@ -68,6 +68,21 @@ export interface Activity {
   error?: string;
 }
 
+/** A saved send or receive, newest first from `getHistory`. */
+export interface HistoryEntry {
+  id: number;
+  /** Unix time in milliseconds. */
+  at: number;
+  received: boolean;
+  kind: "file" | "text";
+  label: string;
+  peerId: string;
+  peerName: string;
+  size: number;
+  failed: boolean;
+  location: string | null;
+}
+
 /** Something a device set to Ask wants to send. */
 export interface PermissionQuestion {
   id: number;

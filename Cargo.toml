@@ -13,6 +13,7 @@ members = [
     "crates/transfer",
     "crates/clipboard",
     "crates/notifications",
+    "crates/history",
     "crates/ffi",
     "tests/peer",
 ]

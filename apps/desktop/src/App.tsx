@@ -39,11 +39,13 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import { ButtonGroup, DeviceGlyph, ProgressBar } from "./components.tsx";
 import {
+  clearHistory,
   connectToPeer,
   disconnectPeer,
   reconnectPeer,
   errorMessage,
   getDeviceIdentity,
+  getHistory,
   getPermissions,
   getTrustedPeers,
   removeTrustedPeer,
@@ -64,6 +66,7 @@ import {
   type AccentName,
   type Activity,
   type DeviceIdentity,
+  type HistoryEntry,
   GRANT_OPTIONS,
   type Grant,
   type HistoryFilter,
@@ -80,7 +83,6 @@ import {
 
 const ACCENT_KEY = "continue.accent";
 const THEME_KEY = "continue.theme";
-const ACTIVITY_STORAGE_KEY = "continue.activity_log";
 
 function readStored<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   try {
@@ -99,24 +101,19 @@ function writeStored(key: string, value: string) {
   }
 }
 
-function loadSavedActivity(): Activity[] {
-  try {
-    const data = localStorage.getItem(ACTIVITY_STORAGE_KEY);
-    if (!data) return [];
-    const parsed = JSON.parse(data) as Activity[];
-    return Array.isArray(parsed) ? parsed.slice(0, 100) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveActivity(items: Activity[]) {
-  try {
-    const completedOnly = items.filter((item) => item.status !== "sending").slice(0, 100);
-    localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(completedOnly));
-  } catch {
-    // Storage failure silently ignored.
-  }
+function fromHistory(entry: HistoryEntry): Activity {
+  return {
+    id: `h-${entry.id}`,
+    kind: entry.kind,
+    label: entry.label,
+    peerId: entry.peerId,
+    peerName: entry.peerName,
+    status: entry.received ? "received" : entry.failed ? "failed" : "sent",
+    timestamp: entry.at,
+    path: entry.location ?? undefined,
+    bytesSent: entry.size,
+    totalBytes: entry.size,
+  };
 }
 
 function getFileIcon(name: string) {
@@ -150,7 +147,7 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
   const [showPairDialog, setShowPairDialog] = useState(false);
-  const [activity, setActivity] = useState<Activity[]>(() => loadSavedActivity());
+  const [activity, setActivity] = useState<Activity[]>([]);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [dragCount, setDragCount] = useState<number | null>(null);
@@ -163,10 +160,6 @@ export default function App() {
   }, []);
 
   const showError = useCallback((message: string) => showToast(message, "error"), [showToast]);
-
-  useEffect(() => {
-    saveActivity(activity);
-  }, [activity]);
 
   useEffect(() => {
     if (!toast) return;
@@ -206,12 +199,19 @@ export default function App() {
       setLoadError("Open Continue from your apps to use it.");
       return;
     }
-    Promise.all([getDeviceIdentity(), getTrustedPeers()])
-      .then(([loadedIdentity, loadedPeers]) => {
+    let active = true;
+    Promise.all([getDeviceIdentity(), getTrustedPeers(), getHistory()])
+      .then(([loadedIdentity, loadedPeers, history]) => {
+        if (!active) return;
         setIdentity(loadedIdentity);
         setPeers(loadedPeers);
+        // Anything sent since the window opened stays on top.
+        setActivity((live) => [...live, ...history.map(fromHistory)]);
       })
-      .catch((error) => setLoadError(errorMessage(error)));
+      .catch((error) => active && setLoadError(errorMessage(error)));
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -308,6 +308,11 @@ export default function App() {
     } finally {
       setConnecting(null);
     }
+  };
+
+  const handleClearHistory = () => {
+    setActivity((prev) => prev.filter((item) => item.status === "sending"));
+    clearHistory().catch((error) => showError(errorMessage(error)));
   };
 
   const handleReconnect = async (peer: TrustedPeer) => {
@@ -638,7 +643,7 @@ export default function App() {
           )}
 
           {view === "history" && (
-            <HistoryView activity={activity} onRetry={retryItem} onCopy={copyToClipboard} onClear={() => setActivity([])} />
+            <HistoryView activity={activity} onRetry={retryItem} onCopy={copyToClipboard} onClear={handleClearHistory} />
           )}
 
           {view === "settings" && (
