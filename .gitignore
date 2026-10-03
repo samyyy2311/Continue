@@ -1,5 +1,5 @@
 # Generated build files
-/target/
+target/
 **/*.rs.bk
 
 # SQLite databases generated during development and tests
