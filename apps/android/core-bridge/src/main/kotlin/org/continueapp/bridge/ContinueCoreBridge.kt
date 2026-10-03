@@ -1,6 +1,7 @@
 package org.continueapp.bridge
 
 import org.continueapp.bridge.ffi.ContinueFfiException
+import org.continueapp.bridge.ffi.HistoryEntryFfi
 import org.continueapp.bridge.ffi.PermissionDecisionFfi
 import org.continueapp.bridge.ffi.PermissionRequestFfi
 import org.continueapp.bridge.ffi.ReceivedFfi
@@ -11,6 +12,7 @@ import java.util.concurrent.TimeUnit.MILLISECONDS
 import org.continueapp.bridge.ffi.answerPermissionRequest as coreAnswerPermissionRequest
 import org.continueapp.bridge.ffi.awaitPairingResult as coreAwaitPairingResult
 import org.continueapp.bridge.ffi.cancelPairing as coreCancelPairing
+import org.continueapp.bridge.ffi.clearHistory as coreClearHistory
 import org.continueapp.bridge.ffi.connectToPeer as coreConnectToPeer
 import org.continueapp.bridge.ffi.disconnect as coreDisconnect
 import org.continueapp.bridge.ffi.generateQrPayload as coreGenerateQrPayload
@@ -19,6 +21,7 @@ import org.continueapp.bridge.ffi.getDeviceFingerprint as coreGetDeviceFingerpri
 import org.continueapp.bridge.ffi.getDeviceSpkiHash as coreGetDeviceSpkiHash
 import org.continueapp.bridge.ffi.initCore as coreInitCore
 import org.continueapp.bridge.ffi.isPeerConnected as coreIsPeerConnected
+import org.continueapp.bridge.ffi.listHistory as coreListHistory
 import org.continueapp.bridge.ffi.listTrustedPeers as coreListTrustedPeers
 import org.continueapp.bridge.ffi.nextPermissionRequest as coreNextPermissionRequest
 import org.continueapp.bridge.ffi.nextReceived as coreNextReceived
@@ -30,6 +33,7 @@ import org.continueapp.bridge.ffi.revokePermission as coreRevokePermission
 import org.continueapp.bridge.ffi.sendClipboardText as coreSendClipboardText
 import org.continueapp.bridge.ffi.sendFile as coreSendFile
 import org.continueapp.bridge.ffi.sendNotification as coreSendNotification
+import org.continueapp.bridge.ffi.setHistoryLocation as coreSetHistoryLocation
 import org.continueapp.bridge.ffi.setPermission as coreSetPermission
 import org.continueapp.bridge.ffi.startDiscovery as coreStartDiscovery
 import org.continueapp.bridge.ffi.startPairingServer as coreStartPairingServer
@@ -99,6 +103,17 @@ interface ContinueCoreBridge {
 
     /** Waits up to [timeoutMs] for the next file or text a paired device sent, or returns null. */
     fun nextReceived(timeoutMs: Long): Received?
+
+    /** What this phone sent and received, newest first. */
+    fun listHistory(limit: Int): List<HistoryEntry>
+
+    fun clearHistory()
+
+    /** Notes where a received file ended up, from [Received.historyId]. */
+    fun setHistoryLocation(
+        id: Long,
+        location: String,
+    )
 
     fun connectToPeer(
         peerFingerprint: String,
@@ -282,6 +297,15 @@ class MockContinueCoreBridge : ContinueCoreBridge {
 
     override fun nextReceived(timeoutMs: Long): Received? = received.poll(timeoutMs, MILLISECONDS)
 
+    override fun listHistory(limit: Int): List<HistoryEntry> = emptyList()
+
+    override fun clearHistory() = Unit
+
+    override fun setHistoryLocation(
+        id: Long,
+        location: String,
+    ) = Unit
+
     override fun connectToPeer(
         peerFingerprint: String,
         endpoint: String,
@@ -402,6 +426,18 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
 
     override fun nextReceived(timeoutMs: Long): Received? = coreNextReceived(timeoutMs.toUInt())?.toReceived()
 
+    override fun listHistory(limit: Int): List<HistoryEntry> {
+        val entries = native { coreListHistory(limit.toUInt()) }
+        return entries.map { it.toHistoryEntry() }
+    }
+
+    override fun clearHistory() = native { coreClearHistory() }
+
+    override fun setHistoryLocation(
+        id: Long,
+        location: String,
+    ) = native { coreSetHistoryLocation(id, location) }
+
     override fun connectToPeer(
         peerFingerprint: String,
         endpoint: String,
@@ -448,9 +484,24 @@ private fun PermissionRequestFfi.toPermissionQuestion() =
         expiresAt = expiresAt.toLong(),
     )
 
+private fun HistoryEntryFfi.toHistoryEntry() =
+    HistoryEntry(
+        id = id,
+        at = at.toLong(),
+        received = received,
+        isText = isText,
+        label = label,
+        peerFingerprint = peerFingerprint,
+        peerName = peerName,
+        size = size.toLong(),
+        failed = failed,
+        location = location,
+    )
+
 private fun ReceivedFfi.toReceived(): Received {
-    val path = filePath ?: return ReceivedText(peerFingerprint, peerName, text.orEmpty())
+    val path = filePath ?: return ReceivedText(historyId, peerFingerprint, peerName, text.orEmpty())
     return ReceivedFile(
+        historyId = historyId,
         peerFingerprint = peerFingerprint,
         peerName = peerName,
         path = path,

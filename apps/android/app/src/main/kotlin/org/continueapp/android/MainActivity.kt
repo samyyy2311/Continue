@@ -127,7 +127,10 @@ private fun ContinueApp(
     }
     PermissionPrompts(state.questions)
     val context = LocalContext.current
-    LaunchedEffect(Unit) { state.incoming.listen(context.applicationContext) }
+    LaunchedEffect(Unit) {
+        state.recent.load()
+        state.incoming.listen(context.applicationContext)
+    }
     BackHandler(enabled = overlay != null) { overlay = null }
 
     Scaffold(

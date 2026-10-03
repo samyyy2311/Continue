@@ -6,6 +6,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   DeviceIdentity,
   Grant,
+  HistoryEntry,
   PeerPermission,
   PermissionAnswer,
   PermissionQuestion,
@@ -41,6 +42,10 @@ export const getPermissions = (peerFingerprint: string) =>
 
 export const setPermission = (peerFingerprint: string, capabilityId: number, grant: Grant) =>
   invoke<void>("set_permission", { peerFingerprint, capabilityId, grant });
+
+export const getHistory = () => invoke<HistoryEntry[]>("get_history");
+
+export const clearHistory = () => invoke<void>("clear_history");
 
 export const answerPermission = (id: number, answer: PermissionAnswer) =>
   invoke<void>("answer_permission", { id, answer });

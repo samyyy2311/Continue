@@ -12,6 +12,7 @@ import androidx.annotation.RequiresApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.continueapp.bridge.ContinueCoreBridge
+import org.continueapp.bridge.ContinueException
 import org.continueapp.bridge.ReceivedFile
 import org.continueapp.bridge.ReceivedText
 import java.io.File
@@ -32,13 +33,26 @@ class Incoming(
                 is ReceivedFile -> {
                     val uri = withContext(Dispatchers.IO) { saveToDownloads(context, item) }
                     recent.received(TransferKind.File, item.name, item.peerName, uri)
+                    val id = item.historyId
+                    if (uri != null && id != null) remember(id, uri)
                 }
                 is ReceivedText -> {
                     copyToClipboard(context, item.text)
-                    recent.received(TransferKind.Text, item.text.trim().lineSequence().first(), item.peerName, null)
+                    recent.received(TransferKind.Text, firstLine(item.text), item.peerName, null)
                 }
                 null -> Unit
             }
+        }
+    }
+
+    /** Saves where the file went, so it can still be opened after a restart. */
+    private suspend fun remember(
+        historyId: Long,
+        uri: Uri,
+    ) = withContext(Dispatchers.IO) {
+        try {
+            bridge.setHistoryLocation(historyId, uri.toString())
+        } catch (_: ContinueException) {
         }
     }
 }

@@ -25,12 +25,15 @@ enum class Capability(val id: Int) {
 
 /** A file or text a paired device sent to this phone. */
 sealed interface Received {
+    /** Its saved history entry, if saving worked. */
+    val historyId: Long?
     val peerFingerprint: String
     val peerName: String
 }
 
 /** A file waiting at [path] in the app's own storage. */
 data class ReceivedFile(
+    override val historyId: Long?,
     override val peerFingerprint: String,
     override val peerName: String,
     val path: String,
@@ -39,10 +42,28 @@ data class ReceivedFile(
 ) : Received
 
 data class ReceivedText(
+    override val historyId: Long?,
     override val peerFingerprint: String,
     override val peerName: String,
     val text: String,
 ) : Received
+
+/** A saved send or receive. */
+data class HistoryEntry(
+    val id: Long,
+    /** Unix time in milliseconds. */
+    val at: Long,
+    val received: Boolean,
+    val isText: Boolean,
+    /** The file name, or the text itself. */
+    val label: String,
+    val peerFingerprint: String,
+    val peerName: String,
+    val size: Long,
+    val failed: Boolean,
+    /** Where the file is on this phone, when known. */
+    val location: String?,
+)
 
 /** Something a device set to Ask wants to send. */
 data class PermissionQuestion(

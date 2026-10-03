@@ -1,0 +1,10 @@
+[package]
+name = "history"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rusqlite = { workspace = true }
+thiserror = { workspace = true }
