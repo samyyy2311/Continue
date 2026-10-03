@@ -84,6 +84,7 @@ dictionary PermissionRequestFfi {
     string peer_name;
     u32 capability_id;
     string? detail;
+    u64 expires_at;
 };
 
 enum PermissionDecisionFfi {

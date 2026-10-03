@@ -26,6 +26,8 @@ pub struct PermissionRequest {
     pub capability: CapabilityId,
     /// The file name, for files.
     pub detail: Option<String>,
+    /// When the core stops waiting and declines. Apps should drop the question then too.
+    pub deadline: tokio::time::Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,7 +105,12 @@ async fn permitted(
         return false;
     };
 
-    let _turn = handlers.prompt_turn.lock().await;
+    // One deadline from arrival covers waiting for a turn and the question itself, so a
+    // backlog from one device can't hold up everyone else for longer than that.
+    let deadline = tokio::time::Instant::now() + PROMPT_TIMEOUT;
+    let Ok(_turn) = tokio::time::timeout_at(deadline, handlers.prompt_turn.lock()).await else {
+        return false;
+    };
     // An "always" given while this request waited its turn already answers it.
     if let Some(answer) = stored_answer(store, peer, capability) {
         return answer;
@@ -112,8 +119,9 @@ async fn permitted(
         peer: peer.to_string(),
         capability,
         detail,
+        deadline,
     };
-    match tokio::time::timeout(PROMPT_TIMEOUT, prompt(request)).await {
+    match tokio::time::timeout_at(deadline, prompt(request)).await {
         Ok(Ok(PermissionDecision::Allow)) => true,
         Ok(Ok(PermissionDecision::AlwaysAllow)) => {
             if let Err(error) =

@@ -76,7 +76,8 @@ class PermissionQuestions(private val bridge: ContinueCoreBridge) {
     /** Picks up questions from the core for as long as the caller keeps it running. */
     suspend fun listen() {
         while (true) {
-            withContext(Dispatchers.IO) { bridge.nextPermissionQuestion(QUESTION_WAIT_MS) }?.let { current = it }
+            val next = withContext(Dispatchers.IO) { bridge.nextPermissionQuestion(QUESTION_WAIT_MS) }
+            if (next != null && next.expiresAt > System.currentTimeMillis()) current = next
         }
     }
 

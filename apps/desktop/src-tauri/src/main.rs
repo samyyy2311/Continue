@@ -62,8 +62,23 @@ struct ActivePairingServer {
     server_endpoint: quinn::Endpoint,
 }
 
+/// A question for the window, as it shows it.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionQuestionDto {
+    pub id: u64,
+    pub peer_name: String,
+    pub kind: &'static str,
+    pub detail: Option<String>,
+}
+
+struct PendingQuestion {
+    question: PermissionQuestionDto,
+    answer: tokio::sync::oneshot::Sender<PermissionDecision>,
+}
+
 /// Questions waiting for the user, by the id the window answers with.
-type PendingAnswers = Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<PermissionDecision>>>>;
+type PendingAnswers = Arc<Mutex<HashMap<u64, PendingQuestion>>>;
 
 pub struct DesktopRuntimeState {
     device_name: String,
@@ -141,27 +156,29 @@ fn permission_prompt(
     let next_id = AtomicU64::new(0);
     Arc::new(move |request| {
         let (answer, decision) = tokio::sync::oneshot::channel();
-        let id = next_id.fetch_add(1, Ordering::Relaxed);
-        pending_answers.lock().insert(id, answer);
-
-        let kind = match request.capability {
-            CapabilityId::FILE_TRANSFER => "file",
-            CapabilityId::CLIPBOARD => "text",
-            _ => "notification",
+        let question = PermissionQuestionDto {
+            id: next_id.fetch_add(1, Ordering::Relaxed),
+            peer_name: peer_name(&trust_store, &request.peer),
+            kind: match request.capability {
+                CapabilityId::FILE_TRANSFER => "file",
+                CapabilityId::CLIPBOARD => "text",
+                _ => "notification",
+            },
+            detail: request.detail,
         };
-        let _ = app_handle.emit(
-            "permission-request",
-            serde_json::json!({
-                "id": id,
-                "peerName": peer_name(&trust_store, &request.peer),
-                "kind": kind,
-                "detail": request.detail,
-            }),
+        let id = question.id;
+        pending_answers.lock().insert(
+            id,
+            PendingQuestion {
+                question: question.clone(),
+                answer,
+            },
         );
+        let _ = app_handle.emit("permission-request", question);
 
         let (pending, app) = (pending_answers.clone(), app_handle.clone());
         tokio::spawn(async move {
-            tokio::time::sleep(sessions::PROMPT_TIMEOUT).await;
+            tokio::time::sleep_until(request.deadline).await;
             if pending.lock().remove(&id).is_some() {
                 let _ = app.emit("permission-request-closed", id);
             }
@@ -186,8 +203,21 @@ fn answer_permission(state: State<DesktopRuntimeState>, id: u64, answer: Answer)
         Answer::Decline => PermissionDecision::Decline,
     };
     if let Some(waiting) = state.pending_answers.lock().remove(&id) {
-        let _ = waiting.send(decision);
+        let _ = waiting.answer.send(decision);
     }
+}
+
+/// Questions asked before the window was listening, so none go unseen.
+#[tauri::command]
+fn pending_permission_questions(state: State<DesktopRuntimeState>) -> Vec<PermissionQuestionDto> {
+    let mut questions: Vec<_> = state
+        .pending_answers
+        .lock()
+        .values()
+        .map(|pending| pending.question.clone())
+        .collect();
+    questions.sort_by_key(|q| q.id);
+    questions
 }
 
 fn session_state_listener(
@@ -826,6 +856,7 @@ fn main() {
             get_permissions,
             set_permission,
             answer_permission,
+            pending_permission_questions,
             connect_to_peer,
             disconnect_peer,
             reconnect_peer,

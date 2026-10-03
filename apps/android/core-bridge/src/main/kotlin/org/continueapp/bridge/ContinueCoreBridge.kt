@@ -445,6 +445,7 @@ private fun PermissionRequestFfi.toPermissionQuestion() =
         peerName = peerName,
         capability = Capability.fromId(capabilityId.toInt()),
         detail = detail,
+        expiresAt = expiresAt.toLong(),
     )
 
 private fun ReceivedFfi.toReceived(): Received {
