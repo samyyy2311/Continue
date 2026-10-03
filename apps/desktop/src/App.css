@@ -42,28 +42,32 @@
 }
 
 :root[data-theme="dark"] {
-  --teal: #4cc2bd;
-  --on-teal: #0e2a2a;
+  --teal: #5cbcb5;
+  --on-teal: #06201f;
 
-  --bg: #141925;
-  --surface: #1b2130;
-  --container: #222a3b;
-  --container-high: #2a3345;
-  --container-highest: #343e52;
-  --text: #e8ecf3;
-  --text-2: #8c97a8;
-  --outline: #4a5568;
-  --outline-variant: #2e3748;
-  --secondary-container: #2b3a4a;
-  --on-secondary-container: #d6e2f0;
-  --accent-container: color-mix(in srgb, var(--accent) 26%, #1b2130);
-  --on-accent-container: color-mix(in srgb, var(--accent) 40%, #ffffff);
-  --inverse-surface: #e8ecf3;
-  --inverse-text: #1b2130;
-  --success: #6ccf95;
-  --error: #ff8a80;
+  --bg: #0e1012;
+  --surface: #15171a;
+  --container: #1c1f23;
+  --container-high: #23272b;
+  --container-highest: #2c3035;
+  --text: #e7e9ec;
+  --text-2: #9ba1a8;
+  --outline: #4a5057;
+  --outline-variant: #2a2e33;
+  --secondary-container: #2a2f35;
+  --on-secondary-container: #e7e9ec;
+  --accent-container: color-mix(in srgb, var(--accent) 20%, #15171a);
+  --on-accent-container: color-mix(in srgb, var(--accent) 60%, #ffffff);
+  --inverse-surface: #e7e9ec;
+  --inverse-text: #15171a;
+  --success: #6cc795;
+  --error: #f2877e;
 
   color-scheme: dark;
+}
+
+:root[data-theme="dark"] .dialog {
+  background: var(--container);
 }
 
 * {
@@ -116,7 +120,7 @@ ol {
 }
 
 .headline {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 600;
   line-height: 1.25;
   letter-spacing: -0.01em;
@@ -187,9 +191,9 @@ ol {
 .rail-fab {
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
   background: var(--accent-container);
   color: var(--on-accent-container);
   transition: background-color 150ms var(--ease);
@@ -740,8 +744,8 @@ ol {
 .button-group button[aria-checked="true"],
 .tab-btn.active {
   border-radius: 20px;
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--accent-container);
+  color: var(--on-accent-container);
 }
 
 .field {
@@ -925,7 +929,7 @@ ol {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(10, 14, 22, 0.45);
+  background: rgba(0, 0, 0, 0.5);
   animation: fade 150ms var(--ease);
 }
 
@@ -935,6 +939,7 @@ ol {
   gap: 24px;
   width: min(660px, 100%);
   padding: 28px;
+  border: 1px solid var(--outline-variant);
   border-radius: 20px;
   background: var(--surface);
   animation: fade 150ms var(--ease);
