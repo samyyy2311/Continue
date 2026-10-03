@@ -138,7 +138,7 @@ function getFileIcon(name: string) {
 export default function App() {
   const [view, setView] = useState<View>("transfer");
   const [accent, setAccent] = useState<AccentName>(() =>
-    readStored(ACCENT_KEY, ACCENT_PALETTE.map((a) => a.id), "cyan"),
+    readStored(ACCENT_KEY, ACCENT_PALETTE.map((a) => a.id), "cobalt"),
   );
   const [theme, setTheme] = useState<Theme>(() => readStored(THEME_KEY, ["system", "light", "dark"], "system"));
   const [identity, setIdentity] = useState<DeviceIdentity | null>(null);

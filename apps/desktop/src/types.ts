@@ -21,7 +21,7 @@ export interface PeerPermission {
   grant: Grant;
 }
 
-export type AccentName = "blue" | "recordRed" | "coral" | "amber" | "cyan" | "emerald" | "magenta" | "silver";
+export type AccentName = "cobalt" | "teal" | "recordRed" | "coral" | "amber" | "emerald" | "magenta" | "silver";
 
 export interface AccentColor {
   id: AccentName;
@@ -34,8 +34,8 @@ export interface AccentColor {
 // Mid-tone colours that hold up on both light and dark surfaces.
 export const ACCENT_PALETTE: AccentColor[] = [
   // The Android app's colour, with a light and a dark value.
-  { id: "cyan", label: "Teal", base: "var(--teal)", onBase: "var(--on-teal)" },
-  { id: "blue", label: "Blue", base: "#3d63dd", onBase: "#ffffff" },
+  { id: "cobalt", label: "Cobalt", base: "var(--brand)", onBase: "var(--on-brand)" },
+  { id: "teal", label: "Teal", base: "#1f7f7c", onBase: "#ffffff" },
   { id: "recordRed", label: "Red", base: "#d93d42", onBase: "#ffffff" },
   { id: "coral", label: "Coral", base: "#d4532b", onBase: "#ffffff" },
   { id: "amber", label: "Amber", base: "#f0b000", onBase: "#221a00" },

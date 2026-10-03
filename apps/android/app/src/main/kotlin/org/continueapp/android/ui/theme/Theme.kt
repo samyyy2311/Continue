@@ -34,10 +34,10 @@ enum class ThemeMode { System, Light, Dark }
 // The same palette as the desktop app. Every foreground/background pair meets WCAG AA contrast.
 private val DarkColors =
     darkColorScheme(
-        primary = Color(0xFF5CBCB5),
-        onPrimary = Color(0xFF06201F),
-        primaryContainer = Color(0xFF233839),
-        onPrimaryContainer = Color(0xFF9DD7D3),
+        primary = Color(0xFFA8BFFF),
+        onPrimary = Color(0xFF0B1B45),
+        primaryContainer = Color(0xFF323948),
+        onPrimaryContainer = Color(0xFFCBD9FF),
         secondaryContainer = Color(0xFF2A2F35),
         onSecondaryContainer = Color(0xFFE7E9EC),
         background = Color(0xFF15171A),
@@ -55,10 +55,10 @@ private val DarkColors =
 
 private val LightColors =
     lightColorScheme(
-        primary = Color(0xFF156E6D),
+        primary = Color(0xFF2457D6),
         onPrimary = Color.White,
-        primaryContainer = Color(0xFFDAE8E8),
-        onPrimaryContainer = Color(0xFF0E4847),
+        primaryContainer = Color(0xFFDCE4F8),
+        onPrimaryContainer = Color(0xFF17398B),
         secondaryContainer = Color(0xFFE2E6EB),
         onSecondaryContainer = Color(0xFF16202B),
         background = Color(0xFFF3F6F9),

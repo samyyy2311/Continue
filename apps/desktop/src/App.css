@@ -11,10 +11,10 @@
 }
 
 :root {
-  --teal: #156e6d;
-  --on-teal: #ffffff;
-  --accent: var(--teal);
-  --on-accent: var(--on-teal);
+  --brand: #2457d6;
+  --on-brand: #ffffff;
+  --accent: var(--brand);
+  --on-accent: var(--on-brand);
 
   --bg: #e3e8ee;
   --surface: #f3f6f9;
@@ -42,8 +42,8 @@
 }
 
 :root[data-theme="dark"] {
-  --teal: #5cbcb5;
-  --on-teal: #06201f;
+  --brand: #a8bfff;
+  --on-brand: #0b1b45;
 
   --bg: #0e1012;
   --surface: #15171a;
@@ -904,11 +904,11 @@ ol {
 
 .snackbar svg {
   flex-shrink: 0;
-  color: var(--teal);
+  color: #a8bfff;
 }
 
 :root[data-theme="dark"] .snackbar svg {
-  color: #156e6d;
+  color: #2457d6;
 }
 
 .snackbar.error svg {
