@@ -53,6 +53,9 @@ export const answerPermission = (id: number, answer: PermissionAnswer) =>
 export const onPermissionRequest = (handler: (question: PermissionQuestion) => void): Promise<UnlistenFn> =>
   listen<PermissionQuestion>("permission-request", (event) => handler(event.payload));
 
+/** Questions asked before the window started listening. */
+export const pendingPermissionQuestions = () => invoke<PermissionQuestion[]>("pending_permission_questions");
+
 /** The question went unanswered for too long and was declined. */
 export const onPermissionRequestClosed = (handler: (id: number) => void): Promise<UnlistenFn> =>
   listen<number>("permission-request-closed", (event) => handler(event.payload));

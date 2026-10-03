@@ -72,6 +72,8 @@ pub struct PermissionRequestFfi {
     pub capability_id: u32,
     /// The file name, for files.
     pub detail: Option<String>,
+    /// Unix time in milliseconds when the core declines an unanswered question.
+    pub expires_at: u64,
 }
 
 pub enum PermissionDecisionFfi {
@@ -303,13 +305,14 @@ fn permission_prompt(trust_store: TrustStore) -> sessions::PermissionPrompt {
                 peer_fingerprint: request.peer,
                 capability_id: request.capability.raw(),
                 detail: request.detail,
+                expires_at: unix_ms(request.deadline),
             },
             usize::MAX,
         );
 
-        // The core stops waiting after PROMPT_TIMEOUT; drop the question then too.
+        // The core stops waiting at the deadline; drop the question then too.
         tokio::spawn(async move {
-            tokio::time::sleep(sessions::PROMPT_TIMEOUT).await;
+            tokio::time::sleep_until(request.deadline).await;
             QUESTIONS.answers.lock().unwrap().remove(&id);
             QUESTIONS
                 .waiting
@@ -320,6 +323,14 @@ fn permission_prompt(trust_store: TrustStore) -> sessions::PermissionPrompt {
         });
         decision
     })
+}
+
+fn unix_ms(deadline: tokio::time::Instant) -> u64 {
+    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+    (std::time::SystemTime::now() + remaining)
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Waits up to `timeout_ms` for the next question for the user.
@@ -1111,6 +1122,7 @@ mod tests {
             peer: "phone".to_string(),
             capability: CapabilityId::FILE_TRANSFER,
             detail: Some("photo.jpg".to_string()),
+            deadline: tokio::time::Instant::now() + sessions::PROMPT_TIMEOUT,
         });
 
         let question = tokio::task::spawn_blocking(|| next_permission_request(1000))
@@ -1120,6 +1132,11 @@ mod tests {
         assert_eq!(question.peer_fingerprint, "phone");
         assert_eq!(question.capability_id, CapabilityId::FILE_TRANSFER.raw());
         assert_eq!(question.detail.as_deref(), Some("photo.jpg"));
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        assert!(question.expires_at > now && question.expires_at <= now + 30_000);
 
         answer_permission_request(question.id, PermissionDecisionFfi::AlwaysAllow);
         assert_eq!(decision.await.unwrap(), PermissionDecision::AlwaysAllow);
