@@ -16,6 +16,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -71,6 +72,7 @@ private val LightColors =
         error = Color(0xFFB3261E),
     )
 
+@OptIn(ExperimentalTextApi::class)
 private fun instrumentSans(weight: Int) =
     Font(
         R.font.instrument_sans,
