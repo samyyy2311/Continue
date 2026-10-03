@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: Contributors to the Continue project */
 /* SPDX-License-Identifier: Apache-2.0 */
 
-/* Same typeface, palette and shapes as the Android app (ui/theme/Theme.kt). */
+/* Same typeface and palette as the Android app (ui/theme/Theme.kt). */
 
 @font-face {
   font-family: "Instrument Sans";
@@ -37,7 +37,6 @@
   --font: "Instrument Sans", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
   color-scheme: light;
 }
@@ -110,10 +109,10 @@ ol {
 }
 
 .display {
-  font-size: 44px;
+  font-size: 30px;
   font-weight: 600;
-  line-height: 1.12;
-  letter-spacing: -0.025em;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
 }
 
 .headline {
@@ -193,15 +192,11 @@ ol {
   border-radius: 16px;
   background: var(--accent-container);
   color: var(--on-accent-container);
-  transition: border-radius 300ms var(--spring), transform 300ms var(--spring);
+  transition: background-color 150ms var(--ease);
 }
 
 .rail-fab:hover {
-  border-radius: 28px;
-}
-
-.rail-fab:active {
-  transform: scale(0.92);
+  background: color-mix(in srgb, var(--accent-container) 85%, var(--text));
 }
 
 .rail-items {
@@ -233,9 +228,8 @@ ol {
   inset: 0;
   border-radius: 16px;
   background: var(--secondary-container);
-  transform: scaleX(0.4);
   opacity: 0;
-  transition: transform 350ms var(--spring), opacity 150ms var(--ease);
+  transition: opacity 150ms var(--ease);
 }
 
 .rail-indicator svg {
@@ -244,7 +238,6 @@ ol {
 
 .rail-item:hover .rail-indicator::before {
   opacity: 0.6;
-  transform: scaleX(1);
 }
 
 .rail-item[aria-current] {
@@ -278,7 +271,7 @@ ol {
 
 .pane {
   margin: 12px 12px 12px 0;
-  border-radius: 28px;
+  border-radius: 20px;
   background: var(--surface);
   overflow: hidden;
 }
@@ -287,7 +280,7 @@ ol {
   height: 100%;
   padding: 40px 48px 64px;
   overflow-y: auto;
-  animation: enter 380ms var(--ease);
+  animation: fade 200ms var(--ease);
 }
 
 .page {
@@ -319,8 +312,6 @@ ol {
   padding: 0 4px;
 }
 
-/* Buttons: pills that squeeze into a rounded square while pressed, like ExpressiveButton. */
-
 .btn {
   display: inline-flex;
   align-items: center;
@@ -332,11 +323,7 @@ ol {
   font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
-  transition: border-radius 300ms var(--spring), background-color 150ms var(--ease), opacity 150ms var(--ease);
-}
-
-.btn:active:not(:disabled) {
-  border-radius: 12px;
+  transition: background-color 150ms var(--ease), opacity 150ms var(--ease);
 }
 
 .btn:disabled {
@@ -348,10 +335,6 @@ ol {
   padding: 0 28px;
   border-radius: 28px;
   font-size: 16px;
-}
-
-.btn-large:active:not(:disabled) {
-  border-radius: 14px;
 }
 
 .btn-small,
@@ -419,7 +402,7 @@ ol {
   height: 40px;
   border-radius: 20px;
   color: var(--text-2);
-  transition: background-color 150ms var(--ease), border-radius 300ms var(--spring);
+  transition: background-color 150ms var(--ease);
 }
 
 .icon-btn:hover {
@@ -427,76 +410,27 @@ ol {
   color: var(--text);
 }
 
-.icon-btn:active {
-  border-radius: 10px;
-}
-
-/* Device glyphs: icons inside the Material "cookie" shape, turning slowly while connected. */
-
 .glyph {
-  position: relative;
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  width: 56px;
-  height: 56px;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--container-highest);
+  color: var(--text-2);
+  transition: background-color 200ms var(--ease), color 200ms var(--ease);
 }
 
 .glyph-lg {
-  width: 96px;
-  height: 96px;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
 }
 
-.glyph > svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  fill: var(--container-highest);
-  transition: fill 400ms var(--ease);
-}
-
-.glyph.active > svg {
-  fill: var(--accent);
-  animation: turn 24s linear infinite;
-}
-
-.glyph-icon {
-  position: relative;
-  display: grid;
-  color: var(--text-2);
-  transition: color 400ms var(--ease);
-}
-
-.glyph.active .glyph-icon {
-  color: var(--on-accent);
-}
-
-.link-hero {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  max-width: 440px;
-}
-
-.link-line {
-  flex: 1;
-  height: 8px;
-  margin: 0 -4px;
-}
-
-.link-line line {
-  stroke: var(--outline);
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-dasharray: 2 10;
-  vector-effect: non-scaling-stroke;
-}
-
-.link-hero.connected .link-line line {
-  stroke: var(--accent);
-  stroke-dasharray: 18 10;
-  animation: flow 1.4s linear infinite;
+.glyph.active {
+  background: var(--accent-container);
+  color: var(--on-accent-container);
 }
 
 /* Home */
@@ -504,21 +438,23 @@ ol {
 .hero {
   display: flex;
   flex-direction: column;
-  gap: 28px;
-  padding: 36px 40px 40px;
-  border-radius: 40px;
-  background: var(--container-high);
-  transition: background-color 500ms var(--ease);
+  gap: 20px;
+  padding: 28px;
+  border-radius: 20px;
+  background: var(--container);
 }
 
-.hero.online {
-  background: var(--accent-container);
+.hero-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .hero-text {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
+  min-width: 0;
 }
 
 .hero-actions {
@@ -546,21 +482,20 @@ ol {
 }
 
 .status.online {
-  color: var(--on-accent-container);
+  color: var(--success);
 }
 
 .status.online::before {
-  background: var(--accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
+  background: var(--success);
 }
 
 .composer {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 64px;
-  padding: 0 8px 0 24px;
-  border-radius: 32px;
+  height: 56px;
+  padding: 0 8px 0 20px;
+  border-radius: 28px;
   background: var(--container);
   transition: box-shadow 150ms var(--ease);
 }
@@ -592,16 +527,12 @@ ol {
 .composer-send {
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 24px;
+  width: 40px;
+  height: 40px;
+  border-radius: 20px;
   background: var(--accent);
   color: var(--on-accent);
-  transition: border-radius 300ms var(--spring), opacity 150ms var(--ease);
-}
-
-.composer-send:hover:not(:disabled) {
-  border-radius: 16px;
+  transition: opacity 150ms var(--ease);
 }
 
 .composer-send:disabled {
@@ -614,15 +545,11 @@ ol {
   align-items: center;
   gap: 20px;
   max-width: 560px;
-  margin: 8vh auto 0;
+  margin: 12vh auto 0;
   text-align: center;
 }
 
-.empty .link-hero {
-  margin-bottom: 12px;
-}
-
-/* Lists: separate rounded items, rounder at the ends, as Material 3 Expressive lists are. */
+/* Lists: separate rounded items, rounder at the ends. */
 
 .list {
   display: flex;
@@ -701,38 +628,28 @@ ol {
   font-weight: 600;
 }
 
-.wavy {
+.progress {
+  position: relative;
   width: 100%;
   max-width: 420px;
-  height: 12px;
-  margin: 4px 0 2px;
+  height: 4px;
+  margin: 6px 0 4px;
+  border-radius: 2px;
+  background: var(--container-highest);
   overflow: hidden;
 }
 
-.wavy svg {
+.progress span {
   display: block;
-  width: 100%;
   height: 100%;
-  overflow: visible;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 200ms linear;
 }
 
-.wavy-wave {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 3;
-  stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
-}
-
-.wavy-track {
-  stroke: var(--accent-container);
-  stroke-width: 3;
-  stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
-}
-
-.wavy.indeterminate .wavy-wave {
-  animation: wave 1s linear infinite;
+.progress.indeterminate span {
+  width: 30%;
+  animation: slide 1.2s var(--ease) infinite;
 }
 
 /* Devices */
@@ -741,8 +658,8 @@ ol {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  padding: 28px;
-  border-radius: 32px;
+  padding: 24px;
+  border-radius: 20px;
   background: var(--container);
 }
 
@@ -800,7 +717,7 @@ ol {
   color: var(--text);
   font-size: 14px;
   font-weight: 600;
-  transition: border-radius 350ms var(--spring), background-color 150ms var(--ease);
+  transition: background-color 150ms var(--ease);
 }
 
 .button-group button:first-child,
@@ -869,7 +786,7 @@ ol {
   color: var(--text-2);
   font-size: 14px;
   font-weight: 600;
-  transition: background-color 150ms var(--ease), border-radius 300ms var(--spring);
+  transition: background-color 150ms var(--ease);
 }
 
 .chip:hover {
@@ -924,15 +841,11 @@ ol {
   height: 36px;
   border-radius: 18px;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent);
-  transition: border-radius 350ms var(--spring), transform 200ms var(--spring);
-}
-
-.swatch:hover {
-  transform: scale(1.08);
 }
 
 .swatch[aria-checked="true"] {
-  border-radius: 12px;
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 
 /* Overlays */
@@ -954,8 +867,7 @@ ol {
   z-index: 40;
   display: grid;
   padding: 24px;
-  background: color-mix(in srgb, var(--bg) 70%, transparent);
-  backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
   animation: fade 150ms var(--ease);
 }
 
@@ -965,9 +877,8 @@ ol {
   align-items: center;
   justify-content: center;
   gap: 16px;
-  border: 3px dashed var(--accent);
-  border-radius: 40px;
-  background: var(--accent-container);
+  border: 2px dashed var(--accent);
+  border-radius: 20px;
 }
 
 .snackbar {
@@ -985,7 +896,7 @@ ol {
   color: var(--inverse-text);
   font-weight: 500;
   transform: translateX(-50%);
-  animation: rise 300ms var(--spring);
+  animation: fade 150ms var(--ease);
 }
 
 .snackbar svg {
@@ -1023,10 +934,10 @@ ol {
   flex-direction: column;
   gap: 24px;
   width: min(660px, 100%);
-  padding: 32px;
-  border-radius: 32px;
+  padding: 28px;
+  border-radius: 20px;
   background: var(--surface);
-  animation: pop 350ms var(--spring);
+  animation: fade 150ms var(--ease);
 }
 
 .dialog-header {
@@ -1102,18 +1013,17 @@ ol {
   font-size: 14px;
 }
 
-.pulse-indicator {
+.waiting {
   display: inline-flex;
   align-items: center;
   gap: 10px;
 }
 
-.pulse-dot {
+.waiting-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
   background: var(--accent);
-  animation: pulse 1.6s var(--ease) infinite;
 }
 
 .qr-wrapper,
@@ -1123,7 +1033,7 @@ ol {
   width: 240px;
   height: 240px;
   padding: 16px;
-  border-radius: 28px;
+  border-radius: 16px;
   background: #ffffff;
 }
 
@@ -1184,58 +1094,18 @@ ol {
   }
 }
 
-@keyframes turn {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes flow {
-  to {
-    stroke-dashoffset: -28;
-  }
-}
-
-@keyframes wave {
-  to {
-    transform: translateX(-40px);
-  }
-}
-
-@keyframes enter {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-}
-
 @keyframes fade {
   from {
     opacity: 0;
   }
 }
 
-@keyframes pop {
+@keyframes slide {
   from {
-    opacity: 0;
-    transform: scale(0.94);
+    transform: translateX(-100%);
   }
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 16px);
-  }
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
-  }
-  60% {
-    box-shadow: 0 0 0 8px transparent;
+  to {
+    transform: translateX(340%);
   }
 }
 
@@ -1249,11 +1119,11 @@ ol {
   }
 
   .display {
-    font-size: 34px;
+    font-size: 26px;
   }
 
   .hero {
-    padding: 28px;
+    padding: 20px;
   }
 
   .pair-show {

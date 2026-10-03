@@ -171,8 +171,8 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
 
         <div className="pair-status-bar" role="status">
           {state.status === "waiting" ? (
-            <span className="pulse-indicator">
-              <span className="pulse-dot" />
+            <span className="waiting">
+              <span className="waiting-dot" />
               Waiting for your phone
             </span>
           ) : (

@@ -38,7 +38,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
-import { ButtonGroup, DeviceGlyph, LinkHero, WavyProgress } from "./components.tsx";
+import { ButtonGroup, DeviceGlyph, ProgressBar } from "./components.tsx";
 import {
   connectToPeer,
   disconnectPeer,
@@ -615,7 +615,7 @@ export default function App() {
   if (!ready) {
     return (
       <main className="standalone">
-        <DeviceGlyph icon={<Laptop size={34} strokeWidth={1.6} />} size="lg" />
+        <DeviceGlyph icon={<Laptop size={28} strokeWidth={1.75} />} size="lg" />
         <h1 className="headline">{loadError ? "Continue couldn't start" : "Continue"}</h1>
         <p className="supporting">
           {loadError || "Open this window from the Continue app, or start it with pnpm tauri dev."}
@@ -725,7 +725,7 @@ export default function App() {
       {dragCount !== null && (
         <div className="drop-scrim" aria-hidden="true">
           <div className="drop-target">
-            <DeviceGlyph icon={<Upload size={30} />} active={selectedPeer?.isConnected} size="lg" />
+            <DeviceGlyph icon={<Upload size={28} strokeWidth={1.75} />} active={selectedPeer?.isConnected} size="lg" />
             <p className="headline">
               {selectedPeer?.isConnected ? `Drop to send to ${selectedPeer.displayName}` : "Connect a device first"}
             </p>
@@ -761,7 +761,7 @@ function ActivityRow(props: { item: Activity; onRetry: (item: Activity) => void;
         </span>
         {item.status === "sending" ? (
           <>
-            <WavyProgress value={progress} label={`Sending ${item.label}`} />
+            <ProgressBar value={progress} label={`Sending ${item.label}`} />
             <span className="list-sub">
               {item.totalBytes
                 ? `${formatBytes(item.bytesSent ?? 0)} of ${formatBytes(item.totalBytes)}`
@@ -826,7 +826,7 @@ function HomeView(props: HomeViewProps) {
   if (!peer) {
     return (
       <div className="empty">
-        <LinkHero peerName="your phone" connected={false} />
+        <DeviceGlyph icon={<Smartphone size={28} strokeWidth={1.75} />} size="lg" />
         <h1 className="display">Pair your phone</h1>
         <p className="supporting">
           Scan a code once, then send files and text between your phone and this computer over your own network.
@@ -863,16 +863,18 @@ function HomeView(props: HomeViewProps) {
       )}
 
       <section className={`hero ${online ? "online" : ""}`}>
-        <LinkHero peerName={peer.displayName} connected={online} />
-        <div className="hero-text">
-          <span className={`status ${online ? "online" : ""}`}>{online ? "Connected" : "Not connected"}</span>
-          <h1 className="display">{peer.displayName}</h1>
-          <p className="supporting">
-            {online
-              ? `On your network${peer.endpoint ? ` at ${peer.endpoint}` : ""}. Drop files anywhere in this window to send them.`
-              : "It connects on its own when both devices are on the same Wi-Fi."}
-          </p>
+        <div className="hero-head">
+          <DeviceGlyph icon={<Smartphone size={28} strokeWidth={1.75} />} active={online} size="lg" />
+          <div className="hero-text">
+            <h1 className="display">{peer.displayName}</h1>
+            <span className={`status ${online ? "online" : ""}`}>{online ? "Connected" : "Not connected"}</span>
+          </div>
         </div>
+        <p className="supporting">
+          {online
+            ? `On your network${peer.endpoint ? ` at ${peer.endpoint}` : ""}. Drop files anywhere in this window to send them.`
+            : "It connects on its own when both devices are on the same Wi-Fi."}
+        </p>
         {online ? (
           <div className="hero-actions">
             <button type="button" className="btn btn-filled btn-large" onClick={onChooseFiles} title={`${MOD_KEY}O`}>
