@@ -404,6 +404,7 @@ async fn discovery_connects_only_to_the_peer_whose_key_matches() {
             HIGH,
             high.cert.spki_hash,
             &[stranger.listen_addr, high.listen_addr],
+            || true,
         )
         .await;
 
@@ -411,6 +412,27 @@ async fn discovery_connects_only_to_the_peer_whose_key_matches() {
     assert_eq!(low.registry.state(HIGH), SessionState::Connected);
     eventually("accepted", || high.registry.get(LOW).is_some()).await;
     assert!(stranger.registry.get(LOW).is_none());
+}
+
+#[tokio::test]
+async fn discovery_drops_a_device_forgotten_during_the_handshake() {
+    let (low, high) = pair();
+    // Trusted when the dial starts, forgotten by the time the handshake finishes.
+    let checks = std::sync::atomic::AtomicUsize::new(0);
+    let still_trusted = || checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+
+    let reached = low
+        .registry
+        .connect_discovered(
+            HIGH,
+            high.cert.spki_hash,
+            &[high.listen_addr],
+            still_trusted,
+        )
+        .await;
+
+    assert_eq!(reached, None);
+    assert!(low.registry.get(HIGH).is_none());
 }
 
 #[tokio::test]
@@ -430,11 +452,11 @@ async fn discovery_leaves_deliberate_disconnects_alone() {
 
     let from_low = low
         .registry
-        .connect_discovered(HIGH, high.cert.spki_hash, &[high.listen_addr])
+        .connect_discovered(HIGH, high.cert.spki_hash, &[high.listen_addr], || true)
         .await;
     let from_high = high
         .registry
-        .connect_discovered(LOW, low.cert.spki_hash, &[low.listen_addr])
+        .connect_discovered(LOW, low.cert.spki_hash, &[low.listen_addr], || true)
         .await;
     assert_eq!((from_low, from_high), (None, None));
     assert!(low.registry.get(HIGH).is_none() && high.registry.get(LOW).is_none());
@@ -442,7 +464,7 @@ async fn discovery_leaves_deliberate_disconnects_alone() {
     low.registry.resume_auto_connect(HIGH);
     let resumed = low
         .registry
-        .connect_discovered(HIGH, high.cert.spki_hash, &[high.listen_addr])
+        .connect_discovered(HIGH, high.cert.spki_hash, &[high.listen_addr], || true)
         .await;
     assert_eq!(resumed, Some(high.listen_addr));
 }

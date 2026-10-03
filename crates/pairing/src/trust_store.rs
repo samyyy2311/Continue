@@ -54,10 +54,12 @@ impl TrustStore {
             );",
         )?;
         // Databases created before last_endpoint existed need the column added.
-        if conn
-            .prepare("SELECT last_endpoint FROM trusted_peers LIMIT 0;")
-            .is_err()
-        {
+        let has_last_endpoint: bool = conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('trusted_peers') WHERE name = 'last_endpoint');",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_last_endpoint {
             conn.execute_batch("ALTER TABLE trusted_peers ADD COLUMN last_endpoint TEXT;")?;
         }
         Ok(())
