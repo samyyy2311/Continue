@@ -191,8 +191,10 @@ class AppState(private val bridge: ContinueCoreBridge) {
     suspend fun reconnect(peer: String): String? =
         run("Couldn't connect. Check that both are on the same Wi-Fi.") { bridge.reconnect(peer) }
 
-    suspend fun forget(peer: String): String? =
-        run("Couldn't forget this computer. Try again.") { bridge.removeTrustedPeer(peer) }
+    suspend fun forget(peer: String): String? {
+        val failed = "Couldn't forget this computer. Try again."
+        return run(failed) { bridge.removeTrustedPeer(peer) }
+    }
 
     suspend fun sendText(
         peer: TrustedPeer,
