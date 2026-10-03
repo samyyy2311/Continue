@@ -16,6 +16,43 @@ import java.io.File
 import java.io.IOException
 import java.util.UUID
 
+private const val RECENT_LIMIT = 20
+
+enum class TransferKind { File, Text }
+
+enum class TransferStatus { Sending, Sent, Failed }
+
+/** Something sent from this phone during this session. */
+data class Transfer(
+    val id: Long,
+    val kind: TransferKind,
+    val label: String,
+    val peerName: String,
+    val status: TransferStatus,
+)
+
+/** What this phone has sent while the app runs, newest first. The core keeps no history. */
+class RecentTransfers {
+    var items by mutableStateOf<List<Transfer>>(emptyList())
+        private set
+    private var nextId = 0L
+
+    /** Lists the transfer as sending, runs [send], then marks it sent or failed by its result. */
+    suspend fun track(
+        kind: TransferKind,
+        label: String,
+        peerName: String,
+        send: suspend () -> String?,
+    ): String? {
+        val id = nextId++
+        items = (listOf(Transfer(id, kind, label, peerName, TransferStatus.Sending)) + items).take(RECENT_LIMIT)
+        val error = send()
+        val status = if (error == null) TransferStatus.Sent else TransferStatus.Failed
+        items = items.map { if (it.id == id) it.copy(status = status) else it }
+        return error
+    }
+}
+
 /**
  * What the screens show, read from the core. Every call into the core runs off the main
  * thread, and failures come back as a message to show rather than an exception.
@@ -25,6 +62,7 @@ class AppState(private val bridge: ContinueCoreBridge) {
         private set
     var connected by mutableStateOf<Set<String>>(emptySet())
         private set
+    val recent = RecentTransfers()
 
     suspend fun refresh() {
         val (latestPeers, latestConnected) =
@@ -49,31 +87,39 @@ class AppState(private val bridge: ContinueCoreBridge) {
     suspend fun forget(peer: String): String? = run("Couldn't forget this device.") { bridge.removeTrustedPeer(peer) }
 
     suspend fun sendText(
-        peer: String,
+        peer: TrustedPeer,
         text: String,
-    ): String? = run("Couldn't send the text.") { bridge.sendClipboardText(peer, text) }
+    ): String? =
+        recent.track(TransferKind.Text, text.trim().lineSequence().first(), peer.displayName) {
+            run("Couldn't send the text.") { bridge.sendClipboardText(peer.fingerprint, text) }
+        }
 
     /**
-     * Sends picked files one by one. The core reads from a path, so each file is copied into
-     * the app's cache first and removed once sent.
+     * Sends picked files one by one, carrying on past a failure so each gets its own result.
+     * The core reads from a path, so each file is copied into the app's cache first.
+     * Returns the last error, or null if everything was sent.
      */
     suspend fun sendFiles(
         context: Context,
-        peer: String,
+        peer: TrustedPeer,
         uris: List<Uri>,
-    ): String? =
-        run("Couldn't send the file.") {
-            val outbox = File(context.cacheDir, "outgoing/${UUID.randomUUID()}").apply { mkdirs() }
-            try {
-                for (uri in uris) {
-                    val file = copyInto(outbox, context, uri)
-                    bridge.sendFile(peer, file.absolutePath)
-                    file.delete()
+    ): String? {
+        var error: String? = null
+        for (uri in uris) {
+            val name = withContext(Dispatchers.IO) { displayName(context, uri) }
+            recent.track(TransferKind.File, name, peer.displayName) {
+                run("Couldn't send $name.") {
+                    val outbox = File(context.cacheDir, "outgoing/${UUID.randomUUID()}").apply { mkdirs() }
+                    try {
+                        bridge.sendFile(peer.fingerprint, copyInto(File(outbox, name), context, uri).absolutePath)
+                    } finally {
+                        outbox.deleteRecursively()
+                    }
                 }
-            } finally {
-                outbox.deleteRecursively()
-            }
+            }?.let { error = it }
         }
+        return error
+    }
 
     suspend fun permission(
         peer: String,
@@ -124,11 +170,10 @@ private fun messageFor(
     }
 
 private fun copyInto(
-    dir: File,
+    file: File,
     context: Context,
     uri: Uri,
 ): File {
-    val file = File(dir, displayName(context, uri))
     val input =
         context.contentResolver.openInputStream(uri)
             ?: throw ContinueException.InternalErrorException("Can't read the file")
@@ -136,14 +181,21 @@ private fun copyInto(
     return file
 }
 
-/** The file's own name, reduced to a single safe path segment. */
+/**
+ * The file's own name, reduced to a single safe path segment. Falls back to "file" when the
+ * provider won't say; reading the file itself is where a real permission problem surfaces.
+ */
 private fun displayName(
     context: Context,
     uri: Uri,
 ): String {
     val name =
-        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) cursor.getString(0) else null
+        try {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        } catch (_: SecurityException) {
+            null
         }
     return name?.substringAfterLast('/')?.takeIf { it.isNotBlank() && it != "." && it != ".." } ?: "file"
 }

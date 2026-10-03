@@ -17,12 +17,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Done
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -46,13 +50,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.continueapp.android.AppState
+import org.continueapp.android.Transfer
+import org.continueapp.android.TransferKind
+import org.continueapp.android.TransferStatus
 import org.continueapp.android.ui.components.ActionButton
 import org.continueapp.android.ui.components.DeviceGlyph
 import org.continueapp.android.ui.components.PageTitle
 import org.continueapp.android.ui.components.ScreenPadding
 import org.continueapp.android.ui.components.SectionLabel
+import org.continueapp.android.ui.components.SettingsRow
 import org.continueapp.android.ui.components.StatusLabel
+import org.continueapp.android.ui.theme.success
 import org.continueapp.bridge.TrustedPeer
+
+private const val RECENT_ON_HOME = 5
 
 @Composable
 fun HomeScreen(
@@ -90,6 +101,10 @@ fun HomeScreen(
         LinkPanel(peer = peer, connected = peer.fingerprint in state.connected, state = state, onMessage = onMessage)
         SectionLabel("Send to ${peer.displayName}")
         SendActions(peer = peer, enabled = peer.fingerprint in state.connected, state = state, onMessage = onMessage)
+        if (state.recent.items.isNotEmpty()) {
+            SectionLabel("Recent")
+            state.recent.items.take(RECENT_ON_HOME).forEach { RecentRow(it) }
+        }
     }
 }
 
@@ -207,7 +222,7 @@ private fun SendActions(
             if (uris.isEmpty()) return@rememberLauncherForActivityResult
             sending = true
             scope.launch {
-                onMessage(state.sendFiles(context, peer.fingerprint, uris) ?: "Sent to ${peer.displayName}")
+                state.sendFiles(context, peer, uris)?.let(onMessage)
                 sending = false
             }
         }
@@ -241,7 +256,7 @@ private fun SendActions(
             onDismiss = { composingText = false },
             onSend = { text ->
                 composingText = false
-                scope.launch { onMessage(state.sendText(peer.fingerprint, text) ?: "Text sent") }
+                scope.launch { state.sendText(peer, text)?.let(onMessage) }
             },
         )
     }
@@ -259,6 +274,28 @@ private fun SendButton(
         Icon(icon, contentDescription = null)
         Text(label, modifier = Modifier.padding(start = 8.dp))
     }
+}
+
+@Composable
+private fun RecentRow(transfer: Transfer) {
+    val colors = MaterialTheme.colorScheme
+    SettingsRow(
+        title = transfer.label,
+        icon = if (transfer.kind == TransferKind.File) Icons.Outlined.Description else Icons.Outlined.ContentPaste,
+        subtitle =
+            when (transfer.status) {
+                TransferStatus.Sending -> "Sending to ${transfer.peerName}"
+                TransferStatus.Sent -> "Sent to ${transfer.peerName}"
+                TransferStatus.Failed -> "Couldn't send to ${transfer.peerName}"
+            },
+        trailing = {
+            when (transfer.status) {
+                TransferStatus.Sending -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                TransferStatus.Sent -> Icon(Icons.Outlined.Done, null, tint = colors.success)
+                TransferStatus.Failed -> Icon(Icons.Outlined.ErrorOutline, null, tint = colors.error)
+            }
+        },
+    )
 }
 
 @Composable
