@@ -1,9 +1,5 @@
 package org.continueapp.android.ui.screens
 
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -21,16 +17,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.ContentPaste
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.Done
-import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -54,21 +46,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.continueapp.android.AppState
-import org.continueapp.android.Transfer
-import org.continueapp.android.TransferKind
-import org.continueapp.android.TransferStatus
-import org.continueapp.android.mimeType
 import org.continueapp.android.ui.components.ActionButton
 import org.continueapp.android.ui.components.DeviceGlyph
 import org.continueapp.android.ui.components.PageTitle
 import org.continueapp.android.ui.components.ScreenPadding
 import org.continueapp.android.ui.components.SectionLabel
-import org.continueapp.android.ui.components.SettingsRow
 import org.continueapp.android.ui.components.StatusLabel
-import org.continueapp.android.ui.theme.success
 import org.continueapp.bridge.TrustedPeer
-
-private const val RECENT_ON_HOME = 5
 
 @Composable
 fun HomeScreen(
@@ -106,10 +90,7 @@ fun HomeScreen(
         LinkPanel(peer = peer, connected = peer.fingerprint in state.connected, state = state, onMessage = onMessage)
         SectionLabel("Send to ${peer.displayName}")
         SendActions(peer = peer, enabled = peer.fingerprint in state.connected, state = state, onMessage = onMessage)
-        if (state.recent.items.isNotEmpty()) {
-            SectionLabel("Recent")
-            state.recent.items.take(RECENT_ON_HOME).forEach { RecentRow(it) }
-        }
+        RecentSection(state.recent, onMessage)
     }
 }
 
@@ -278,57 +259,6 @@ private fun SendButton(
     ActionButton(onClick = onClick, enabled = enabled, tonal = true, modifier = modifier) {
         Icon(icon, contentDescription = null)
         Text(label, modifier = Modifier.padding(start = 8.dp))
-    }
-}
-
-@Composable
-private fun RecentRow(transfer: Transfer) {
-    val context = LocalContext.current
-    val name = transfer.peerName
-    SettingsRow(
-        title = transfer.label,
-        icon = if (transfer.kind == TransferKind.File) Icons.Outlined.Description else Icons.Outlined.ContentPaste,
-        subtitle =
-            when (transfer.status) {
-                TransferStatus.Sending -> "Sending to $name"
-                TransferStatus.Sent -> "Sent to $name"
-                TransferStatus.Failed -> "Couldn't send to $name"
-                TransferStatus.Received -> if (transfer.kind == TransferKind.Text) "Copied from $name" else "From $name"
-            },
-        onClick = transfer.uri?.let { uri -> { openFile(context, uri, transfer.label) } },
-        trailing =
-            if (transfer.status == TransferStatus.Received) {
-                null
-            } else {
-                { StatusIcon(transfer.status) }
-            },
-    )
-}
-
-@Composable
-private fun StatusIcon(status: TransferStatus) {
-    val colors = MaterialTheme.colorScheme
-    when (status) {
-        TransferStatus.Sending -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-        TransferStatus.Sent -> Icon(Icons.Outlined.Done, null, tint = colors.success)
-        TransferStatus.Failed -> Icon(Icons.Outlined.ErrorOutline, null, tint = colors.error)
-        TransferStatus.Received -> Unit
-    }
-}
-
-/** Opens a received file in whatever app handles it, if there is one. */
-private fun openFile(
-    context: Context,
-    uri: Uri,
-    name: String,
-) {
-    val intent =
-        Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, mimeType(name))
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    try {
-        context.startActivity(intent)
-    } catch (_: ActivityNotFoundException) {
     }
 }
 

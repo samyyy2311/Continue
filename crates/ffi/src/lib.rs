@@ -12,6 +12,7 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::Duration;
 use thiserror::Error;
 
+use history::{Direction, HistoryStore, Kind};
 use identity::{FileSecretStore, IdentitySigner};
 use pairing::{DeviceKeys, InitiatorPairing, ReplayCache, TrustStore, TrustedPeer};
 use permissions::{PermissionStore, PersistedGrant};
@@ -49,6 +50,7 @@ struct CoreState {
     runtime: Arc<tokio::runtime::Runtime>,
     trust_store: TrustStore,
     permission_store: PermissionStore,
+    history: HistoryStore,
     transport_cert: Arc<TransportCertificate>,
     identity_signer: Arc<dyn IdentitySigner>,
     replay_cache: Arc<ReplayCache>,
@@ -81,6 +83,8 @@ pub enum PermissionDecisionFfi {
 /// A file or text a paired device sent to this phone. Files arrive as `file_path` and
 /// `file_name`, text as `text`.
 pub struct ReceivedFfi {
+    /// The history entry, for `set_history_location` once the app has moved the file.
+    pub history_id: Option<i64>,
     pub peer_fingerprint: String,
     pub peer_name: String,
     pub file_path: Option<String>,
@@ -150,17 +154,42 @@ fn peer_name(trust_store: &TrustStore, fingerprint: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Hands received files and text to the app through `next_received`.
+/// Saves to history; a failure there shouldn't fail what was actually done.
+fn remember(history: &HistoryStore, item: history::Item) -> Option<i64> {
+    history
+        .record(&item)
+        .map_err(|error| tracing::warn!("Couldn't save to history: {error}"))
+        .ok()
+}
+
+/// Saves received files and text to history and hands them to the app through
+/// `next_received`.
 fn deliver_received(
     mut handlers: sessions::SessionCapabilityHandlers,
     trust_store: TrustStore,
+    history: HistoryStore,
 ) -> sessions::SessionCapabilityHandlers {
-    let peers = trust_store.clone();
+    let (peers, saved) = (trust_store.clone(), history.clone());
     handlers.on_file_received = Some(Arc::new(move |peer, file| {
+        let peer_name = peer_name(&peers, peer);
+        let history_id = remember(
+            &saved,
+            history::Item {
+                direction: Direction::Received,
+                kind: Kind::File,
+                label: file.file_name.clone(),
+                peer_fingerprint: peer.to_string(),
+                peer_name: peer_name.clone(),
+                size: file.bytes_received,
+                failed: false,
+                location: None,
+            },
+        );
         RECEIVED.push(
             ReceivedFfi {
+                history_id,
                 peer_fingerprint: peer.to_string(),
-                peer_name: peer_name(&peers, peer),
+                peer_name,
                 file_path: Some(file.path.to_string_lossy().into_owned()),
                 file_name: Some(file.file_name),
                 size: file.bytes_received,
@@ -170,19 +199,91 @@ fn deliver_received(
         );
     }));
     handlers.on_clipboard_received = Some(Arc::new(move |peer, update| {
+        let peer_name = peer_name(&trust_store, peer);
+        let text = String::from_utf8_lossy(&update.payload).into_owned();
+        let size = update.payload.len() as u64;
+        let history_id = remember(
+            &history,
+            history::Item {
+                direction: Direction::Received,
+                kind: Kind::Text,
+                label: text.clone(),
+                peer_fingerprint: peer.to_string(),
+                peer_name: peer_name.clone(),
+                size,
+                failed: false,
+                location: None,
+            },
+        );
         RECEIVED.push(
             ReceivedFfi {
+                history_id,
                 peer_fingerprint: peer.to_string(),
-                peer_name: peer_name(&trust_store, peer),
+                peer_name,
                 file_path: None,
                 file_name: None,
-                size: update.payload.len() as u64,
-                text: Some(String::from_utf8_lossy(&update.payload).into_owned()),
+                size,
+                text: Some(text),
             },
             RECEIVED_LIMIT,
         );
     }));
     handlers
+}
+
+pub struct HistoryEntryFfi {
+    pub id: i64,
+    /// Unix time in milliseconds.
+    pub at: u64,
+    pub received: bool,
+    pub is_text: bool,
+    pub label: String,
+    pub peer_fingerprint: String,
+    pub peer_name: String,
+    pub size: u64,
+    pub failed: bool,
+    pub location: Option<String>,
+}
+
+fn history_store() -> Result<HistoryStore, ContinueFfiError> {
+    let lock = CORE.lock().unwrap();
+    let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+    Ok(state.history.clone())
+}
+
+fn history_error(error: history::HistoryError) -> ContinueFfiError {
+    ContinueFfiError::DatabaseError(error.to_string())
+}
+
+/// What this phone sent and received, newest first.
+pub fn list_history(limit: u32) -> Result<Vec<HistoryEntryFfi>, ContinueFfiError> {
+    let entries = history_store()?.list(limit).map_err(history_error)?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| HistoryEntryFfi {
+            id: entry.id,
+            at: entry.at,
+            received: entry.item.direction == Direction::Received,
+            is_text: entry.item.kind == Kind::Text,
+            label: entry.item.label,
+            peer_fingerprint: entry.item.peer_fingerprint,
+            peer_name: entry.item.peer_name,
+            size: entry.item.size,
+            failed: entry.item.failed,
+            location: entry.item.location,
+        })
+        .collect())
+}
+
+pub fn clear_history() -> Result<(), ContinueFfiError> {
+    history_store()?.clear().map_err(history_error)
+}
+
+/// Notes where the app put a received file.
+pub fn set_history_location(id: i64, location: String) -> Result<(), ContinueFfiError> {
+    history_store()?
+        .set_location(id, &location)
+        .map_err(history_error)
 }
 
 /// Waits up to `timeout_ms` for the next file or text a paired device sent.
@@ -273,6 +374,7 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
 
     let trust_store =
         TrustStore::open(&db_path).map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;
+    let history = HistoryStore::open(&db_path).map_err(history_error)?;
     let permission_store = PermissionStore::open(&db_path)
         .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;
 
@@ -302,6 +404,7 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
                 .with_permission_store(Arc::new(permission_store.clone()))
                 .with_permission_prompt(permission_prompt(trust_store.clone())),
             trust_store.clone(),
+            history.clone(),
         ),
         sessions::RegistryConfig::default(),
         Some(Arc::new(move |peer, session_state| {
@@ -336,6 +439,7 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
         runtime,
         trust_store,
         permission_store,
+        history,
         transport_cert,
         identity_signer,
         replay_cache: Arc::new(ReplayCache::new()),
@@ -835,23 +939,38 @@ pub fn disconnect(peer_fingerprint: String) -> Result<(), ContinueFfiError> {
     Ok(())
 }
 
-fn connected_session(
-    peer_fingerprint: &str,
-) -> Result<(Arc<tokio::runtime::Runtime>, Arc<SessionMultiplexer>), ContinueFfiError> {
+struct Connected {
+    runtime: Arc<tokio::runtime::Runtime>,
+    mux: Arc<SessionMultiplexer>,
+    history: HistoryStore,
+    peer_name: String,
+}
+
+fn connected_session(peer_fingerprint: &str) -> Result<Connected, ContinueFfiError> {
     let lock = CORE.lock().unwrap();
     let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
     let mux = state
         .sessions
         .get(peer_fingerprint)
         .ok_or_else(|| ContinueFfiError::InternalError("Peer not connected".to_string()))?;
-    Ok((state.runtime.clone(), mux))
+    Ok(Connected {
+        runtime: state.runtime.clone(),
+        mux,
+        history: state.history.clone(),
+        peer_name: peer_name(&state.trust_store, peer_fingerprint),
+    })
 }
 
+/// The file is the app's temporary copy, so history keeps its name but not its place.
 pub fn send_file(peer_fingerprint: String, file_path: String) -> Result<u64, ContinueFfiError> {
-    let (runtime, mux) = connected_session(&peer_fingerprint)?;
-
-    runtime.block_on(async move {
-        let path = std::path::Path::new(&file_path);
+    let Connected {
+        runtime,
+        mux,
+        history,
+        peer_name,
+    } = connected_session(&peer_fingerprint)?;
+    let path = std::path::Path::new(&file_path);
+    let result = runtime.block_on(async {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -859,14 +978,35 @@ pub fn send_file(peer_fingerprint: String, file_path: String) -> Result<u64, Con
         let transfer_id = format!("tx-{now}");
         mux.send_file_to_peer(path, transfer_id, None::<fn(u64, u64)>)
             .await
-            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))
-    })
+    });
+    remember(
+        &history,
+        history::Item {
+            direction: Direction::Sent,
+            kind: Kind::File,
+            label: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            peer_fingerprint,
+            peer_name,
+            size: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+            failed: result.is_err(),
+            location: None,
+        },
+    );
+    result.map_err(|e| ContinueFfiError::InternalError(e.to_string()))
 }
 
 pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(), ContinueFfiError> {
-    let (runtime, mux) = connected_session(&peer_fingerprint)?;
-
-    runtime.block_on(async move {
+    let Connected {
+        runtime,
+        mux,
+        history,
+        peer_name,
+    } = connected_session(&peer_fingerprint)?;
+    let sent = text.clone();
+    let result = runtime.block_on(async move {
         let mut caps = std::collections::HashSet::new();
         caps.insert(protocol::CapabilityId::CLIPBOARD);
         let query = capabilities::CapabilityQuery {
@@ -879,14 +1019,27 @@ pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(),
 
         mux.send_clipboard_to_peer(
             clipboard::ClipboardFormat::TextPlain,
-            text.into_bytes(),
+            sent.into_bytes(),
             &query,
         )
         .await
-        .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
-
-        Ok(())
-    })
+    });
+    remember(
+        &history,
+        history::Item {
+            direction: Direction::Sent,
+            kind: Kind::Text,
+            size: text.len() as u64,
+            label: text,
+            peer_fingerprint,
+            peer_name,
+            failed: result.is_err(),
+            location: None,
+        },
+    );
+    result
+        .map(|_| ())
+        .map_err(|e| ContinueFfiError::InternalError(e.to_string()))
 }
 
 pub fn send_notification(
@@ -895,7 +1048,7 @@ pub fn send_notification(
     body: String,
     app_name: String,
 ) -> Result<(), ContinueFfiError> {
-    let (runtime, mux) = connected_session(&peer_fingerprint)?;
+    let Connected { runtime, mux, .. } = connected_session(&peer_fingerprint)?;
 
     runtime.block_on(async move {
         let dispatcher = notifications::NotificationDispatcher::new();
@@ -974,9 +1127,11 @@ mod tests {
 
     #[test]
     fn received_files_and_text_reach_the_app_with_their_sender() {
+        let history = HistoryStore::in_memory().unwrap();
         let handlers = deliver_received(
             sessions::SessionCapabilityHandlers::new(std::env::temp_dir()),
             TrustStore::in_memory().unwrap(),
+            history.clone(),
         );
         (handlers.on_file_received.unwrap())(
             "laptop",
@@ -993,5 +1148,10 @@ mod tests {
         assert_eq!(file.size, 2048);
         assert!(file.text.is_none());
         assert!(next_received(10).is_none());
+
+        let saved = history.list(10).unwrap();
+        assert_eq!(file.history_id, Some(saved[0].id));
+        assert_eq!(saved[0].item.direction, Direction::Received);
+        assert_eq!(saved[0].item.label, "report.pdf");
     }
 }

@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.continueapp.bridge.ContinueCoreBridge
 import org.continueapp.bridge.ContinueException
+import org.continueapp.bridge.HistoryEntry
 import org.continueapp.bridge.PermissionAnswer
 import org.continueapp.bridge.PermissionGrant
 import org.continueapp.bridge.PermissionQuestion
@@ -25,9 +26,9 @@ enum class TransferKind { File, Text }
 
 enum class TransferStatus { Sending, Sent, Failed, Received }
 
-/** Something sent from or to this phone during this session. */
+/** Something sent from or to this phone. */
 data class Transfer(
-    val id: Long,
+    val id: String,
     val kind: TransferKind,
     val label: String,
     val peerName: String,
@@ -36,11 +37,37 @@ data class Transfer(
     val uri: Uri? = null,
 )
 
-/** What this phone has sent and received while the app runs, newest first. */
-class RecentTransfers {
+/** What this phone has sent and received, newest first. The core saves it across restarts. */
+class RecentTransfers(private val bridge: ContinueCoreBridge) {
     var items by mutableStateOf<List<Transfer>>(emptyList())
         private set
     private var nextId = 0L
+
+    /** Adds what was saved before the app started, below anything already listed. */
+    suspend fun load() {
+        val saved =
+            withContext(Dispatchers.IO) {
+                try {
+                    bridge.listHistory(RECENT_LIMIT)
+                } catch (_: ContinueException) {
+                    emptyList()
+                }
+            }
+        items = (items + saved.map { it.toTransfer() }).take(RECENT_LIMIT)
+    }
+
+    /** Clears the saved history; anything still sending stays. */
+    suspend fun clear(): String? {
+        items = items.filter { it.status == TransferStatus.Sending }
+        return withContext(Dispatchers.IO) {
+            try {
+                bridge.clearHistory()
+                null
+            } catch (_: ContinueException) {
+                "Couldn't clear your history."
+            }
+        }
+    }
 
     /** Lists the transfer as sending, runs [send], then marks it sent or failed by its result. */
     suspend fun track(
@@ -49,7 +76,7 @@ class RecentTransfers {
         peerName: String,
         send: suspend () -> String?,
     ): String? {
-        val id = nextId++
+        val id = "live-${nextId++}"
         items = (listOf(Transfer(id, kind, label, peerName, TransferStatus.Sending)) + items).take(RECENT_LIMIT)
         val error = send()
         val status = if (error == null) TransferStatus.Sent else TransferStatus.Failed
@@ -63,10 +90,28 @@ class RecentTransfers {
         peerName: String,
         uri: Uri?,
     ) {
-        val transfer = Transfer(nextId++, kind, label, peerName, TransferStatus.Received, uri)
+        val transfer = Transfer("live-${nextId++}", kind, label, peerName, TransferStatus.Received, uri)
         items = (listOf(transfer) + items).take(RECENT_LIMIT)
     }
 }
+
+/** Text shows as its first line, like it does while it's being sent. */
+fun firstLine(text: String): String = text.trim().lineSequence().first()
+
+private fun HistoryEntry.toTransfer() =
+    Transfer(
+        id = "saved-$id",
+        kind = if (isText) TransferKind.Text else TransferKind.File,
+        label = if (isText) firstLine(label) else label,
+        peerName = peerName,
+        status =
+            when {
+                received -> TransferStatus.Received
+                failed -> TransferStatus.Failed
+                else -> TransferStatus.Sent
+            },
+        uri = location?.takeIf { it.startsWith("content://") }?.let(Uri::parse),
+    )
 
 /** Questions from devices set to Ask. The core asks one at a time. */
 class PermissionQuestions(private val bridge: ContinueCoreBridge) {
@@ -101,7 +146,7 @@ class AppState(private val bridge: ContinueCoreBridge) {
         private set
     var connected by mutableStateOf<Set<String>>(emptySet())
         private set
-    val recent = RecentTransfers()
+    val recent = RecentTransfers(bridge)
     val questions = PermissionQuestions(bridge)
     val incoming = Incoming(bridge, recent)
 
@@ -136,7 +181,7 @@ class AppState(private val bridge: ContinueCoreBridge) {
         peer: TrustedPeer,
         text: String,
     ): String? =
-        recent.track(TransferKind.Text, text.trim().lineSequence().first(), peer.displayName) {
+        recent.track(TransferKind.Text, firstLine(text), peer.displayName) {
             run("Couldn't send the text.") { bridge.sendClipboardText(peer.fingerprint, text) }
         }
 

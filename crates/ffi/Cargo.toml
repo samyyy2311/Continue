@@ -31,10 +31,12 @@ transfer = { path = "../transfer" }
 clipboard = { path = "../clipboard" }
 notifications = { path = "../notifications" }
 limits = { path = "../limits" }
+history = { path = "../history" }
 uniffi = { workspace = true }
 quinn = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "time", "sync"] }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [build-dependencies]
 uniffi = { workspace = true, features = ["build"] }

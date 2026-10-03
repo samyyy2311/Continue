@@ -57,6 +57,15 @@ namespace continue {
     ReceivedFfi? next_received(u32 timeout_ms);
 
     [Throws=ContinueFfiError]
+    sequence<HistoryEntryFfi> list_history(u32 limit);
+
+    [Throws=ContinueFfiError]
+    void clear_history();
+
+    [Throws=ContinueFfiError]
+    void set_history_location(i64 id, string location);
+
+    [Throws=ContinueFfiError]
     void connect_to_peer(string peer_fingerprint, string endpoint);
 
     [Throws=ContinueFfiError]
@@ -93,12 +102,26 @@ enum PermissionDecisionFfi {
 };
 
 dictionary ReceivedFfi {
+    i64? history_id;
     string peer_fingerprint;
     string peer_name;
     string? file_path;
     string? file_name;
     u64 size;
     string? text;
+};
+
+dictionary HistoryEntryFfi {
+    i64 id;
+    u64 at;
+    boolean received;
+    boolean is_text;
+    string label;
+    string peer_fingerprint;
+    string peer_name;
+    u64 size;
+    boolean failed;
+    string? location;
 };
 
 dictionary TrustedPeerFfi {
