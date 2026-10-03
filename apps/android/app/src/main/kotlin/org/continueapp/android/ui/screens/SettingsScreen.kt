@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -15,11 +16,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +49,45 @@ class AppearanceSettings(
     val onThemeModeChange: (ThemeMode) -> Unit,
     val onWallpaperColorsChange: (Boolean) -> Unit,
 )
+
+/** Where received files go: a folder picked by the user, or Downloads/Continue. */
+@Composable
+private fun SaveFolderRow() {
+    val context = LocalContext.current
+    val app = context.applicationContext as ContinueApplication
+    var folder by remember { mutableStateOf(app.saveFolder) }
+    val access = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+    val change = { picked: Uri? ->
+        // Keeps access to the new folder across restarts, and lets go of the old one. A folder
+        // that won't allow lasting access isn't used, so files keep going to Downloads.
+        val kept =
+            picked?.takeIf {
+                runCatching { context.contentResolver.takePersistableUriPermission(it, access) }.isSuccess
+            }
+        folder?.takeIf { it != kept }?.let { old ->
+            runCatching { context.contentResolver.releasePersistableUriPermission(old, access) }
+        }
+        app.saveFolder = kept
+        folder = kept
+    }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(change) }
+    SettingsRow(
+        title = "Save files to",
+        subtitle = folder?.let(::folderName) ?: "Downloads/Continue",
+        icon = Icons.Outlined.Folder,
+        onClick = { pick.launch(folder) },
+        trailing =
+            folder?.let {
+                { TextButton(onClick = { change(null) }) { Text("Use Downloads") } }
+            },
+    )
+}
+
+/** "Documents/Phone" from a picked folder, as people know it rather than as a link. */
+private fun folderName(tree: Uri): String {
+    val path = DocumentsContract.getTreeDocumentId(tree).substringAfter(':')
+    return path.ifBlank { "Picked folder" }
+}
 
 /** Sends anything newly copied when the app opens. */
 @Composable
@@ -119,6 +162,9 @@ fun SettingsScreen(
         )
         BackgroundRow()
         SendCopiesRow()
+
+        SectionLabel("Received files")
+        SaveFolderRow()
 
         SectionLabel("Appearance")
         SettingsRow(title = "Theme", icon = Icons.Outlined.DarkMode)

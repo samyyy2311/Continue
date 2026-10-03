@@ -60,6 +60,7 @@ struct CoreState {
     trusted_keys: Arc<RwLock<HashSet<[u8; 32]>>>,
     listener: quinn::Endpoint,
     discovery_tasks: Vec<tokio::task::JoinHandle<()>>,
+    incoming: sessions::IncomingFiles,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -407,11 +408,13 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
         .join("received");
     let _ = std::fs::create_dir_all(&download_dir);
     let grants = permission_store.clone();
+    let incoming = sessions::IncomingFiles::default();
     let sessions = SessionRegistry::new(
         local_fingerprint,
         transport_cert.clone(),
         deliver_received(
             sessions::SessionCapabilityHandlers::new(download_dir)
+                .with_incoming(incoming.clone())
                 .with_permission_store(Arc::new(permission_store.clone()))
                 .with_permission_prompt(permission_prompt(trust_store.clone())),
             trust_store.clone(),
@@ -458,6 +461,7 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
         sessions,
         trusted_keys,
         listener,
+        incoming,
         discovery_tasks: Vec::new(),
     };
 
@@ -501,6 +505,41 @@ pub fn get_device_fingerprint() -> Result<String, ContinueFfiError> {
     Ok(identity::Fingerprint::from_verifying_key(&key)
         .as_str()
         .to_string())
+}
+
+/// A file on its way in.
+pub struct IncomingFileFfi {
+    pub transfer_id: String,
+    pub peer_name: String,
+    pub file_name: String,
+    pub received: u64,
+    pub total: u64,
+}
+
+/// Files coming in right now, oldest first, for the app to show while they arrive.
+pub fn list_incoming() -> Vec<IncomingFileFfi> {
+    let lock = CORE.lock().unwrap();
+    let Some(state) = lock.as_ref() else {
+        return Vec::new();
+    };
+    let files = state.incoming.list();
+    files
+        .into_iter()
+        .map(|file| IncomingFileFfi {
+            peer_name: peer_name(&state.trust_store, &file.peer),
+            transfer_id: file.transfer_id,
+            file_name: file.file_name,
+            received: file.received,
+            total: file.total,
+        })
+        .collect()
+}
+
+/// Stops a file part way. False if it already finished or never started.
+pub fn cancel_incoming(transfer_id: String) -> bool {
+    let lock = CORE.lock().unwrap();
+    lock.as_ref()
+        .is_some_and(|state| state.incoming.cancel(&transfer_id))
 }
 
 pub fn get_device_spki_hash() -> Result<String, ContinueFfiError> {
