@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { fileNameFromPath, formatBytes, formatRelativeTime, getFileCategory } from "./format.ts";
+import { dayLabel, fileNameFromPath, formatBytes, formatRelativeTime, getFileCategory, linkIn } from "./format.ts";
 
 describe("formatBytes", () => {
   it("picks the largest unit below the value", () => {
@@ -51,5 +51,26 @@ describe("getFileCategory", () => {
     expect(getFileCategory("main.rs")).toBe("code");
     expect(getFileCategory("invoice.pdf")).toBe("document");
     expect(getFileCategory("unknown.xyz123")).toBe("other");
+  });
+});
+
+describe("linkIn", () => {
+  it("finds a link sent on its own", () => {
+    expect(linkIn("  https://example.com/a?b=1 ")).toBe("https://example.com/a?b=1");
+  });
+
+  it("ignores links inside other text and other kinds of address", () => {
+    expect(linkIn("see https://example.com")).toBeNull();
+    expect(linkIn("file:///etc/passwd")).toBeNull();
+    expect(linkIn("Gate B12")).toBeNull();
+  });
+});
+
+describe("dayLabel", () => {
+  const evening = new Date(2026, 9, 3, 22).getTime();
+
+  it("names today and yesterday", () => {
+    expect(dayLabel(new Date(2026, 9, 3, 1).getTime(), evening)).toBe("Today");
+    expect(dayLabel(new Date(2026, 9, 2, 23).getTime(), evening)).toBe("Yesterday");
   });
 });

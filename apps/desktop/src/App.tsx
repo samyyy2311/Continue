@@ -49,6 +49,7 @@ import {
   getHistory,
   getPermissions,
   getTrustedPeers,
+  openLink,
   openReceived,
   savePastedFile,
   removeTrustedPeer,
@@ -57,10 +58,12 @@ import {
   setPermission,
 } from "./api.ts";
 import {
+  dayLabel,
   fileNameFromPath,
   formatBytes,
   formatRelativeTime,
   getFileCategory,
+  linkIn,
 } from "./format.ts";
 import { PairDialog } from "./PairDialog.tsx";
 import {
@@ -85,19 +88,26 @@ import {
 
 const ACCENT_KEY = "continue.accent";
 const THEME_KEY = "continue.theme";
+const PEER_KEY = "continue.peer";
 
-function readStored<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+/** Storage can be unavailable in restrictive environments, so reads fall back to nothing. */
+function readStored(key: string): string | null {
   try {
-    const stored = localStorage.getItem(key);
-    return allowed.includes(stored as T) ? (stored as T) : fallback;
+    return localStorage.getItem(key);
   } catch {
-    return fallback;
+    return null;
   }
 }
 
-function writeStored(key: string, value: string) {
+function readChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  const stored = readStored(key);
+  return allowed.includes(stored as T) ? (stored as T) : fallback;
+}
+
+function writeStored(key: string, value: string | null) {
   try {
-    localStorage.setItem(key, value);
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
   } catch {
     // Storage can be unavailable in restrictive environments.
   }
@@ -150,13 +160,14 @@ function getFileIcon(name: string) {
 export default function App() {
   const [view, setView] = useState<View>("transfer");
   const [accent, setAccent] = useState<AccentName>(() =>
-    readStored(ACCENT_KEY, ACCENT_PALETTE.map((a) => a.id), "cobalt"),
+    readChoice(ACCENT_KEY, ACCENT_PALETTE.map((a) => a.id), "cobalt"),
   );
-  const [theme, setTheme] = useState<Theme>(() => readStored(THEME_KEY, ["system", "light", "dark"], "system"));
+  const [theme, setTheme] = useState<Theme>(() => readChoice(THEME_KEY, ["system", "light", "dark"], "system"));
   const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
   const [peers, setPeers] = useState<TrustedPeer[] | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
+  // The last device picked is picked again next time.
+  const [selectedPeerId, setSelectedPeerId] = useState<string | null>(() => readStored(PEER_KEY));
   const [showPairDialog, setShowPairDialog] = useState(false);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [connecting, setConnecting] = useState<string | null>(null);
@@ -184,6 +195,8 @@ export default function App() {
     document.documentElement.style.setProperty("--on-accent", active.onBase);
     writeStored(ACCENT_KEY, accent);
   }, [accent]);
+
+  useEffect(() => writeStored(PEER_KEY, selectedPeerId), [selectedPeerId]);
 
   useEffect(() => {
     writeStored(THEME_KEY, theme);
@@ -339,7 +352,7 @@ export default function App() {
     try {
       await disconnectPeer(peer.fingerprint);
       await refreshPeers();
-      showToast(`Disconnected ${peer.displayName}`);
+      showToast(`Disconnected from ${peer.displayName}`);
     } catch (error) {
       showError(errorMessage(error));
     }
@@ -348,7 +361,7 @@ export default function App() {
   const handleRemovePeer = async (peer: TrustedPeer) => {
     try {
       await removeTrustedPeer(peer.fingerprint);
-      showToast(`Unpaired ${peer.displayName}`);
+      showToast(`Forgot ${peer.displayName}`);
       if (selectedPeerId === peer.fingerprint) {
         setSelectedPeerId(null);
       }
@@ -392,7 +405,7 @@ export default function App() {
   /** The selected device if it's ready to send to; otherwise says why not. */
   const readyPeer = () => {
     if (!selectedPeer) {
-      showError("Pair a device first.");
+      showError("Pair your phone first.");
       return null;
     }
     if (!selectedPeer.isConnected) {
@@ -413,7 +426,7 @@ export default function App() {
   const retryItem = (item: Activity) => {
     const peer = peers?.find((p) => p.fingerprint === item.peerId);
     if (!peer) {
-      showError("Device is no longer paired.");
+      showError(`${item.peerName} isn't paired any more.`);
       return;
     }
     if (!peer.isConnected) {
@@ -475,13 +488,13 @@ export default function App() {
     try {
       const text = await navigator.clipboard.readText();
       if (!text || !text.trim()) {
-        showError("System clipboard is empty.");
+        showError("There's nothing copied to send.");
         return;
       }
       await sendText(peer, text.trim());
-      showToast("Clipboard sent to device");
+      showToast(`Sent what you copied to ${peer.displayName}`);
     } catch {
-      showError("Unable to access clipboard. Please paste into text field.");
+      showError("Couldn't read what you copied. Paste it into the text box instead.");
     }
   };
 
@@ -508,9 +521,9 @@ export default function App() {
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      showToast("Copied to clipboard");
+      showToast("Copied");
     } catch {
-      showError("Failed to copy to clipboard");
+      showError("Couldn't copy that.");
     }
   };
 
@@ -518,6 +531,7 @@ export default function App() {
     retry: retryItem,
     copy: copyToClipboard,
     open: (path, reveal) => openReceived(path, reveal).catch((error) => showError(errorMessage(error))),
+    openLink: (url) => openLink(url).catch((error) => showError(errorMessage(error))),
   };
 
   const chooseFilesRef = useRef(chooseFiles);
@@ -704,7 +718,7 @@ export default function App() {
           <div className="drop-target">
             <DeviceGlyph icon={<Upload size={28} strokeWidth={1.75} />} active={selectedPeer?.isConnected} size="lg" />
             <p className="headline">
-              {selectedPeer?.isConnected ? `Drop to send to ${selectedPeer.displayName}` : "Connect a device first"}
+              {selectedPeer?.isConnected ? `Drop to send to ${selectedPeer.displayName}` : "Connect your phone first"}
             </p>
             {selectedPeer?.isConnected && dragCount > 0 && (
               <p className="supporting">{dragCount === 1 ? "1 file" : `${dragCount} files`}</p>
@@ -730,11 +744,18 @@ interface RowActions {
   retry: (item: Activity) => void;
   copy: (text: string) => void;
   open: (path: string, reveal: boolean) => void;
+  openLink: (url: string) => void;
 }
 
-function ActivityRow(props: { item: Activity; actions: RowActions }) {
-  const { item, actions } = props;
+/** Under a day heading (`underDay`), older rows show the time rather than repeat the day. */
+function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: boolean }) {
+  const { item, actions, underDay = false } = props;
+  const when =
+    underDay && dayLabel(item.timestamp) !== "Today"
+      ? new Date(item.timestamp).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+      : formatRelativeTime(item.timestamp);
   const openable = item.status === "received" && item.kind === "file" ? item.path : undefined;
+  const link = item.kind === "text" && item.status !== "sending" ? linkIn(item.label) : null;
   const progress =
     item.status === "sending" && item.totalBytes ? (item.bytesSent ?? 0) / item.totalBytes : null;
   const who = item.status === "received" ? `From ${item.peerName}` : `To ${item.peerName}`;
@@ -758,7 +779,7 @@ function ActivityRow(props: { item: Activity; actions: RowActions }) {
         ) : (
           <span className="list-sub">
             {who} ·{" "}
-            {formatRelativeTime(item.timestamp)}
+            {when}
             {item.kind === "file" && item.bytesSent !== undefined && ` · ${formatBytes(item.bytesSent)}`}
           </span>
         )}
@@ -789,6 +810,11 @@ function ActivityRow(props: { item: Activity; actions: RowActions }) {
         {item.kind === "text" && item.status !== "sending" && (
           <button type="button" className="icon-btn" title="Copy" onClick={() => actions.copy(item.label)}>
             <Copy size={18} />
+          </button>
+        )}
+        {link && (
+          <button type="button" className="btn btn-tonal btn-small" onClick={() => actions.openLink(link)}>
+            Open link
           </button>
         )}
       </div>
@@ -1114,10 +1140,23 @@ const HISTORY_FILTERS = [
   { value: "failed", label: "Failed" },
 ] as const;
 
+/** Splits newest-first activity into days, keeping the order. */
+function byDay(items: Activity[]): [string, Activity[]][] {
+  const days: [string, Activity[]][] = [];
+  for (const item of items) {
+    const day = dayLabel(item.timestamp);
+    const last = days[days.length - 1];
+    if (last?.[0] === day) last[1].push(item);
+    else days.push([day, [item]]);
+  }
+  return days;
+}
+
 function HistoryView(props: HistoryViewProps) {
   const { activity, rowActions, onClear } = props;
   const [filter, setFilter] = useState<HistoryFilter>("all");
   const [search, setSearch] = useState("");
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   const needle = search.trim().toLowerCase();
   const filtered = activity.filter((item) => {
@@ -1132,9 +1171,17 @@ function HistoryView(props: HistoryViewProps) {
       <header className="page-head">
         <h1 className="display">Activity</h1>
         {activity.length > 0 && (
-          <button type="button" className="btn btn-text" onClick={onClear}>
+          <button
+            type="button"
+            className={`btn ${confirmingClear ? "btn-danger" : "btn-text"}`}
+            onClick={() => {
+              if (confirmingClear) onClear();
+              setConfirmingClear(!confirmingClear);
+            }}
+            onBlur={() => setConfirmingClear(false)}
+          >
             <Trash2 size={18} />
-            Clear
+            {confirmingClear ? "Click again to clear all" : "Clear"}
           </button>
         )}
       </header>
@@ -1168,13 +1215,18 @@ function HistoryView(props: HistoryViewProps) {
       </div>
 
       {filtered.length === 0 ? (
-        <p className="supporting">{search ? `Nothing matches "${search}".` : "Nothing here yet."}</p>
+        <p className="supporting">{search ? `Nothing matches "${search}".` : "Nothing sent or received yet."}</p>
       ) : (
-        <ul className="list">
-          {filtered.map((item) => (
-            <ActivityRow key={item.id} item={item} actions={rowActions} />
-          ))}
-        </ul>
+        byDay(filtered).map(([day, items]) => (
+          <section key={day} className="day">
+            <h2 className="day-label">{day}</h2>
+            <ul className="list">
+              {items.map((item) => (
+                <ActivityRow key={item.id} item={item} actions={rowActions} underDay />
+              ))}
+            </ul>
+          </section>
+        ))
       )}
     </div>
   );
@@ -1213,7 +1265,7 @@ function SettingsView(props: SettingsViewProps) {
         <li className="list-item">
           <div className="list-text">
             <span className="list-title">Theme</span>
-            <span className="list-sub">Auto follows your system</span>
+            <span className="list-sub">Auto matches your computer's setting</span>
           </div>
           <ButtonGroup label="Theme" options={THEME_OPTIONS} value={theme} onChange={onThemeChange} />
         </li>

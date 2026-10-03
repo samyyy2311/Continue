@@ -548,6 +548,13 @@ ol {
 
 /* Lists: separate rounded items, rounder at the ends. */
 
+.day-label {
+  margin: 0 0 10px 4px;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .list {
   display: flex;
   flex-direction: column;

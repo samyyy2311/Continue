@@ -95,9 +95,9 @@ export interface PermissionQuestion {
 export type PermissionAnswer = "allow" | "alwaysAllow" | "decline";
 
 export const PERMISSIONS: Record<string, { label: string; description: string }> = {
-  "File Transfer": { label: "Files", description: "Allow sending and receiving files" },
-  "Clipboard Sync": { label: "Clipboard", description: "Share copied text and links" },
-  "Notification Relay": { label: "Notifications", description: "Show phone notifications on desktop" },
+  "File Transfer": { label: "Files", description: "Send files to this computer" },
+  "Clipboard Sync": { label: "Text", description: "Send copied text and links" },
+  "Notification Relay": { label: "Notifications", description: "Show its notifications here" },
 };
 
 export const GRANT_OPTIONS: { value: Grant; label: string }[] = [

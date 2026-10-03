@@ -53,6 +53,9 @@ export const savePastedFile = async (file: File, name: string) =>
     headers: { "x-file-name": encodeURIComponent(name) },
   });
 
+/** Opens a web link in the default browser. */
+export const openLink = (url: string) => invoke<void>("open_link", { url });
+
 /** Opens a received file, or with `reveal` shows it in its folder. */
 export const openReceived = (path: string, reveal: boolean) => invoke<void>("open_received", { path, reveal });
 

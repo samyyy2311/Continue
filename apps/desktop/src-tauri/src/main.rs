@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
 use history::{Direction, HistoryStore, Kind};
@@ -177,6 +178,18 @@ fn open_received(
     result.map_err(user_error("Couldn't open that file."))
 }
 
+/// Opens a web link that was sent or received. Anything but http and https is refused.
+#[tauri::command]
+fn open_link(app: AppHandle, url: String) -> Result<(), String> {
+    const FAILED: &str = "Couldn't open that link.";
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(FAILED.to_string());
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(user_error(FAILED))
+}
+
 /// Where pasted files wait to be sent. Emptied on each start.
 fn pasted_dir(app: &AppHandle) -> PathBuf {
     app.path()
@@ -226,6 +239,30 @@ fn peer_name(trust_store: &TrustStore, fingerprint: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Shows a system notification, but only while the window isn't in front, where the same
+/// news already shows.
+fn notify_if_away(app: &AppHandle, title: &str, body: &str) {
+    let in_front = app
+        .get_webview_window("main")
+        .and_then(|window| window.is_focused().ok())
+        .unwrap_or(false);
+    if in_front {
+        return;
+    }
+    if let Err(error) = app.notification().builder().title(title).body(body).show() {
+        tracing::warn!("Couldn't show a notification: {error}");
+    }
+}
+
+/// The name to show for a paired device, even one saved without a name.
+fn shown_name(name: String) -> String {
+    if name.is_empty() {
+        "Your phone".to_string()
+    } else {
+        name
+    }
+}
+
 fn session_handlers(
     download_dir: PathBuf,
     permission_store: Arc<PermissionStore>,
@@ -244,6 +281,12 @@ fn session_handlers(
 
     let (app, peers, saved) = (app_handle.clone(), trust_store.clone(), history.clone());
     handlers.on_file_received = Some(Arc::new(move |peer, file| {
+        let name = peer_name(&peers, peer);
+        notify_if_away(
+            &app,
+            &format!("{} sent a file", shown_name(name.clone())),
+            &file.file_name,
+        );
         remember(
             &saved,
             history::Item {
@@ -251,7 +294,7 @@ fn session_handlers(
                 kind: Kind::File,
                 label: file.file_name.clone(),
                 peer_fingerprint: peer.to_string(),
-                peer_name: peer_name(&peers, peer),
+                peer_name: name.clone(),
                 size: file.bytes_received,
                 failed: false,
                 location: Some(file.path.to_string_lossy().into_owned()),
@@ -261,7 +304,7 @@ fn session_handlers(
             "file-received",
             serde_json::json!({
                 "peerId": peer,
-                "peerName": peer_name(&peers, peer),
+                "peerName": name,
                 "fileName": file.file_name,
                 "path": file.path.to_string_lossy(),
                 "bytesReceived": file.bytes_received,
@@ -272,6 +315,12 @@ fn session_handlers(
     let app = app_handle.clone();
     handlers.on_clipboard_received = Some(Arc::new(move |peer, update| {
         let text = String::from_utf8_lossy(&update.payload);
+        let name = peer_name(&trust_store, peer);
+        notify_if_away(
+            &app,
+            &format!("Copied text from {}", shown_name(name.clone())),
+            text.lines().next().unwrap_or_default(),
+        );
         remember(
             &history,
             history::Item {
@@ -279,7 +328,7 @@ fn session_handlers(
                 kind: Kind::Text,
                 label: text.to_string(),
                 peer_fingerprint: peer.to_string(),
-                peer_name: peer_name(&trust_store, peer),
+                peer_name: name.clone(),
                 size: update.payload.len() as u64,
                 failed: false,
                 location: None,
@@ -289,7 +338,7 @@ fn session_handlers(
             "clipboard-received",
             serde_json::json!({
                 "peerId": peer,
-                "peerName": peer_name(&trust_store, peer),
+                "peerName": name,
                 "content": text,
             }),
         );
@@ -325,6 +374,19 @@ fn permission_prompt(
                 question: question.clone(),
                 answer,
             },
+        );
+        let what = match (question.detail.as_deref(), question.kind) {
+            (Some(file), _) => file,
+            (None, "text") => "some text",
+            (None, _) => "notifications",
+        };
+        notify_if_away(
+            &app_handle,
+            &format!(
+                "{} wants to send {what}",
+                shown_name(question.peer_name.clone())
+            ),
+            "Open Continue to allow or decline.",
         );
         let _ = app_handle.emit("permission-request", question);
 
@@ -986,6 +1048,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let app_data = app
                 .path()
@@ -1050,6 +1113,7 @@ fn main() {
             get_history,
             clear_history,
             open_received,
+            open_link,
             save_pasted_file,
             connect_to_peer,
             disconnect_peer,
