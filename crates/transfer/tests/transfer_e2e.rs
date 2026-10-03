@@ -48,7 +48,7 @@ async fn file_transfer_e2e_success() {
             &mut send_stream,
             &mut recv_stream,
             &recv_dir_clone,
-            None::<fn(&_) -> bool>,
+            None::<fn(&_) -> std::future::Ready<bool>>,
             None::<fn(u64, u64)>,
         )
         .await;
@@ -128,7 +128,7 @@ async fn file_transfer_rejected_by_permission_checker() {
             &mut send_stream,
             &mut recv_stream,
             &recv_dir_clone,
-            Some(|_req: &protocol::v1::FileTransferRequest| false),
+            Some(|_req: &protocol::v1::FileTransferRequest| std::future::ready(false)),
             None::<fn(u64, u64)>,
         )
         .await;

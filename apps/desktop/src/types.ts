@@ -68,6 +68,17 @@ export interface Activity {
   error?: string;
 }
 
+/** Something a device set to Ask wants to send. */
+export interface PermissionQuestion {
+  id: number;
+  peerName: string;
+  kind: "file" | "text" | "notification";
+  /** The file name, for files. */
+  detail: string | null;
+}
+
+export type PermissionAnswer = "allow" | "alwaysAllow" | "decline";
+
 export const PERMISSIONS: Record<string, { label: string; description: string }> = {
   "File Transfer": { label: "Files", description: "Allow sending and receiving files" },
   "Clipboard Sync": { label: "Clipboard", description: "Share copied text and links" },

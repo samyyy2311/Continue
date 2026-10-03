@@ -956,6 +956,28 @@ ol {
   color: var(--text-2);
 }
 
+.dialog-small {
+  gap: 20px;
+  width: min(460px, 100%);
+}
+
+.dialog-small .dialog-title {
+  margin-bottom: 6px;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.dialog-detail {
+  font-weight: 700;
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .segmented-tabs {
   align-self: flex-start;
 }
