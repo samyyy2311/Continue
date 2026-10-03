@@ -42,7 +42,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.continueapp.android.ui.screens.AppearanceSettings
 import org.continueapp.android.ui.screens.DeviceScreen
@@ -50,6 +49,7 @@ import org.continueapp.android.ui.screens.DevicesScreen
 import org.continueapp.android.ui.screens.HomeScreen
 import org.continueapp.android.ui.screens.PairScreen
 import org.continueapp.android.ui.screens.PermissionPrompts
+import org.continueapp.android.ui.screens.SendNewCopies
 import org.continueapp.android.ui.screens.SettingsScreen
 import org.continueapp.android.ui.screens.SharePrompt
 import org.continueapp.android.ui.theme.ContinueTheme
@@ -124,8 +124,6 @@ private sealed interface Overlay {
     data class Device(val fingerprint: String) : Overlay
 }
 
-private const val REFRESH_INTERVAL_MS = 2_000L
-
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ContinueApp(
@@ -142,13 +140,8 @@ private fun ContinueApp(
     val showMessage: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
 
     // The core has no connection events yet, so connection state is read on a short interval.
-    LaunchedEffect(Unit) {
-        while (true) {
-            state.refresh()
-            delay(REFRESH_INTERVAL_MS)
-        }
-    }
     PermissionPrompts(state.questions)
+    SendNewCopies(state, onMessage = showMessage)
     BackHandler(enabled = overlay != null) { overlay = null }
     SharePrompt(shared, state, onMessage = showMessage) {
         overlay = null

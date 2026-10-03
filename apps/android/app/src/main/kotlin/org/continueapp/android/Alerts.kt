@@ -49,20 +49,29 @@ fun needsNotificationPermission(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
         PackageManager.PERMISSION_GRANTED
 
-/** The quiet notification that keeps receiving going, with a button to send the clipboard. */
+/**
+ * The quiet notification that keeps receiving going. It says who's connected and has a button
+ * to send the clipboard.
+ */
 fun backgroundNotification(context: Context): Notification {
+    val app = context.applicationContext as ContinueApplication
     val sendClipboard =
         PendingIntent.getActivity(context, 0, Intent(context, SendClipboardActivity::class.java), IMMUTABLE)
     return NotificationCompat
         .Builder(context, CHANNEL_BACKGROUND)
         .setSmallIcon(R.drawable.ic_notification)
-        .setContentTitle("Ready to receive")
+        .setContentTitle(app.connectionStatus)
         .setContentText("Files and text from your computer arrive even with Continue closed.")
         .setContentIntent(openApp(context))
         .addAction(0, "Send clipboard", sendClipboard)
         .setOngoing(true)
         .setPriority(NotificationCompat.PRIORITY_MIN)
         .build()
+}
+
+/** Shows the latest connection state in the background notification. */
+fun updateBackgroundNotification(context: Context) {
+    post(context, BACKGROUND_NOTIFICATION_ID, backgroundNotification(context))
 }
 
 /** Says something arrived. Tapping it opens [open], or the app when there's nothing to open. */

@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
@@ -44,6 +45,29 @@ class AppearanceSettings(
     val onThemeModeChange: (ThemeMode) -> Unit,
     val onWallpaperColorsChange: (Boolean) -> Unit,
 )
+
+/** Sends anything newly copied when the app opens. */
+@Composable
+private fun SendCopiesRow() {
+    val app = LocalContext.current.applicationContext as ContinueApplication
+    var on by remember { mutableStateOf(app.sendNewCopies) }
+    SettingsRow(
+        title = "Send what you copy",
+        subtitle =
+            "When you open Continue, anything you copied since goes to your computer. " +
+                "For one tap from anywhere, add the Send clipboard tile to Quick Settings.",
+        icon = Icons.Outlined.ContentPaste,
+        trailing = {
+            Switch(
+                checked = on,
+                onCheckedChange = {
+                    on = it
+                    app.sendNewCopies = it
+                },
+            )
+        },
+    )
+}
 
 /** Keeps receiving with the app closed. Turning it on asks to show notifications if needed. */
 @Composable
@@ -94,6 +118,7 @@ fun SettingsScreen(
             trailing = { Switch(checked = visible, onCheckedChange = onVisibleChange) },
         )
         BackgroundRow()
+        SendCopiesRow()
 
         SectionLabel("Appearance")
         SettingsRow(title = "Theme", icon = Icons.Outlined.DarkMode)

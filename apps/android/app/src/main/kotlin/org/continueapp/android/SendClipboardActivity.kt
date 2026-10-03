@@ -1,6 +1,5 @@
 package org.continueapp.android
 
-import android.content.ClipboardManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -25,31 +24,12 @@ class SendClipboardActivity : ComponentActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus || sending) return
         sending = true
-        val text =
-            getSystemService(ClipboardManager::class.java)
-                ?.primaryClip
-                ?.takeIf { it.itemCount > 0 }
-                ?.getItemAt(0)
-                ?.coerceToText(this)
-                ?.toString()
-                .orEmpty()
-        val state = (application as ContinueApplication).state
+        val app = application as ContinueApplication
+        val text = readCopy(this, app).orEmpty()
         lifecycleScope.launch {
-            val message = if (text.isBlank()) "There's nothing copied to send." else state.sendToConnected(text)
+            val message = if (text.isBlank()) "There's nothing copied to send." else app.state.sendToConnected(text)
             Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
             finish()
         }
-    }
-}
-
-/** Sends text to every connected computer, and says how that went. */
-private suspend fun AppState.sendToConnected(text: String): String {
-    refresh()
-    val targets = peers.filter { it.fingerprint in connected }
-    val failed = targets.map { sendText(it, text) }.firstOrNull { it != null }
-    return when {
-        targets.isEmpty() -> "Your computer isn't connected."
-        failed != null -> failed
-        else -> "Sent to ${targets.joinToString { it.displayName }}"
     }
 }

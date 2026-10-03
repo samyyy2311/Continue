@@ -1,7 +1,5 @@
 package org.continueapp.android
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -75,13 +73,6 @@ fun viewIntent(
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
 fun mimeType(name: String): String = URLConnection.guessContentTypeFromName(name) ?: "application/octet-stream"
-
-fun copyToClipboard(
-    context: Context,
-    text: String,
-) {
-    context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(SAVE_FOLDER, text))
-}
 
 /**
  * Moves a received file into Downloads/Continue. Returns its content URI on Android 10 and

@@ -7,6 +7,7 @@ import android.net.wifi.WifiManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.continueapp.android.ui.theme.ThemeMode
 import org.continueapp.bridge.ContinueCoreBridge
@@ -45,6 +46,20 @@ class ContinueApplication : Application() {
     var wallpaperColors: Boolean
         get() = settings.getBoolean(KEY_WALLPAPER_COLORS, false)
         set(value) = settings.edit().putBoolean(KEY_WALLPAPER_COLORS, value).apply()
+
+    /** Whether opening the app sends anything newly copied to the computer. */
+    var sendNewCopies: Boolean
+        get() = settings.getBoolean(KEY_SEND_COPIES, true)
+        set(value) = settings.edit().putBoolean(KEY_SEND_COPIES, value).apply()
+
+    /** When the newest copy the app has already dealt with was made. */
+    var lastCopySeen: Long
+        get() = settings.getLong(KEY_COPY_SEEN, 0L)
+        set(value) = settings.edit().putLong(KEY_COPY_SEEN, value).apply()
+
+    /** Who's connected, as the background notification says it. */
+    var connectionStatus = "Looking for your computer"
+        private set
 
     /** Whether files and text keep arriving with the app closed. */
     var receiveInBackground: Boolean
@@ -86,6 +101,30 @@ class ContinueApplication : Application() {
             state.incoming.listen(this@ContinueApplication)
         }
         scope.launch { state.questions.listen() }
+        scope.launch { watchConnections() }
+    }
+
+    /** Keeps connection state fresh, often while on screen and now and then otherwise. */
+    private suspend fun watchConnections() {
+        while (true) {
+            state.refresh()
+            val status = describeConnections()
+            if (status != connectionStatus) {
+                connectionStatus = status
+                if (receiveInBackground) updateBackgroundNotification(this)
+            }
+            delay(if (onScreen) ON_SCREEN_REFRESH_MS else BACKGROUND_REFRESH_MS)
+        }
+    }
+
+    private fun describeConnections(): String {
+        val names = state.peers.filter { it.fingerprint in state.connected }.map { it.displayName }
+        return when {
+            state.peers.isEmpty() -> "Not paired with a computer yet"
+            names.isEmpty() -> "Looking for your computer"
+            names.size == 1 -> "Connected to ${names.single()}"
+            else -> "Connected to ${names.size} computers"
+        }
     }
 
     private fun applyVisibility(visible: Boolean) {
@@ -110,5 +149,9 @@ class ContinueApplication : Application() {
         const val KEY_THEME = "theme"
         const val KEY_WALLPAPER_COLORS = "wallpaper_colors"
         const val KEY_BACKGROUND = "receive_in_background"
+        const val KEY_SEND_COPIES = "send_new_copies"
+        const val KEY_COPY_SEEN = "last_copy_seen"
+        const val ON_SCREEN_REFRESH_MS = 2_000L
+        const val BACKGROUND_REFRESH_MS = 10_000L
     }
 }
