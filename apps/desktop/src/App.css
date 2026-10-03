@@ -11,10 +11,10 @@
 }
 
 :root {
-  --teal: #156e6d;
-  --on-teal: #ffffff;
-  --accent: var(--teal);
-  --on-accent: var(--on-teal);
+  --brand: #2457d6;
+  --on-brand: #ffffff;
+  --accent: var(--brand);
+  --on-accent: var(--on-brand);
 
   --bg: #e3e8ee;
   --surface: #f3f6f9;
@@ -42,8 +42,8 @@
 }
 
 :root[data-theme="dark"] {
-  --teal: #5cbcb5;
-  --on-teal: #06201f;
+  --brand: #a8bfff;
+  --on-brand: #0b1b45;
 
   --bg: #0e1012;
   --surface: #15171a;
@@ -548,6 +548,13 @@ ol {
 
 /* Lists: separate rounded items, rounder at the ends. */
 
+.day-label {
+  margin: 0 0 10px 4px;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .list {
   display: flex;
   flex-direction: column;
@@ -608,6 +615,45 @@ ol {
   white-space: nowrap;
 }
 
+.list-sub.wrap {
+  white-space: normal;
+}
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 52px;
+  height: 32px;
+  border: 2px solid var(--outline);
+  border-radius: 16px;
+  background: var(--container-highest);
+  transition: background-color 150ms var(--ease), border-color 150ms var(--ease);
+}
+
+.switch span {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--outline);
+  transition: transform 150ms var(--ease), width 150ms var(--ease), height 150ms var(--ease), top 150ms var(--ease);
+}
+
+.switch[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.switch[aria-checked="true"] span {
+  top: 2px;
+  width: 24px;
+  height: 24px;
+  background: var(--on-accent);
+  transform: translateX(20px);
+}
+
 .list-trailing {
   display: flex;
   align-items: center;
@@ -619,16 +665,20 @@ ol {
   color: var(--success);
 }
 
-.status-text.error {
-  color: var(--error);
+.status-text {
+  color: var(--text-2);
   font-size: 13.5px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-text.error {
+  color: var(--error);
 }
 
 .progress {
   position: relative;
   width: 100%;
-  max-width: 420px;
   height: 4px;
   margin: 6px 0 4px;
   border-radius: 2px;
@@ -708,6 +758,8 @@ ol {
   align-items: center;
   gap: 6px;
   height: 40px;
+  justify-content: center;
+  min-width: 96px;
   padding: 0 18px;
   border-radius: 6px;
   background: var(--container-high);
@@ -898,11 +950,11 @@ ol {
 
 .snackbar svg {
   flex-shrink: 0;
-  color: var(--teal);
+  color: #a8bfff;
 }
 
 :root[data-theme="dark"] .snackbar svg {
-  color: #156e6d;
+  color: #2457d6;
 }
 
 .snackbar.error svg {
@@ -964,6 +1016,10 @@ ol {
 dialog.dialog {
   margin: auto;
   color: var(--text);
+}
+
+dialog.dialog:focus {
+  outline: none;
 }
 
 dialog.dialog:not([open]) {

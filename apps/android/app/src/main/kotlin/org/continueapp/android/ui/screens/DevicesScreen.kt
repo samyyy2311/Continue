@@ -56,7 +56,7 @@ fun DevicesScreen(
         PageTitle("Devices")
         if (state.peers.isEmpty()) {
             Text(
-                "No paired devices yet. Tap Pair to add your computer.",
+                "Nothing paired yet. Tap Pair to add your computer.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -125,7 +125,7 @@ fun DeviceScreen(
         )
 
         TextButton(onClick = { confirmingForget = true }, modifier = Modifier.padding(vertical = 16.dp)) {
-            Text("Forget this device", color = MaterialTheme.colorScheme.error)
+            Text("Forget this computer", color = MaterialTheme.colorScheme.error)
         }
     }
 
@@ -133,7 +133,7 @@ fun DeviceScreen(
         AlertDialog(
             onDismissRequest = { confirmingForget = false },
             title = { Text("Forget ${peer.displayName}?") },
-            text = { Text("It will need to be paired again before it can connect.") },
+            text = { Text("You'll need to pair it again to send anything between them.") },
             confirmButton = {
                 TextButton(
                     onClick = {

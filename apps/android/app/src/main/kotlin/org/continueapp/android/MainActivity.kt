@@ -1,10 +1,13 @@
 package org.continueapp.android
 
+import android.Manifest
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -29,6 +32,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,9 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.continueapp.android.ui.screens.AppearanceSettings
 import org.continueapp.android.ui.screens.DeviceScreen
@@ -47,15 +49,29 @@ import org.continueapp.android.ui.screens.DevicesScreen
 import org.continueapp.android.ui.screens.HomeScreen
 import org.continueapp.android.ui.screens.PairScreen
 import org.continueapp.android.ui.screens.PermissionPrompts
+import org.continueapp.android.ui.screens.SendNewCopies
 import org.continueapp.android.ui.screens.SettingsScreen
+import org.continueapp.android.ui.screens.SharePrompt
 import org.continueapp.android.ui.theme.ContinueTheme
 
 class MainActivity : ComponentActivity() {
+    private val askForNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val app = application as ContinueApplication
-        val state = AppState(app.coreBridge)
+        // A share still waiting after the phone is turned is kept by the app; reopening from
+        // recent apps shouldn't ask again about one already answered.
+        val fromRecents = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        if (savedInstanceState == null && !fromRecents) sharedFrom(intent)?.let { app.pendingShare.value = it }
+        val state = app.state
+        app.applyBackground()
+        // Asked once here; after that, only when background receiving is turned on in Settings.
+        if (app.receiveInBackground && !app.askedForNotifications && needsNotificationPermission(this)) {
+            app.askedForNotifications = true
+            askForNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
 
         setContent {
             var themeMode by remember { mutableStateOf(app.themeMode) }
@@ -83,9 +99,15 @@ class MainActivity : ComponentActivity() {
                         app.visible = it
                     },
                     appearance = appearance,
+                    shared = app.pendingShare,
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        sharedFrom(intent)?.let { (application as ContinueApplication).pendingShare.value = it }
     }
 }
 
@@ -102,8 +124,6 @@ private sealed interface Overlay {
     data class Device(val fingerprint: String) : Overlay
 }
 
-private const val REFRESH_INTERVAL_MS = 2_000L
-
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ContinueApp(
@@ -111,6 +131,7 @@ private fun ContinueApp(
     visible: Boolean,
     onVisibleChange: (Boolean) -> Unit,
     appearance: AppearanceSettings,
+    shared: MutableState<Shared?>,
 ) {
     var tab by remember { mutableStateOf(Tab.Home) }
     var overlay by remember { mutableStateOf<Overlay?>(null) }
@@ -119,19 +140,13 @@ private fun ContinueApp(
     val showMessage: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
 
     // The core has no connection events yet, so connection state is read on a short interval.
-    LaunchedEffect(Unit) {
-        while (true) {
-            state.refresh()
-            delay(REFRESH_INTERVAL_MS)
-        }
-    }
     PermissionPrompts(state.questions)
-    val context = LocalContext.current
-    LaunchedEffect(Unit) {
-        state.recent.load()
-        state.incoming.listen(context.applicationContext)
-    }
+    SendNewCopies(state, onMessage = showMessage)
     BackHandler(enabled = overlay != null) { overlay = null }
+    SharePrompt(shared, state, onMessage = showMessage) {
+        overlay = null
+        tab = Tab.Home
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,

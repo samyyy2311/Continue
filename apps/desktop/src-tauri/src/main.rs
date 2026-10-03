@@ -3,6 +3,10 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod clipboard_sync;
+mod tray;
+
+use clipboard_sync::ClipboardSync;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -10,6 +14,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_opener::OpenerExt;
 
 use history::{Direction, HistoryStore, Kind};
 use identity::{FileSecretStore, IdentitySigner};
@@ -93,6 +100,8 @@ pub struct DesktopRuntimeState {
     sessions: SessionRegistry,
     pending_answers: PendingAnswers,
     history: HistoryStore,
+    download_dir: PathBuf,
+    clipboard: ClipboardSync,
 }
 
 /// Saves to history; a failure there shouldn't fail what was actually done.
@@ -151,6 +160,115 @@ fn clear_history(state: State<DesktopRuntimeState>) -> Result<(), String> {
         .map_err(user_error("Couldn't clear your history."))
 }
 
+/// Opens a received file, or shows it in its folder. Only files in the
+/// received-files folder can be opened this way.
+#[tauri::command]
+fn open_received(
+    app: AppHandle,
+    state: State<DesktopRuntimeState>,
+    path: String,
+    reveal: bool,
+) -> Result<(), String> {
+    const MISSING: &str = "Couldn't find that file. It may have been moved or deleted.";
+    let file = std::fs::canonicalize(&path).map_err(user_error(MISSING))?;
+    let folder = std::fs::canonicalize(&state.download_dir).map_err(user_error(MISSING))?;
+    if !file.starts_with(&folder) {
+        return Err(MISSING.to_string());
+    }
+    let opener = app.opener();
+    let result = if reveal {
+        opener.reveal_item_in_dir(&file)
+    } else {
+        opener.open_path(file.to_string_lossy(), None::<&str>)
+    };
+    result.map_err(user_error("Couldn't open that file."))
+}
+
+/// Opens a web link that was sent or received. Anything but http and https is refused.
+#[tauri::command]
+fn open_link(app: AppHandle, url: String) -> Result<(), String> {
+    const FAILED: &str = "Couldn't open that link.";
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(FAILED.to_string());
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(user_error(FAILED))
+}
+
+/// Started at login with this, Continue stays in the tray instead of opening its window.
+const BACKGROUND_ARG: &str = "--background";
+
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> bool {
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let launcher = app.autolaunch();
+    let result = if enabled {
+        launcher.enable()
+    } else {
+        launcher.disable()
+    };
+    result.map_err(user_error("Couldn't change that setting."))
+}
+
+/// Starts Continue at login the first time it runs. After that it's the user's choice.
+fn start_at_login_by_default(app: &AppHandle, app_data: &Path) {
+    let chosen = app_data.join("start-at-login-set");
+    if chosen.exists() {
+        return;
+    }
+    match app.autolaunch().enable() {
+        Ok(()) => {
+            let _ = std::fs::write(chosen, b"");
+        }
+        Err(error) => tracing::warn!("Couldn't start Continue at login: {error}"),
+    }
+}
+
+/// Where pasted files wait to be sent. Emptied on each start.
+fn pasted_dir(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_cache_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("continue"))
+        .join("pasted")
+}
+
+/// Saves a pasted file so it can be sent like one picked from disk. The
+/// bytes are the request body and the name is in the `x-file-name` header.
+#[tauri::command]
+fn save_pasted_file(app: AppHandle, request: tauri::ipc::Request) -> Result<String, String> {
+    const FAILED: &str = "Couldn't send what you pasted.";
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(FAILED.to_string());
+    };
+    let name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            percent_encoding::percent_decode_str(value)
+                .decode_utf8_lossy()
+                .into_owned()
+        })
+        .unwrap_or_default();
+    let name = Path::new(&name).file_name().map_or_else(
+        || "Pasted file".into(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    // A folder per paste keeps the original name without clashing.
+    let folder = pasted_dir(&app).join(NEXT.fetch_add(1, Ordering::Relaxed).to_string());
+    let path = folder.join(name);
+    std::fs::create_dir_all(&folder)
+        .and_then(|()| std::fs::write(&path, bytes))
+        .map_err(user_error(FAILED))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 fn peer_name(trust_store: &TrustStore, fingerprint: &str) -> String {
     trust_store
         .get_peer(fingerprint)
@@ -160,12 +278,37 @@ fn peer_name(trust_store: &TrustStore, fingerprint: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Shows a system notification, but only while the window isn't in front, where the same
+/// news already shows.
+fn notify_if_away(app: &AppHandle, title: &str, body: &str) {
+    let in_front = app
+        .get_webview_window("main")
+        .and_then(|window| window.is_focused().ok())
+        .unwrap_or(false);
+    if in_front {
+        return;
+    }
+    if let Err(error) = app.notification().builder().title(title).body(body).show() {
+        tracing::warn!("Couldn't show a notification: {error}");
+    }
+}
+
+/// The name to show for a paired device, even one saved without a name.
+fn shown_name(name: String) -> String {
+    if name.is_empty() {
+        "Your phone".to_string()
+    } else {
+        name
+    }
+}
+
 fn session_handlers(
     download_dir: PathBuf,
     permission_store: Arc<PermissionStore>,
     trust_store: TrustStore,
     pending_answers: PendingAnswers,
     history: HistoryStore,
+    clipboard: ClipboardSync,
     app_handle: &AppHandle,
 ) -> sessions::SessionCapabilityHandlers {
     let mut handlers = sessions::SessionCapabilityHandlers::new(download_dir)
@@ -178,6 +321,12 @@ fn session_handlers(
 
     let (app, peers, saved) = (app_handle.clone(), trust_store.clone(), history.clone());
     handlers.on_file_received = Some(Arc::new(move |peer, file| {
+        let name = peer_name(&peers, peer);
+        notify_if_away(
+            &app,
+            &format!("{} sent a file", shown_name(name.clone())),
+            &file.file_name,
+        );
         remember(
             &saved,
             history::Item {
@@ -185,7 +334,7 @@ fn session_handlers(
                 kind: Kind::File,
                 label: file.file_name.clone(),
                 peer_fingerprint: peer.to_string(),
-                peer_name: peer_name(&peers, peer),
+                peer_name: name.clone(),
                 size: file.bytes_received,
                 failed: false,
                 location: Some(file.path.to_string_lossy().into_owned()),
@@ -195,7 +344,7 @@ fn session_handlers(
             "file-received",
             serde_json::json!({
                 "peerId": peer,
-                "peerName": peer_name(&peers, peer),
+                "peerName": name,
                 "fileName": file.file_name,
                 "path": file.path.to_string_lossy(),
                 "bytesReceived": file.bytes_received,
@@ -206,6 +355,13 @@ fn session_handlers(
     let app = app_handle.clone();
     handlers.on_clipboard_received = Some(Arc::new(move |peer, update| {
         let text = String::from_utf8_lossy(&update.payload);
+        clipboard.write(text.to_string());
+        let name = peer_name(&trust_store, peer);
+        notify_if_away(
+            &app,
+            &format!("Copied text from {}", shown_name(name.clone())),
+            text.lines().next().unwrap_or_default(),
+        );
         remember(
             &history,
             history::Item {
@@ -213,7 +369,7 @@ fn session_handlers(
                 kind: Kind::Text,
                 label: text.to_string(),
                 peer_fingerprint: peer.to_string(),
-                peer_name: peer_name(&trust_store, peer),
+                peer_name: name.clone(),
                 size: update.payload.len() as u64,
                 failed: false,
                 location: None,
@@ -223,7 +379,7 @@ fn session_handlers(
             "clipboard-received",
             serde_json::json!({
                 "peerId": peer,
-                "peerName": peer_name(&trust_store, peer),
+                "peerName": name,
                 "content": text,
             }),
         );
@@ -259,6 +415,19 @@ fn permission_prompt(
                 question: question.clone(),
                 answer,
             },
+        );
+        let what = match (question.detail.as_deref(), question.kind) {
+            (Some(file), _) => file,
+            (None, "text") => "some text",
+            (None, _) => "notifications",
+        };
+        notify_if_away(
+            &app_handle,
+            &format!(
+                "{} wants to send {what}",
+                shown_name(question.peer_name.clone())
+            ),
+            "Open Continue to allow or decline.",
         );
         let _ = app_handle.emit("permission-request", question);
 
@@ -310,7 +479,15 @@ fn session_state_listener(
     app_handle: AppHandle,
     trust_store: TrustStore,
 ) -> sessions::StateListener {
+    let connected = tray::Connected::default();
     Arc::new(move |peer, session_state| {
+        let is_connected = session_state == SessionState::Connected;
+        connected.update(
+            &app_handle,
+            peer,
+            peer_name(&trust_store, peer),
+            is_connected,
+        );
         let _ = app_handle.emit(
             "peer-state-changed",
             serde_json::json!({
@@ -318,7 +495,7 @@ fn session_state_listener(
                 "state": session_state.to_string(),
             }),
         );
-        if session_state == SessionState::Connected {
+        if is_connected {
             let _ = app_handle.emit(
                 "peer-connected",
                 serde_json::json!({
@@ -763,8 +940,83 @@ async fn send_clipboard_text(
     peer_fingerprint: String,
     text: String,
 ) -> Result<(), String> {
-    let mux = state
-        .sessions
+    push_text(
+        &state.sessions,
+        &state.trust_store,
+        &state.history,
+        peer_fingerprint,
+        text,
+    )
+    .await
+}
+
+/// Text copied here while sync is on, as the window lists it.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncedTextDto {
+    peer_id: String,
+    peer_name: String,
+    text: String,
+    failed: bool,
+}
+
+/// Sends what was just copied here to every connected device.
+fn send_copied_text(app: &AppHandle, text: String) {
+    let state = app.state::<DesktopRuntimeState>();
+    let (sessions, trust_store, history) = (
+        state.sessions.clone(),
+        state.trust_store.clone(),
+        state.history.clone(),
+    );
+    let peers = trust_store.list_peers().unwrap_or_default();
+    for peer in peers
+        .into_iter()
+        .filter(|p| sessions.get(&p.fingerprint).is_some())
+    {
+        let (app, sessions, trust_store, history, text) = (
+            app.clone(),
+            sessions.clone(),
+            trust_store.clone(),
+            history.clone(),
+            text.clone(),
+        );
+        tauri::async_runtime::spawn(async move {
+            let result = push_text(
+                &sessions,
+                &trust_store,
+                &history,
+                peer.fingerprint.clone(),
+                text.clone(),
+            )
+            .await;
+            let _ = app.emit(
+                "clipboard-synced",
+                SyncedTextDto {
+                    peer_id: peer.fingerprint,
+                    peer_name: peer.display_name,
+                    text,
+                    failed: result.is_err(),
+                },
+            );
+        });
+    }
+}
+
+/// Turns sending what's copied here on or off. The window says on start and on each change.
+#[tauri::command]
+fn set_clipboard_sync(state: State<DesktopRuntimeState>, enabled: bool) {
+    state.clipboard.set_enabled(enabled);
+}
+
+/// Sends text to a connected device and saves it to history.
+async fn push_text(
+    sessions: &SessionRegistry,
+    trust_store: &TrustStore,
+    history: &HistoryStore,
+    peer_fingerprint: String,
+    text: String,
+) -> Result<(), String> {
+    let mux = sessions
         .get(&peer_fingerprint)
         .ok_or_else(|| NOT_CONNECTED.to_string())?;
 
@@ -786,13 +1038,13 @@ async fn send_clipboard_text(
         )
         .await;
     remember(
-        &state.history,
+        history,
         history::Item {
             direction: Direction::Sent,
             kind: Kind::Text,
             size: text.len() as u64,
             label: text,
-            peer_name: peer_name(&state.trust_store, &peer_fingerprint),
+            peer_name: peer_name(trust_store, &peer_fingerprint),
             peer_fingerprint,
             failed: result.is_err(),
             location: None,
@@ -854,6 +1106,7 @@ fn initialize_desktop_runtime(
     db_path: &Path,
     secrets_dir: &Path,
     download_dir: PathBuf,
+    clipboard: ClipboardSync,
 ) -> Result<DesktopRuntimeState, Box<dyn std::error::Error>> {
     let trust_store = TrustStore::open(db_path)?;
     let permission_store = Arc::new(PermissionStore::open(db_path)?);
@@ -875,11 +1128,12 @@ fn initialize_desktop_runtime(
         local_fingerprint,
         transport_cert.clone(),
         session_handlers(
-            download_dir,
+            download_dir.clone(),
             permission_store.clone(),
             trust_store.clone(),
             pending_answers.clone(),
             history.clone(),
+            clipboard.clone(),
             app_handle,
         ),
         sessions::RegistryConfig::default(),
@@ -905,6 +1159,8 @@ fn initialize_desktop_runtime(
         sessions,
         pending_answers,
         history,
+        download_dir,
+        clipboard,
     })
 }
 
@@ -917,7 +1173,17 @@ fn main() {
         .init();
 
     tauri::Builder::default()
+        // Opening Continue again shows the one already running, which may be in the tray.
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            tray::show_window(app)
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![BACKGROUND_ARG]),
+        ))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let app_data = app
                 .path()
@@ -929,15 +1195,23 @@ fn main() {
             let secrets_dir = app_data.join("secrets");
             let _ = std::fs::create_dir_all(&secrets_dir);
 
+            let _ = std::fs::remove_dir_all(pasted_dir(app.handle()));
+
             let download_dir = app
                 .path()
                 .download_dir()
                 .unwrap_or_else(|_| app_data.join("downloads"));
             let _ = std::fs::create_dir_all(&download_dir);
 
-            let runtime_state =
-                initialize_desktop_runtime(app.handle(), &db_path, &secrets_dir, download_dir)
-                    .expect("Failed to initialize Continue desktop runtime engine");
+            let (clipboard, clipboard_watcher) = clipboard_sync::new();
+            let runtime_state = initialize_desktop_runtime(
+                app.handle(),
+                &db_path,
+                &secrets_dir,
+                download_dir,
+                clipboard,
+            )
+            .expect("Failed to initialize Continue desktop runtime engine");
 
             // quinn needs a running async runtime to open the endpoint, which `setup` doesn't have.
             let cert = runtime_state.transport_cert.clone();
@@ -964,6 +1238,16 @@ fn main() {
             });
 
             app.manage(runtime_state);
+            let handle = app.handle().clone();
+            clipboard_watcher.start(move |text| send_copied_text(&handle, text));
+
+            if let Err(error) = tray::create(app.handle()) {
+                tracing::warn!("No tray icon, so closing the window will quit: {error}");
+            }
+            start_at_login_by_default(app.handle(), &app_data);
+            if !std::env::args().any(|arg| arg == BACKGROUND_ARG) {
+                tray::show_window(app.handle());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -979,6 +1263,12 @@ fn main() {
             pending_permission_questions,
             get_history,
             clear_history,
+            open_received,
+            open_link,
+            set_clipboard_sync,
+            get_autostart,
+            set_autostart,
+            save_pasted_file,
             connect_to_peer,
             disconnect_peer,
             reconnect_peer,
@@ -986,6 +1276,14 @@ fn main() {
             send_clipboard_text,
             send_notification
         ])
+        // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
+        .on_window_event(|window, event| {
+            let in_tray = tray::exists(window.app_handle());
+            if let (tauri::WindowEvent::CloseRequested { api, .. }, true) = (event, in_tray) {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running Continue desktop application");
 }

@@ -47,6 +47,25 @@ export const getHistory = () => invoke<HistoryEntry[]>("get_history");
 
 export const clearHistory = () => invoke<void>("clear_history");
 
+/** Saves a pasted file to disk so it can be sent, and returns its path. */
+export const savePastedFile = async (file: File, name: string) =>
+  invoke<string>("save_pasted_file", new Uint8Array(await file.arrayBuffer()), {
+    headers: { "x-file-name": encodeURIComponent(name) },
+  });
+
+/** Turns sending what's copied on this computer on or off. */
+export const setClipboardSyncEnabled = (enabled: boolean) => invoke<void>("set_clipboard_sync", { enabled });
+
+export const getAutostart = () => invoke<boolean>("get_autostart");
+
+export const setAutostart = (enabled: boolean) => invoke<void>("set_autostart", { enabled });
+
+/** Opens a web link in the default browser. */
+export const openLink = (url: string) => invoke<void>("open_link", { url });
+
+/** Opens a received file, or with `reveal` shows it in its folder. */
+export const openReceived = (path: string, reveal: boolean) => invoke<void>("open_received", { path, reveal });
+
 export const answerPermission = (id: number, answer: PermissionAnswer) =>
   invoke<void>("answer_permission", { id, answer });
 

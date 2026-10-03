@@ -7,6 +7,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.continueapp.bridge.ContinueCoreBridge
 import org.continueapp.bridge.ContinueException
@@ -35,6 +38,10 @@ data class Transfer(
     val status: TransferStatus,
     /** Where a received file was saved, when it can be opened. */
     val uri: Uri? = null,
+    /** Unix time in milliseconds. */
+    val at: Long = System.currentTimeMillis(),
+    /** The whole text, for text that was sent or received. */
+    val text: String? = null,
 )
 
 /** What this phone has sent and received, newest first. The core saves it across restarts. */
@@ -74,10 +81,12 @@ class RecentTransfers(private val bridge: ContinueCoreBridge) {
         kind: TransferKind,
         label: String,
         peerName: String,
+        text: String? = null,
         send: suspend () -> String?,
     ): String? {
         val id = "live-${nextId++}"
-        items = (listOf(Transfer(id, kind, label, peerName, TransferStatus.Sending)) + items).take(RECENT_LIMIT)
+        val transfer = Transfer(id, kind, label, peerName, TransferStatus.Sending, text = text)
+        items = (listOf(transfer) + items).take(RECENT_LIMIT)
         val error = send()
         val status = if (error == null) TransferStatus.Sent else TransferStatus.Failed
         items = items.map { if (it.id == id) it.copy(status = status) else it }
@@ -88,9 +97,10 @@ class RecentTransfers(private val bridge: ContinueCoreBridge) {
         kind: TransferKind,
         label: String,
         peerName: String,
-        uri: Uri?,
+        uri: Uri? = null,
+        text: String? = null,
     ) {
-        val transfer = Transfer("live-${nextId++}", kind, label, peerName, TransferStatus.Received, uri)
+        val transfer = Transfer("live-${nextId++}", kind, label, peerName, TransferStatus.Received, uri, text = text)
         items = (listOf(transfer) + items).take(RECENT_LIMIT)
     }
 }
@@ -111,30 +121,50 @@ private fun HistoryEntry.toTransfer() =
                 else -> TransferStatus.Sent
             },
         uri = location?.takeIf { it.startsWith("content://") }?.let(Uri::parse),
+        at = at,
+        text = label.takeIf { isText },
     )
 
 /** Questions from devices set to Ask. The core asks one at a time. */
 class PermissionQuestions(private val bridge: ContinueCoreBridge) {
-    var current by mutableStateOf<PermissionQuestion?>(null)
-        private set
+    private var shown by mutableStateOf<PermissionQuestion?>(null)
 
-    /** Picks up questions from the core for as long as the caller keeps it running. */
-    suspend fun listen() {
-        while (true) {
-            val next = withContext(Dispatchers.IO) { bridge.nextPermissionQuestion(QUESTION_WAIT_MS) }
-            if (next != null && next.expiresAt > System.currentTimeMillis()) current = next
+    /** The question waiting for an answer, if there is one. */
+    val current: PermissionQuestion? get() = shown
+
+    /** Hears each new question, and null once it's answered or has run out of time. */
+    var onChange: (PermissionQuestion?) -> Unit = {}
+
+    /**
+     * Picks up questions from the core for as long as the caller keeps it running. Each one
+     * goes away when the core stops waiting for it.
+     */
+    suspend fun listen() =
+        coroutineScope {
+            while (true) {
+                val next = withContext(Dispatchers.IO) { bridge.nextPermissionQuestion(QUESTION_WAIT_MS) }
+                if (next != null && next.expiresAt > System.currentTimeMillis()) {
+                    show(next)
+                    launch {
+                        delay(next.expiresAt - System.currentTimeMillis())
+                        if (shown?.id == next.id) show(null)
+                    }
+                }
+            }
         }
+
+    /** Answers question [id]. An answer to a question that already went away is ignored. */
+    suspend fun answer(
+        id: Long,
+        answer: PermissionAnswer,
+    ) {
+        if (shown?.id == id) show(null)
+        withContext(Dispatchers.IO) { bridge.answerPermissionQuestion(id, answer) }
     }
 
-    suspend fun answer(answer: PermissionAnswer) {
-        val asked = current ?: return
-        current = null
-        withContext(Dispatchers.IO) { bridge.answerPermissionQuestion(asked.id, answer) }
-    }
-
-    /** Hides a question the core has stopped waiting on. */
-    fun dismiss(id: Long) {
-        if (current?.id == id) current = null
+    private fun show(question: PermissionQuestion?) {
+        shown = question
+        onChange(question)
     }
 }
 
@@ -146,6 +176,10 @@ class AppState(private val bridge: ContinueCoreBridge) {
     var peers by mutableStateOf<List<TrustedPeer>>(emptyList())
         private set
     var connected by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /** False until the core has been read once, so screens don't flash "nothing paired". */
+    var loaded by mutableStateOf(false)
         private set
     val recent = RecentTransfers(bridge)
     val questions = PermissionQuestions(bridge)
@@ -164,25 +198,30 @@ class AppState(private val bridge: ContinueCoreBridge) {
             } ?: return
         peers = latestPeers
         connected = latestConnected
+        loaded = true
     }
 
     /** Returns what to tell the user if pairing failed, or null once paired. */
     suspend fun pair(code: String): String? =
-        run("Something went wrong while pairing. Try again.") {
+        run("Pairing didn't work. Try again.") {
             bridge.pairFromQr(code)
         }
 
     suspend fun disconnect(peer: String): String? = run("Couldn't disconnect.") { bridge.disconnect(peer) }
 
-    suspend fun reconnect(peer: String): String? = run("Couldn't reconnect.") { bridge.reconnect(peer) }
+    suspend fun reconnect(peer: String): String? =
+        run("Couldn't connect. Check that both are on the same Wi-Fi.") { bridge.reconnect(peer) }
 
-    suspend fun forget(peer: String): String? = run("Couldn't forget this device.") { bridge.removeTrustedPeer(peer) }
+    suspend fun forget(peer: String): String? {
+        val failed = "Couldn't forget this computer. Try again."
+        return run(failed) { bridge.removeTrustedPeer(peer) }
+    }
 
     suspend fun sendText(
         peer: TrustedPeer,
         text: String,
     ): String? =
-        recent.track(TransferKind.Text, firstLine(text), peer.displayName) {
+        recent.track(TransferKind.Text, firstLine(text), peer.displayName, text) {
             run("Couldn't send the text.") { bridge.sendClipboardText(peer.fingerprint, text) }
         }
 
@@ -225,7 +264,7 @@ class AppState(private val bridge: ContinueCoreBridge) {
         peer: String,
         capability: Int,
         grant: PermissionGrant,
-    ): String? = run("Couldn't change the permission.") { bridge.setPermission(peer, capability, grant.rawValue) }
+    ): String? = run("Couldn't save that change. Try again.") { bridge.setPermission(peer, capability, grant.rawValue) }
 
     private suspend fun run(
         fallback: String,

@@ -134,7 +134,7 @@ private fun NoDevices(onPair: () -> Unit) {
         DeviceGlyph(Icons.Outlined.Laptop, active = false)
         Text("Pair with your computer", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "Open Continue on your computer, choose Pair Device, and scan the code it shows.",
+            "Open Continue on your computer, click Pair a device, and scan the code it shows.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

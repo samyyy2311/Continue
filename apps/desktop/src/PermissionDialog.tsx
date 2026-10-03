@@ -73,6 +73,7 @@ function QuestionDialog({ question, onAnswered }: { question: PermissionQuestion
   useEffect(() => {
     const dialog = ref.current;
     dialog?.showModal();
+    dialog?.focus();
     return () => dialog?.close();
   }, []);
 
@@ -85,6 +86,7 @@ function QuestionDialog({ question, onAnswered }: { question: PermissionQuestion
     <dialog
       ref={ref}
       className="dialog dialog-small"
+      tabIndex={-1}
       aria-labelledby="permission-title"
       aria-describedby="permission-body"
       onCancel={(event) => {

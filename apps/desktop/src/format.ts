@@ -20,7 +20,34 @@ export function formatRelativeTime(timestamp: number, now = Date.now()): string 
   if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours} h ago`;
-  return new Date(timestamp).toLocaleDateString();
+  const date = new Date(timestamp);
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  const sameYear = date.getFullYear() === new Date(now).getFullYear();
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: sameYear ? undefined : "numeric" });
+}
+
+/** A heading for the day something happened: Today, Yesterday, or the date. */
+export function dayLabel(timestamp: number, now = Date.now()): string {
+  const day = new Date(timestamp).toDateString();
+  if (day === new Date(now).toDateString()) return "Today";
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (day === yesterday.toDateString()) return "Yesterday";
+  return new Date(timestamp).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+}
+
+/** The web link, if the text is nothing but one. */
+export function linkIn(text: string): string | null {
+  const trimmed = text.trim();
+  if (/\s/.test(trimmed)) return null;
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 export type FileCategory = "image" | "video" | "audio" | "archive" | "code" | "document" | "other";
