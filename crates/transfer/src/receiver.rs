@@ -16,9 +16,13 @@ use crate::error::TransferError;
 use crate::hex::hex_encode;
 use crate::sanitizer::sanitize_filename;
 
+/// Told to the sender when the receiver stops a transfer part way.
+const CANCELLED_CODE: u32 = 1;
+
 /// Result of a completed and verified incoming file transfer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceivedFile {
+    pub transfer_id: String,
     pub path: PathBuf,
     pub file_name: String,
     pub bytes_received: u64,
@@ -27,18 +31,22 @@ pub struct ReceivedFile {
 /// Receive an incoming file transfer over a dedicated QUIC bidirectional stream.
 ///
 /// `permission_checker` sees the request before anything is written and may take its time,
-/// e.g. to ask the user; the sender waits for the answer.
-pub async fn receive_file<P, Fut, F>(
+/// e.g. to ask the user; the sender waits for the answer. Once accepted, `on_progress` hears
+/// how many bytes have arrived, starting at 0. When `stop` finishes first, the transfer is
+/// abandoned, the partial file removed and the sender told.
+pub async fn receive_file<P, Fut, F, S>(
     send_stream: &mut quinn::SendStream,
     recv_stream: &mut quinn::RecvStream,
     destination_dir: &Path,
     permission_checker: Option<P>,
     on_progress: Option<F>,
+    stop: S,
 ) -> Result<ReceivedFile, TransferError>
 where
     P: FnOnce(&FileTransferRequest) -> Fut,
     Fut: Future<Output = bool>,
-    F: Fn(u64, u64),
+    F: Fn(&FileTransferRequest, u64),
+    S: Future<Output = ()>,
 {
     let req: FileTransferRequest = read_msg(recv_stream, MAX_FRAME_TRANSFER_META_BYTES).await?;
 
@@ -79,12 +87,15 @@ where
         reason: String::new(),
     };
     write_msg(send_stream, &resp, MAX_FRAME_TRANSFER_META_BYTES).await?;
+    if let Some(ref progress) = on_progress {
+        progress(&req, 0);
+    }
 
     let mut hasher = Sha256::new();
     let mut total_received = 0u64;
     let mut chunk = vec![0u8; TRANSFER_CHUNK_BYTES];
 
-    let stream_result: Result<(), TransferError> = async {
+    let copy = async {
         loop {
             match recv_stream.read(&mut chunk).await? {
                 Some(n) if n > 0 => {
@@ -92,7 +103,7 @@ where
                     hasher.update(&chunk[..n]);
                     total_received += n as u64;
                     if let Some(ref progress) = on_progress {
-                        progress(total_received, req.file_size);
+                        progress(&req, total_received);
                     }
                 }
                 _ => break,
@@ -100,8 +111,14 @@ where
         }
         part_file.flush().await?;
         Ok(())
+    };
+    let stream_result: Result<(), TransferError> = tokio::select! {
+        result = copy => result,
+        () = stop => Err(TransferError::Cancelled),
+    };
+    if matches!(stream_result, Err(TransferError::Cancelled)) {
+        let _ = recv_stream.stop(quinn::VarInt::from_u32(CANCELLED_CODE));
     }
-    .await;
 
     // Drop handle before renaming or deleting to release file lock on Windows.
     drop(part_file);
@@ -144,13 +161,14 @@ where
     tokio::fs::rename(&part_path, &target_path).await?;
 
     let ack = FileTransferAck {
-        transfer_id: req.transfer_id,
+        transfer_id: req.transfer_id.clone(),
         bytes_received: total_received,
         verified: true,
     };
     write_msg(send_stream, &ack, MAX_FRAME_TRANSFER_META_BYTES).await?;
 
     Ok(ReceivedFile {
+        transfer_id: req.transfer_id,
         path: target_path,
         file_name: clean_name,
         bytes_received: total_received,
