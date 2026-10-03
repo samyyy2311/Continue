@@ -1,8 +1,13 @@
 package org.continueapp.bridge
 
 import org.continueapp.bridge.ffi.ContinueFfiException
+import org.continueapp.bridge.ffi.PermissionDecisionFfi
+import org.continueapp.bridge.ffi.PermissionRequestFfi
 import org.continueapp.bridge.ffi.TrustedPeerFfi
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit.MILLISECONDS
+import org.continueapp.bridge.ffi.answerPermissionRequest as coreAnswerPermissionRequest
 import org.continueapp.bridge.ffi.awaitPairingResult as coreAwaitPairingResult
 import org.continueapp.bridge.ffi.cancelPairing as coreCancelPairing
 import org.continueapp.bridge.ffi.connectToPeer as coreConnectToPeer
@@ -14,6 +19,7 @@ import org.continueapp.bridge.ffi.getDeviceSpkiHash as coreGetDeviceSpkiHash
 import org.continueapp.bridge.ffi.initCore as coreInitCore
 import org.continueapp.bridge.ffi.isPeerConnected as coreIsPeerConnected
 import org.continueapp.bridge.ffi.listTrustedPeers as coreListTrustedPeers
+import org.continueapp.bridge.ffi.nextPermissionRequest as coreNextPermissionRequest
 import org.continueapp.bridge.ffi.pairFromQr as corePairFromQr
 import org.continueapp.bridge.ffi.queryPermission as coreQueryPermission
 import org.continueapp.bridge.ffi.reconnect as coreReconnect
@@ -78,6 +84,17 @@ interface ContinueCoreBridge {
         capabilityId: Int,
     )
 
+    /**
+     * Waits up to [timeoutMs] for the next question for the user, or returns null. The core
+     * declines a question nobody answers within 30 seconds.
+     */
+    fun nextPermissionQuestion(timeoutMs: Long): PermissionQuestion?
+
+    fun answerPermissionQuestion(
+        id: Long,
+        answer: PermissionAnswer,
+    )
+
     fun connectToPeer(
         peerFingerprint: String,
         endpoint: String,
@@ -121,6 +138,13 @@ class MockContinueCoreBridge : ContinueCoreBridge {
     private val peers = ConcurrentHashMap<String, TrustedPeer>()
     private val permissions = ConcurrentHashMap<String, String>()
     private val connectedPeers = ConcurrentHashMap<String, String>()
+    private val questions = LinkedBlockingQueue<PermissionQuestion>()
+    val answers = ConcurrentHashMap<Long, PermissionAnswer>()
+
+    /** Puts a question to the app as a device set to Ask would. */
+    fun ask(question: PermissionQuestion) {
+        questions.put(question)
+    }
 
     override fun initCore(dbPath: String) {
         initialized = true
@@ -236,6 +260,15 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         permissions.remove(key)
     }
 
+    override fun nextPermissionQuestion(timeoutMs: Long): PermissionQuestion? = questions.poll(timeoutMs, MILLISECONDS)
+
+    override fun answerPermissionQuestion(
+        id: Long,
+        answer: PermissionAnswer,
+    ) {
+        answers[id] = answer
+    }
+
     override fun connectToPeer(
         peerFingerprint: String,
         endpoint: String,
@@ -339,6 +372,21 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
         capabilityId: Int,
     ) = native { coreRevokePermission(peerFingerprint, capabilityId.toUInt()) }
 
+    override fun nextPermissionQuestion(timeoutMs: Long): PermissionQuestion? =
+        coreNextPermissionRequest(timeoutMs.toUInt())?.toPermissionQuestion()
+
+    override fun answerPermissionQuestion(
+        id: Long,
+        answer: PermissionAnswer,
+    ) = coreAnswerPermissionRequest(
+        id.toULong(),
+        when (answer) {
+            PermissionAnswer.ALLOW -> PermissionDecisionFfi.ALLOW
+            PermissionAnswer.ALWAYS_ALLOW -> PermissionDecisionFfi.ALWAYS_ALLOW
+            PermissionAnswer.DECLINE -> PermissionDecisionFfi.DECLINE
+        },
+    )
+
     override fun connectToPeer(
         peerFingerprint: String,
         endpoint: String,
@@ -373,6 +421,15 @@ private fun TrustedPeerFfi.toTrustedPeer() =
         fingerprint = fingerprint,
         displayName = displayName,
         pairedAt = pairedAt.toLong(),
+    )
+
+private fun PermissionRequestFfi.toPermissionQuestion() =
+    PermissionQuestion(
+        id = id.toLong(),
+        peerFingerprint = peerFingerprint,
+        peerName = peerName,
+        capability = Capability.fromId(capabilityId.toInt()),
+        detail = detail,
     )
 
 /** Runs a core call, turning its errors into the bridge's own exception types. */

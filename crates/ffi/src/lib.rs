@@ -6,15 +6,17 @@
 
 uniffi::include_scaffolding!("continue");
 
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex, RwLock};
+use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::time::Duration;
 use thiserror::Error;
 
 use identity::{FileSecretStore, IdentitySigner};
 use pairing::{DeviceKeys, InitiatorPairing, ReplayCache, TrustStore, TrustedPeer};
 use permissions::{PermissionStore, PersistedGrant};
 use protocol::CapabilityId;
-use sessions::{SessionMultiplexer, SessionRegistry, SessionState};
+use sessions::{PermissionDecision, SessionMultiplexer, SessionRegistry, SessionState};
 use transport::{DialConfig, TransportCertificate};
 
 #[derive(Debug, Error)]
@@ -59,6 +61,96 @@ struct CoreState {
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
+
+/// Something a device set to Ask wants to send, for the app to put to the user.
+pub struct PermissionRequestFfi {
+    pub id: u64,
+    pub peer_fingerprint: String,
+    pub peer_name: String,
+    pub capability_id: u32,
+    /// The file name, for files.
+    pub detail: Option<String>,
+}
+
+pub enum PermissionDecisionFfi {
+    Allow,
+    AlwaysAllow,
+    Decline,
+}
+
+/// Questions waiting for the app to pick up, and the answers the core is waiting on. Kept
+/// outside `CORE` so waiting for a question never holds up other calls.
+struct Questions {
+    waiting: Mutex<VecDeque<PermissionRequestFfi>>,
+    arrived: Condvar,
+    answers: Mutex<BTreeMap<u64, tokio::sync::oneshot::Sender<PermissionDecision>>>,
+    next_id: AtomicU64,
+}
+
+static QUESTIONS: Questions = Questions {
+    waiting: Mutex::new(VecDeque::new()),
+    arrived: Condvar::new(),
+    answers: Mutex::new(BTreeMap::new()),
+    next_id: AtomicU64::new(0),
+};
+
+fn permission_prompt(trust_store: TrustStore) -> sessions::PermissionPrompt {
+    Arc::new(move |request| {
+        let (answer, decision) = tokio::sync::oneshot::channel();
+        let id = QUESTIONS.next_id.fetch_add(1, Ordering::Relaxed);
+        QUESTIONS.answers.lock().unwrap().insert(id, answer);
+        let peer_name = trust_store
+            .get_peer(&request.peer)
+            .ok()
+            .flatten()
+            .map(|p| p.display_name)
+            .unwrap_or_default();
+        QUESTIONS
+            .waiting
+            .lock()
+            .unwrap()
+            .push_back(PermissionRequestFfi {
+                id,
+                peer_fingerprint: request.peer,
+                peer_name,
+                capability_id: request.capability.raw(),
+                detail: request.detail,
+            });
+        QUESTIONS.arrived.notify_all();
+
+        // The core stops waiting after PROMPT_TIMEOUT; drop the question then too.
+        tokio::spawn(async move {
+            tokio::time::sleep(sessions::PROMPT_TIMEOUT).await;
+            QUESTIONS.answers.lock().unwrap().remove(&id);
+            QUESTIONS.waiting.lock().unwrap().retain(|q| q.id != id);
+        });
+        decision
+    })
+}
+
+/// Waits up to `timeout_ms` for the next question for the user.
+pub fn next_permission_request(timeout_ms: u32) -> Option<PermissionRequestFfi> {
+    let waiting = QUESTIONS.waiting.lock().unwrap();
+    let (mut waiting, _) = QUESTIONS
+        .arrived
+        .wait_timeout_while(waiting, Duration::from_millis(timeout_ms.into()), |q| {
+            q.is_empty()
+        })
+        .unwrap();
+    waiting.pop_front()
+}
+
+/// Answers a question from `next_permission_request`. Late answers are ignored.
+pub fn answer_permission_request(id: u64, decision: PermissionDecisionFfi) {
+    let decision = match decision {
+        PermissionDecisionFfi::Allow => PermissionDecision::Allow,
+        PermissionDecisionFfi::AlwaysAllow => PermissionDecision::AlwaysAllow,
+        PermissionDecisionFfi::Decline => PermissionDecision::Decline,
+    };
+    if let Some(waiting) = QUESTIONS.answers.lock().unwrap().remove(&id) {
+        let _ = waiting.send(decision);
+    }
+}
 
 pub struct TrustedPeerFfi {
     pub fingerprint: String,
@@ -113,7 +205,9 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
     let sessions = SessionRegistry::new(
         local_fingerprint,
         transport_cert.clone(),
-        sessions::SessionCapabilityHandlers::new(download_dir),
+        sessions::SessionCapabilityHandlers::new(download_dir)
+            .with_permission_store(Arc::new(permission_store.clone()))
+            .with_permission_prompt(permission_prompt(trust_store.clone())),
         sessions::RegistryConfig::default(),
         Some(Arc::new(move |peer, session_state| {
             if matches!(
@@ -750,4 +844,36 @@ fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
         let _ = write!(&mut s, "{:02x}", b);
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // One test, since the question queue is shared by the whole process.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn questions_reach_the_app_and_answers_reach_the_core() {
+        let none = tokio::task::spawn_blocking(|| next_permission_request(10))
+            .await
+            .unwrap();
+        assert!(none.is_none());
+
+        let prompt = permission_prompt(TrustStore::in_memory().unwrap());
+        let decision = prompt(sessions::PermissionRequest {
+            peer: "phone".to_string(),
+            capability: CapabilityId::FILE_TRANSFER,
+            detail: Some("photo.jpg".to_string()),
+        });
+
+        let question = tokio::task::spawn_blocking(|| next_permission_request(1000))
+            .await
+            .unwrap()
+            .expect("a question");
+        assert_eq!(question.peer_fingerprint, "phone");
+        assert_eq!(question.capability_id, CapabilityId::FILE_TRANSFER.raw());
+        assert_eq!(question.detail.as_deref(), Some("photo.jpg"));
+
+        answer_permission_request(question.id, PermissionDecisionFfi::AlwaysAllow);
+        assert_eq!(decision.await.unwrap(), PermissionDecision::AlwaysAllow);
+    }
 }

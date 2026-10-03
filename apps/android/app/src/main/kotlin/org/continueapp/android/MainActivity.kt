@@ -45,6 +45,7 @@ import org.continueapp.android.ui.screens.DeviceScreen
 import org.continueapp.android.ui.screens.DevicesScreen
 import org.continueapp.android.ui.screens.HomeScreen
 import org.continueapp.android.ui.screens.PairScreen
+import org.continueapp.android.ui.screens.PermissionPrompts
 import org.continueapp.android.ui.screens.SettingsScreen
 import org.continueapp.android.ui.theme.ContinueTheme
 
@@ -123,6 +124,7 @@ private fun ContinueApp(
             delay(REFRESH_INTERVAL_MS)
         }
     }
+    PermissionPrompts(state.questions)
     BackHandler(enabled = overlay != null) { overlay = null }
 
     Scaffold(

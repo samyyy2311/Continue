@@ -10,13 +10,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.continueapp.bridge.ContinueCoreBridge
 import org.continueapp.bridge.ContinueException
+import org.continueapp.bridge.PermissionAnswer
 import org.continueapp.bridge.PermissionGrant
+import org.continueapp.bridge.PermissionQuestion
 import org.continueapp.bridge.TrustedPeer
 import java.io.File
 import java.io.IOException
 import java.util.UUID
 
 private const val RECENT_LIMIT = 20
+private const val QUESTION_WAIT_MS = 1_000L
 
 enum class TransferKind { File, Text }
 
@@ -53,6 +56,30 @@ class RecentTransfers {
     }
 }
 
+/** Questions from devices set to Ask. The core asks one at a time. */
+class PermissionQuestions(private val bridge: ContinueCoreBridge) {
+    var current by mutableStateOf<PermissionQuestion?>(null)
+        private set
+
+    /** Picks up questions from the core for as long as the caller keeps it running. */
+    suspend fun listen() {
+        while (true) {
+            withContext(Dispatchers.IO) { bridge.nextPermissionQuestion(QUESTION_WAIT_MS) }?.let { current = it }
+        }
+    }
+
+    suspend fun answer(answer: PermissionAnswer) {
+        val asked = current ?: return
+        current = null
+        withContext(Dispatchers.IO) { bridge.answerPermissionQuestion(asked.id, answer) }
+    }
+
+    /** Hides a question the core has stopped waiting on. */
+    fun dismiss(id: Long) {
+        if (current?.id == id) current = null
+    }
+}
+
 /**
  * What the screens show, read from the core. Every call into the core runs off the main
  * thread, and failures come back as a message to show rather than an exception.
@@ -63,6 +90,7 @@ class AppState(private val bridge: ContinueCoreBridge) {
     var connected by mutableStateOf<Set<String>>(emptySet())
         private set
     val recent = RecentTransfers()
+    val questions = PermissionQuestions(bridge)
 
     /** Keeps what's on screen if the core can't be read this time; the next refresh tries again. */
     suspend fun refresh() {
