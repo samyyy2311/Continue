@@ -90,8 +90,8 @@ fn handlers_with(
     prompt: Option<PermissionPrompt>,
 ) -> (SessionCapabilityHandlers, PathBuf) {
     let downloads = scratch_dir();
-    let mut handlers = SessionCapabilityHandlers::new(&downloads)
-        .with_permission_store(Arc::new(store.clone()));
+    let mut handlers =
+        SessionCapabilityHandlers::new(&downloads).with_permission_store(Arc::new(store.clone()));
     if let Some(prompt) = prompt {
         handlers = handlers.with_permission_prompt(prompt);
     }
