@@ -60,6 +60,9 @@ namespace continue {
     void disconnect(string peer_fingerprint);
 
     [Throws=ContinueFfiError]
+    void reconnect(string peer_fingerprint);
+
+    [Throws=ContinueFfiError]
     u64 send_file(string peer_fingerprint, string file_path);
 
     [Throws=ContinueFfiError]

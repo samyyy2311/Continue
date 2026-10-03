@@ -13,15 +13,6 @@ export function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
 
-/** `pairedAt` is stored by the backend in Unix seconds. */
-export function formatPairedDate(pairedAt: number): string {
-  return new Date(pairedAt * 1000).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
 export function formatRelativeTime(timestamp: number, now = Date.now()): string {
   const seconds = Math.round((now - timestamp) / 1000);
   if (seconds < 45) return "just now";

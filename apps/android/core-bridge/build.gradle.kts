@@ -10,7 +10,7 @@ val rustLibsDir = layout.buildDirectory.dir("rustJniLibs")
 
 android {
     namespace = "org.continueapp.bridge"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         minSdk = 26

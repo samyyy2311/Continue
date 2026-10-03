@@ -2,157 +2,204 @@ package org.continueapp.android
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ShortNavigationBar
+import androidx.compose.material3.ShortNavigationBarItem
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.continueapp.android.ui.screens.AppearanceSettings
+import org.continueapp.android.ui.screens.DeviceScreen
 import org.continueapp.android.ui.screens.DevicesScreen
-import org.continueapp.android.ui.screens.PermissionsScreen
-import org.continueapp.android.ui.screens.TransfersScreen
+import org.continueapp.android.ui.screens.HomeScreen
+import org.continueapp.android.ui.screens.PairScreen
+import org.continueapp.android.ui.screens.SettingsScreen
 import org.continueapp.android.ui.theme.ContinueTheme
-import org.continueapp.android.ui.theme.Slate800
-import org.continueapp.android.ui.theme.Slate900
-import org.continueapp.bridge.ContinueCoreBridge
-import org.continueapp.bridge.ContinueException
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        val bridge = (application as ContinueApplication).coreBridge
+        val app = application as ContinueApplication
+        val state = AppState(app.coreBridge)
 
         setContent {
-            ContinueTheme {
-                MainAppContent(bridge = bridge)
+            var themeMode by remember { mutableStateOf(app.themeMode) }
+            var wallpaperColors by remember { mutableStateOf(app.wallpaperColors) }
+            var visible by remember { mutableStateOf(app.visible) }
+            val appearance =
+                AppearanceSettings(
+                    themeMode = themeMode,
+                    wallpaperColors = wallpaperColors,
+                    onThemeModeChange = {
+                        themeMode = it
+                        app.themeMode = it
+                    },
+                    onWallpaperColorsChange = {
+                        wallpaperColors = it
+                        app.wallpaperColors = it
+                    },
+                )
+            ContinueTheme(mode = themeMode, wallpaperColors = wallpaperColors) {
+                ContinueApp(
+                    state = state,
+                    visible = visible,
+                    onVisibleChange = {
+                        visible = it
+                        app.visible = it
+                    },
+                    appearance = appearance,
+                )
             }
         }
     }
 }
 
-private const val TAB_DEVICES = 0
-private const val TAB_TRANSFERS = 1
-private const val TAB_PERMISSIONS = 2
+private enum class Tab(val label: String, val selectedIcon: ImageVector, val icon: ImageVector) {
+    Home("Home", Icons.Filled.Home, Icons.Outlined.Home),
+    Devices("Devices", Icons.Filled.Devices, Icons.Outlined.Devices),
+    Settings("Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
+}
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** A screen shown over the tabs, closed with back. */
+private sealed interface Overlay {
+    data object Pair : Overlay
+
+    data class Device(val fingerprint: String) : Overlay
+}
+
+private const val REFRESH_INTERVAL_MS = 2_000L
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun MainAppContent(bridge: ContinueCoreBridge) {
-    var selectedTab by remember { mutableIntStateOf(TAB_DEVICES) }
-    var peers by remember { mutableStateOf(bridge.listTrustedPeers()) }
+private fun ContinueApp(
+    state: AppState,
+    visible: Boolean,
+    onVisibleChange: (Boolean) -> Unit,
+    appearance: AppearanceSettings,
+) {
+    var tab by remember { mutableStateOf(Tab.Home) }
+    var overlay by remember { mutableStateOf<Overlay?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val showMessage: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
 
-    val fingerprint =
-        remember {
-            try {
-                bridge.getDeviceFingerprint()
-            } catch (_: Exception) {
-                "device-fingerprint-unknown"
-            }
+    // The core has no connection events yet, so connection state is read on a short interval.
+    LaunchedEffect(Unit) {
+        while (true) {
+            state.refresh()
+            delay(REFRESH_INTERVAL_MS)
         }
-
-    val spkiHash =
-        remember {
-            try {
-                bridge.getDeviceSpkiHash()
-            } catch (_: Exception) {
-                "device-spki-unknown"
-            }
-        }
-
-    val handlePair: suspend (String) -> String? = { code ->
-        val error = withContext(Dispatchers.IO) { pairingError { bridge.pairFromQr(code) } }
-        if (error == null) {
-            peers = bridge.listTrustedPeers()
-        }
-        error
     }
-
-    val handleRemovePeer: (String) -> Unit = { fp ->
-        bridge.removeTrustedPeer(fp)
-        peers = bridge.listTrustedPeers()
-    }
+    BackHandler(enabled = overlay != null) { overlay = null }
 
     Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = Slate900,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "Continue",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        color = Color.White,
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Slate800),
-            )
-        },
-        bottomBar = {
-            NavigationBar(containerColor = Slate800) {
-                NavigationBarItem(
-                    selected = selectedTab == TAB_DEVICES,
-                    onClick = { selectedTab = TAB_DEVICES },
-                    label = { Text("Devices") },
-                    icon = { Text("📱") },
-                )
-                NavigationBarItem(
-                    selected = selectedTab == TAB_TRANSFERS,
-                    onClick = { selectedTab = TAB_TRANSFERS },
-                    label = { Text("Transfers") },
-                    icon = { Text("📁") },
-                )
-                NavigationBarItem(
-                    selected = selectedTab == TAB_PERMISSIONS,
-                    onClick = { selectedTab = TAB_PERMISSIONS },
-                    label = { Text("Permissions") },
-                    icon = { Text("🔒") },
+        containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbar) },
+        floatingActionButton = {
+            if (overlay == null && tab != Tab.Settings) {
+                ExtendedFloatingActionButton(
+                    onClick = { overlay = Overlay.Pair },
+                    icon = { Icon(Icons.Outlined.QrCodeScanner, contentDescription = null) },
+                    text = { Text("Pair") },
                 )
             }
         },
-    ) { innerPadding ->
-        val screenModifier = Modifier.padding(innerPadding)
-        when (selectedTab) {
-            TAB_DEVICES ->
-                DevicesScreen(
-                    deviceFingerprint = fingerprint,
-                    deviceSpkiHash = spkiHash,
-                    peers = peers,
-                    onPair = handlePair,
-                    onRemovePeer = handleRemovePeer,
-                    modifier = screenModifier,
-                )
-            TAB_TRANSFERS -> TransfersScreen(modifier = screenModifier)
-            TAB_PERMISSIONS -> PermissionsScreen(modifier = screenModifier)
+        bottomBar = {
+            if (overlay == null) {
+                ShortNavigationBar {
+                    Tab.entries.forEach { item ->
+                        ShortNavigationBarItem(
+                            selected = tab == item,
+                            onClick = { tab = item },
+                            icon = {
+                                Icon(if (tab == item) item.selectedIcon else item.icon, contentDescription = null)
+                            },
+                            label = { Text(item.label) },
+                        )
+                    }
+                }
+            }
+        },
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+            val content = Modifier.fillMaxSize().widthIn(max = 840.dp)
+            when (val current = overlay) {
+                Overlay.Pair ->
+                    PairScreen(onPair = state::pair, onDone = { overlay = null }, modifier = content)
+                is Overlay.Device -> {
+                    val peer = state.peers.firstOrNull { it.fingerprint == current.fingerprint }
+                    if (peer == null) {
+                        // The device was forgotten, possibly from the other side.
+                        LaunchedEffect(Unit) { overlay = null }
+                    } else {
+                        DeviceScreen(
+                            state = state,
+                            peer = peer,
+                            onBack = { overlay = null },
+                            onMessage = showMessage,
+                            modifier = content,
+                        )
+                    }
+                }
+                null ->
+                    when (tab) {
+                        Tab.Home ->
+                            HomeScreen(
+                                state = state,
+                                visible = visible,
+                                onPair = { overlay = Overlay.Pair },
+                                onOpenSettings = { tab = Tab.Settings },
+                                onMessage = showMessage,
+                                modifier = content,
+                            )
+                        Tab.Devices ->
+                            DevicesScreen(
+                                state = state,
+                                onOpenDevice = { overlay = Overlay.Device(it) },
+                                modifier = content,
+                            )
+                        Tab.Settings ->
+                            SettingsScreen(
+                                visible = visible,
+                                onVisibleChange = onVisibleChange,
+                                appearance = appearance,
+                                modifier = content,
+                            )
+                    }
+            }
         }
     }
 }
-
-private fun pairingError(attempt: () -> Unit): String? =
-    try {
-        attempt()
-        null
-    } catch (e: ContinueException) {
-        when (e) {
-            is ContinueException.InvalidQrException -> "That isn't a Continue pairing code."
-            is ContinueException.PairingTimeoutException -> "Pairing took too long. Try again."
-            is ContinueException.PairingFailedException ->
-                "Couldn't pair. Check that both devices are on the same Wi-Fi and try again."
-            else -> "Something went wrong while pairing. Try again."
-        }
-    }

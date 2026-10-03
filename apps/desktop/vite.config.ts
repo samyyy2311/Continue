@@ -11,6 +11,10 @@ export default defineConfig({
     hmr: {
       overlay: false,
     },
+    // The desktop shares Instrument Sans with the Android app instead of keeping a copy.
+    fs: {
+      allow: [".", "../android/app/src/main/res/font"],
+    },
   },
   test: {
     globals: true,

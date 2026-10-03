@@ -15,7 +15,6 @@ members = [
     "crates/notifications",
     "crates/ffi",
     "tests/peer",
-    "tools/keygen",
 ]
 resolver = "2"
 # The Tauri app builds on its own; it needs system WebKit libraries the core crates do not.

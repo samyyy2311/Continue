@@ -26,6 +26,9 @@ export const connectToPeer = (peerFingerprint: string, endpoint: string) =>
 export const disconnectPeer = (peerFingerprint: string) =>
   invoke<void>("disconnect_peer", { peerFingerprint });
 
+export const reconnectPeer = (peerFingerprint: string) =>
+  invoke<void>("reconnect_peer", { peerFingerprint });
+
 export const getPermissions = (peerFingerprint: string) =>
   invoke<PeerPermission[]>("get_permissions", { peerFingerprint });
 

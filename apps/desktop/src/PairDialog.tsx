@@ -4,7 +4,6 @@
 import React, { useEffect, useState } from "react";
 import { Check, Copy, Loader, QrCode, Smartphone, X } from "lucide-react";
 import { renderSVG } from "uqr";
-import { isTauri } from "@tauri-apps/api/core";
 import {
   cancelPairing,
   errorMessage,
@@ -56,8 +55,8 @@ export function PairDialog({ onPaired, onClose }: PairDialogProps) {
       >
         <header className="dialog-header">
           <div>
-            <h2 id="pair-dialog-title" className="dialog-title">Pair a Device</h2>
-            <p className="dialog-subtitle">Connect your phone or PC over your local network</p>
+            <h2 id="pair-dialog-title" className="dialog-title">Pair a device</h2>
+            <p className="dialog-subtitle">Both devices need to be on the same Wi-Fi.</p>
           </div>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close dialog">
             <X size={18} />
@@ -73,7 +72,7 @@ export function PairDialog({ onPaired, onClose }: PairDialogProps) {
             onClick={() => setMode("show")}
           >
             <QrCode size={15} />
-            Scan QR Code
+            Show code
           </button>
           <button
             type="button"
@@ -83,7 +82,7 @@ export function PairDialog({ onPaired, onClose }: PairDialogProps) {
             onClick={() => setMode("enter")}
           >
             <Smartphone size={15} />
-            Enter Remote Code
+            Enter code
           </button>
         </div>
 
@@ -100,10 +99,6 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
 
   useEffect(() => {
     let active = true;
-    if (!isTauri()) {
-      setState({ status: "waiting", code: "continue://pair?v=1&addr=192.168.1.50:4433&fp=e49a:21fc:87aa" });
-      return;
-    }
 
     const unlisteners = Promise.all([
       onPairingCompleted((peer) => active && onPaired(peer)),
@@ -145,21 +140,17 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
         <ol className="step-list">
           <li>
             <span className="step-number">1</span>
-            <span>Open <strong>Continue</strong> on your mobile device</span>
+            <span>Open <strong>Continue</strong> on your phone</span>
           </li>
           <li>
             <span className="step-number">2</span>
-            <span>Tap <strong>Pair a Device</strong></span>
+            <span>Tap <strong>Scan code</strong></span>
           </li>
           <li>
             <span className="step-number">3</span>
-            <span>Scan this QR code with the camera</span>
+            <span>Point the camera at this code</span>
           </li>
         </ol>
-
-        <div className="pair-notice">
-          Ensure both devices are connected to the same local Wi-Fi or subnet.
-        </div>
 
         <div className="pair-actions">
           <button
@@ -169,19 +160,19 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
             onClick={() => state.status === "waiting" && copyCode(state.code)}
           >
             {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
-            {copied ? "Copied to Clipboard" : "Copy Code as Text"}
+            {copied ? "Copied" : "Copy code as text"}
           </button>
         </div>
 
         <div className="pair-status-bar" role="status">
           {state.status === "waiting" ? (
-            <span className="pulse-indicator">
-              <span className="pulse-dot" />
-              Waiting for device to connect...
+            <span className="waiting">
+              <span className="waiting-dot" />
+              Waiting for your phone
             </span>
           ) : (
             <span className="text-muted">
-              <Loader size={14} className="spin inline-icon" /> Generating pairing session...
+              <Loader size={14} className="spin inline-icon" /> Getting a code ready
             </span>
           )}
         </div>
@@ -198,7 +189,7 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
         ) : (
           <div className="qr-loading">
             <Loader size={24} className="spin text-accent" />
-            <span>Generating QR code...</span>
+            <span>Getting a code ready</span>
           </div>
         )}
       </div>
@@ -217,16 +208,6 @@ function EnterCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
     setPending(true);
     setError("");
     try {
-      if (!isTauri()) {
-        onPaired({
-          displayName: "Paired Phone",
-          fingerprint: "a1b2:c3d4:e5f6:7890",
-          pairedAt: Math.floor(Date.now() / 1000),
-          isConnected: true,
-          endpoint: "192.168.1.55:4433",
-        });
-        return;
-      }
       const peer = await pairFromCode(code.trim());
       onPaired(peer);
     } catch (err) {
@@ -238,16 +219,16 @@ function EnterCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
   return (
     <form className="enter-code-form" onSubmit={submit}>
       <p className="field-desc">
-        If you generated a pairing code on your other device, paste or enter it here to link.
+        Got a code from your other device? Paste it here.
       </p>
       <label className="field-block">
-        <span className="field-label">Pairing Code Payload</span>
+        <span className="field-label">Pairing code</span>
         <textarea
           className="input-textarea font-mono"
           rows={4}
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          placeholder="Paste pairing code string..."
+          placeholder="Paste the code"
           spellCheck={false}
           autoFocus
         />
@@ -256,7 +237,7 @@ function EnterCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
       <div className="form-actions">
         <button type="submit" className="btn btn-primary" disabled={pending || !code.trim()}>
           {pending && <Loader size={14} className="spin inline-icon" />}
-          {pending ? "Pairing Device..." : "Pair Device"}
+          {pending ? "Pairing" : "Pair"}
         </button>
       </div>
     </form>

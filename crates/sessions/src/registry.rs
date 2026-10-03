@@ -91,6 +91,15 @@ impl SessionRegistry {
         }
     }
 
+    /// Lets a peer that was disconnected on purpose be connected automatically again, and
+    /// dials it now.
+    pub fn resume_auto_connect(&self, peer: &str) {
+        if let Some(entry) = self.peers().get_mut(peer) {
+            entry.ended_on_purpose = false;
+        }
+        self.redial_now();
+    }
+
     /// Asks `connect_paired_peers` to dial saved addresses now instead of at its next round,
     /// e.g. right after pairing.
     pub fn redial_now(&self) {
@@ -169,14 +178,18 @@ impl SessionRegistry {
     /// say which device it is, so only a pinned handshake with the right peer succeeds and
     /// failures are expected and not reported. Skips peers that are connected, being dialed,
     /// or were disconnected on purpose. Returns the address that worked.
+    ///
+    /// `still_trusted` is asked again once the handshake is done, so a device forgotten while
+    /// it was being dialed doesn't end up connected.
     pub async fn connect_discovered(
         &self,
         peer: &str,
         spki_hash: [u8; 32],
         addresses: &[SocketAddr],
+        still_trusted: impl Fn() -> bool,
     ) -> Option<SocketAddr> {
         for &addr in addresses {
-            if !self.wants_discovered(peer) {
+            if !self.wants_discovered(peer) || !still_trusted() {
                 return None;
             }
             match connect_pinned(
@@ -188,7 +201,7 @@ impl SessionRegistry {
             .await
             {
                 Ok(connection) => {
-                    if !self.wants_discovered(peer) {
+                    if !self.wants_discovered(peer) || !still_trusted() {
                         connection.close(close_code(DisconnectReason::Normal), b"not needed");
                         return None;
                     }
