@@ -35,11 +35,12 @@ export interface AccentColor {
 
 // Mid-tone colours that hold up on both light and dark surfaces.
 export const ACCENT_PALETTE: AccentColor[] = [
+  // The Android app's colour, with a light and a dark value.
+  { id: "cyan", label: "Teal", base: "var(--teal)", onBase: "var(--on-teal)" },
   { id: "blue", label: "Blue", base: "#3d63dd", onBase: "#ffffff" },
   { id: "recordRed", label: "Red", base: "#d93d42", onBase: "#ffffff" },
   { id: "coral", label: "Coral", base: "#d4532b", onBase: "#ffffff" },
   { id: "amber", label: "Amber", base: "#f0b000", onBase: "#221a00" },
-  { id: "cyan", label: "Teal", base: "#0b7f95", onBase: "#ffffff" },
   { id: "emerald", label: "Green", base: "#1e8a4c", onBase: "#ffffff" },
   { id: "magenta", label: "Pink", base: "#c0317a", onBase: "#ffffff" },
   // Follows the theme: dark on light, light on dark.
