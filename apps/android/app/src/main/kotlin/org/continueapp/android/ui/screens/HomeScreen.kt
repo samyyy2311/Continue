@@ -90,7 +90,7 @@ fun HomeScreen(
         LinkPanel(peer = peer, connected = peer.fingerprint in state.connected, state = state, onMessage = onMessage)
         SectionLabel("Send to ${peer.displayName}")
         SendActions(peer = peer, enabled = peer.fingerprint in state.connected, state = state, onMessage = onMessage)
-        RecentSection(state.recent, onMessage)
+        RecentSection(state.recent, state.incoming, onMessage)
     }
 }
 
