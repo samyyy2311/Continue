@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod clipboard_sync;
+mod receiving;
 mod tray;
 
 use clipboard_sync::ClipboardSync;
@@ -100,7 +101,8 @@ pub struct DesktopRuntimeState {
     sessions: SessionRegistry,
     pending_answers: PendingAnswers,
     history: HistoryStore,
-    download_dir: PathBuf,
+    save_folder: sessions::SaveFolder,
+    incoming: sessions::IncomingFiles,
     clipboard: ClipboardSync,
 }
 
@@ -171,8 +173,9 @@ fn open_received(
 ) -> Result<(), String> {
     const MISSING: &str = "Couldn't find that file. It may have been moved or deleted.";
     let file = std::fs::canonicalize(&path).map_err(user_error(MISSING))?;
-    let folder = std::fs::canonicalize(&state.download_dir).map_err(user_error(MISSING))?;
-    if !file.starts_with(&folder) {
+    let folder = std::fs::canonicalize(state.save_folder.get()).map_err(user_error(MISSING))?;
+    // Files from before the folder was changed are still in history, so they can open too.
+    if !file.starts_with(&folder) && !was_received(&state.history, &file) {
         return Err(MISSING.to_string());
     }
     let opener = app.opener();
@@ -182,6 +185,19 @@ fn open_received(
         opener.open_path(file.to_string_lossy(), None::<&str>)
     };
     result.map_err(user_error("Couldn't open that file."))
+}
+
+fn was_received(history: &HistoryStore, file: &Path) -> bool {
+    let entries = history.list(history::HISTORY_LIMIT).unwrap_or_default();
+    entries.iter().any(|entry| {
+        entry.item.direction == Direction::Received
+            && entry
+                .item
+                .location
+                .as_deref()
+                .and_then(|location| std::fs::canonicalize(location).ok())
+                .is_some_and(|location| location == file)
+    })
 }
 
 /// Opens a web link that was sent or received. Anything but http and https is refused.
@@ -317,7 +333,11 @@ fn session_handlers(
             app_handle.clone(),
             trust_store.clone(),
             pending_answers,
-        ));
+        ))
+        .with_incoming(sessions::IncomingFiles::with_listener(receiving::listener(
+            app_handle.clone(),
+            trust_store.clone(),
+        )));
 
     let (app, peers, saved) = (app_handle.clone(), trust_store.clone(), history.clone());
     handlers.on_file_received = Some(Arc::new(move |peer, file| {
@@ -1124,18 +1144,20 @@ fn initialize_desktop_runtime(
     let local_fingerprint =
         identity::Fingerprint::from_verifying_key(&identity_signer.verifying_key()?).to_string();
     let pending_answers = PendingAnswers::default();
+    let handlers = session_handlers(
+        download_dir,
+        permission_store.clone(),
+        trust_store.clone(),
+        pending_answers.clone(),
+        history.clone(),
+        clipboard.clone(),
+        app_handle,
+    );
+    let (save_folder, incoming) = (handlers.save_folder.clone(), handlers.incoming.clone());
     let sessions = SessionRegistry::new(
         local_fingerprint,
         transport_cert.clone(),
-        session_handlers(
-            download_dir.clone(),
-            permission_store.clone(),
-            trust_store.clone(),
-            pending_answers.clone(),
-            history.clone(),
-            clipboard.clone(),
-            app_handle,
-        ),
+        handlers,
         sessions::RegistryConfig::default(),
         Some(session_state_listener(
             app_handle.clone(),
@@ -1159,7 +1181,8 @@ fn initialize_desktop_runtime(
         sessions,
         pending_answers,
         history,
-        download_dir,
+        save_folder,
+        incoming,
         clipboard,
     })
 }
@@ -1197,10 +1220,7 @@ fn main() {
 
             let _ = std::fs::remove_dir_all(pasted_dir(app.handle()));
 
-            let download_dir = app
-                .path()
-                .download_dir()
-                .unwrap_or_else(|_| app_data.join("downloads"));
+            let download_dir = receiving::starting_folder(app.handle(), &app_data);
             let _ = std::fs::create_dir_all(&download_dir);
 
             let (clipboard, clipboard_watcher) = clipboard_sync::new();
@@ -1266,6 +1286,10 @@ fn main() {
             open_received,
             open_link,
             set_clipboard_sync,
+            receiving::list_incoming,
+            receiving::cancel_incoming,
+            receiving::get_save_folder,
+            receiving::set_save_folder,
             get_autostart,
             set_autostart,
             save_pasted_file,
