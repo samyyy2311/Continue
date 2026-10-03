@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod clipboard_sync;
+mod tray;
 
 use clipboard_sync::ClipboardSync;
 use parking_lot::Mutex;
@@ -13,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -192,6 +194,39 @@ fn open_link(app: AppHandle, url: String) -> Result<(), String> {
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(user_error(FAILED))
+}
+
+/// Started at login with this, Continue stays in the tray instead of opening its window.
+const BACKGROUND_ARG: &str = "--background";
+
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> bool {
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let launcher = app.autolaunch();
+    let result = if enabled {
+        launcher.enable()
+    } else {
+        launcher.disable()
+    };
+    result.map_err(user_error("Couldn't change that setting."))
+}
+
+/// Starts Continue at login the first time it runs. After that it's the user's choice.
+fn start_at_login_by_default(app: &AppHandle, app_data: &Path) {
+    let chosen = app_data.join("start-at-login-set");
+    if chosen.exists() {
+        return;
+    }
+    match app.autolaunch().enable() {
+        Ok(()) => {
+            let _ = std::fs::write(chosen, b"");
+        }
+        Err(error) => tracing::warn!("Couldn't start Continue at login: {error}"),
+    }
 }
 
 /// Where pasted files wait to be sent. Emptied on each start.
@@ -444,7 +479,15 @@ fn session_state_listener(
     app_handle: AppHandle,
     trust_store: TrustStore,
 ) -> sessions::StateListener {
+    let connected = tray::Connected::default();
     Arc::new(move |peer, session_state| {
+        let is_connected = session_state == SessionState::Connected;
+        connected.update(
+            &app_handle,
+            peer,
+            peer_name(&trust_store, peer),
+            is_connected,
+        );
         let _ = app_handle.emit(
             "peer-state-changed",
             serde_json::json!({
@@ -452,7 +495,7 @@ fn session_state_listener(
                 "state": session_state.to_string(),
             }),
         );
-        if session_state == SessionState::Connected {
+        if is_connected {
             let _ = app_handle.emit(
                 "peer-connected",
                 serde_json::json!({
@@ -1130,6 +1173,14 @@ fn main() {
         .init();
 
     tauri::Builder::default()
+        // Opening Continue again shows the one already running, which may be in the tray.
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            tray::show_window(app)
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![BACKGROUND_ARG]),
+        ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -1189,6 +1240,14 @@ fn main() {
             app.manage(runtime_state);
             let handle = app.handle().clone();
             clipboard_watcher.start(move |text| send_copied_text(&handle, text));
+
+            if let Err(error) = tray::create(app.handle()) {
+                tracing::warn!("No tray icon, so closing the window will quit: {error}");
+            }
+            start_at_login_by_default(app.handle(), &app_data);
+            if !std::env::args().any(|arg| arg == BACKGROUND_ARG) {
+                tray::show_window(app.handle());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1207,6 +1266,8 @@ fn main() {
             open_received,
             open_link,
             set_clipboard_sync,
+            get_autostart,
+            set_autostart,
             save_pasted_file,
             connect_to_peer,
             disconnect_peer,
@@ -1215,6 +1276,14 @@ fn main() {
             send_clipboard_text,
             send_notification
         ])
+        // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
+        .on_window_event(|window, event| {
+            let in_tray = tray::exists(window.app_handle());
+            if let (tauri::WindowEvent::CloseRequested { api, .. }, true) = (event, in_tray) {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running Continue desktop application");
 }

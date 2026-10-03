@@ -56,6 +56,10 @@ export const savePastedFile = async (file: File, name: string) =>
 /** Turns sending what's copied on this computer on or off. */
 export const setClipboardSyncEnabled = (enabled: boolean) => invoke<void>("set_clipboard_sync", { enabled });
 
+export const getAutostart = () => invoke<boolean>("get_autostart");
+
+export const setAutostart = (enabled: boolean) => invoke<void>("set_autostart", { enabled });
+
 /** Opens a web link in the default browser. */
 export const openLink = (url: string) => invoke<void>("open_link", { url });
 

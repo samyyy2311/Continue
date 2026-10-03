@@ -45,6 +45,7 @@ import {
   disconnectPeer,
   reconnectPeer,
   errorMessage,
+  getAutostart,
   getDeviceIdentity,
   getHistory,
   getPermissions,
@@ -52,6 +53,7 @@ import {
   openLink,
   openReceived,
   savePastedFile,
+  setAutostart,
   setClipboardSyncEnabled,
   removeTrustedPeer,
   sendClipboardText,
@@ -736,6 +738,7 @@ export default function App() {
               onAccentChange={setAccent}
               clipboardSync={clipboardSync}
               onClipboardSyncChange={setClipboardSync}
+              onError={showError}
             />
           )}
         </div>
@@ -1264,6 +1267,7 @@ interface SettingsViewProps {
   identity: DeviceIdentity | null;
   clipboardSync: boolean;
   onClipboardSyncChange: (on: boolean) => void;
+  onError: (message: string) => void;
   theme: Theme;
   accent: AccentName;
   onThemeChange: (theme: Theme) => void;
@@ -1277,12 +1281,22 @@ const THEME_OPTIONS = [
 ] as const;
 
 function SettingsView(props: SettingsViewProps) {
-  const { identity, theme, accent, onThemeChange, onAccentChange, clipboardSync, onClipboardSyncChange } = props;
+  const { identity, theme, accent, onThemeChange, onAccentChange, clipboardSync, onClipboardSyncChange, onError } = props;
   const [appVersion, setAppVersion] = useState("");
+  const [startAtLogin, setStartAtLogin] = useState(false);
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => setAppVersion(""));
+    getAutostart().then(setStartAtLogin).catch(() => {});
   }, []);
+
+  const changeStartAtLogin = (on: boolean) => {
+    setStartAtLogin(on);
+    setAutostart(on).catch((error) => {
+      setStartAtLogin(!on);
+      onError(errorMessage(error));
+    });
+  };
 
   return (
     <div className="page">
@@ -1320,6 +1334,21 @@ function SettingsView(props: SettingsViewProps) {
               </button>
             ))}
           </div>
+        </li>
+      </ul>
+
+      <h2 className="label">Running</h2>
+      <ul className="list">
+        <li className="list-item">
+          <div className="list-text">
+            <span className="list-title" id="start-at-login-label">
+              Open when you log in
+            </span>
+            <span className="list-sub wrap">
+              Continue starts in the tray, ready to receive. Closing the window keeps it there; quit from the tray icon.
+            </span>
+          </div>
+          <Switch labelledBy="start-at-login-label" checked={startAtLogin} onChange={changeStartAtLogin} />
         </li>
       </ul>
 
