@@ -210,7 +210,7 @@ async fn text_is_asked_about_and_delivered_once_allowed() {
     let (mut handlers, _) = handlers_with(&store, Some(prompt));
     let received = Arc::new(Mutex::new(Vec::new()));
     let sink = received.clone();
-    handlers.on_clipboard_received = Some(Arc::new(move |update| {
+    handlers.on_clipboard_received = Some(Arc::new(move |_peer, update| {
         sink.lock().unwrap().push(update.payload);
     }));
     let link = link(handlers).await;

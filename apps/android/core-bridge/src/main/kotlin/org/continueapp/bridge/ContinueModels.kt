@@ -23,6 +23,27 @@ enum class Capability(val id: Int) {
     }
 }
 
+/** A file or text a paired device sent to this phone. */
+sealed interface Received {
+    val peerFingerprint: String
+    val peerName: String
+}
+
+/** A file waiting at [path] in the app's own storage. */
+data class ReceivedFile(
+    override val peerFingerprint: String,
+    override val peerName: String,
+    val path: String,
+    val name: String,
+    val size: Long,
+) : Received
+
+data class ReceivedText(
+    override val peerFingerprint: String,
+    override val peerName: String,
+    val text: String,
+) : Received
+
 /** Something a device set to Ask wants to send. */
 data class PermissionQuestion(
     val id: Long,

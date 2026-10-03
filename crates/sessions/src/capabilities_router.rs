@@ -42,14 +42,17 @@ pub enum PermissionDecision {
 pub type PermissionPrompt =
     Arc<dyn Fn(PermissionRequest) -> oneshot::Receiver<PermissionDecision> + Send + Sync>;
 
+/// Called with the sender's fingerprint and what it sent.
+pub type OnReceived<T> = Arc<dyn Fn(&str, T) + Send + Sync>;
+
 /// Callbacks and configuration for active capabilities over a multiplexed session.
 #[derive(Clone)]
 pub struct SessionCapabilityHandlers {
     pub download_dir: PathBuf,
     pub notification_dispatcher: Arc<NotificationDispatcher>,
-    pub on_file_received: Option<Arc<dyn Fn(ReceivedFile) + Send + Sync>>,
-    pub on_clipboard_received: Option<Arc<dyn Fn(ClipboardUpdate) + Send + Sync>>,
-    pub on_notification_received: Option<Arc<dyn Fn(NotificationPost) + Send + Sync>>,
+    pub on_file_received: Option<OnReceived<ReceivedFile>>,
+    pub on_clipboard_received: Option<OnReceived<ClipboardUpdate>>,
+    pub on_notification_received: Option<OnReceived<NotificationPost>>,
     pub permission_store: Option<Arc<permissions::PermissionStore>>,
     pub permission_prompt: Option<PermissionPrompt>,
     /// Keeps to one question at a time, so a batch of files asks once when the first answer is
@@ -194,7 +197,7 @@ pub fn spawn_capabilities_dispatcher(
                                     );
                                 }
                                 if let Some(cb) = &handlers.on_file_received {
-                                    cb(received);
+                                    cb(&peer_fp, received);
                                 }
                             }
                             Err(e) => {
@@ -239,7 +242,7 @@ pub fn spawn_capabilities_dispatcher(
                                     store.consume_if_allow_once(&peer_fp, CapabilityId::CLIPBOARD);
                                 }
                                 if let Some(cb) = on_received {
-                                    cb(update);
+                                    cb(&peer_fp, update);
                                 }
                             }
                             Err(e) => {
@@ -282,7 +285,7 @@ pub fn spawn_capabilities_dispatcher(
                                     );
                                 }
                                 if let Some(cb) = on_received {
-                                    cb(post);
+                                    cb(&peer_fp, post);
                                 }
                             }
                             Err(e) => {

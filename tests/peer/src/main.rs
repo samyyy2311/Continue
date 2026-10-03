@@ -379,7 +379,7 @@ async fn test_end_to_end_file_transfer() -> Result<()> {
 
     let (file_tx, mut file_rx) = tokio::sync::mpsc::channel(1);
     let mut handlers = sessions::SessionCapabilityHandlers::new(&temp_dir);
-    handlers.on_file_received = Some(Arc::new(move |received| {
+    handlers.on_file_received = Some(Arc::new(move |_peer, received| {
         let _ = file_tx.try_send(received);
     }));
 
@@ -422,7 +422,7 @@ async fn test_end_to_end_clipboard_sync() -> Result<()> {
 
     let (clip_tx, mut clip_rx) = tokio::sync::mpsc::channel(1);
     let mut handlers = sessions::SessionCapabilityHandlers::new(std::env::temp_dir());
-    handlers.on_clipboard_received = Some(Arc::new(move |update| {
+    handlers.on_clipboard_received = Some(Arc::new(move |_peer, update| {
         let _ = clip_tx.try_send(update);
     }));
 
@@ -466,7 +466,7 @@ async fn test_end_to_end_notification_relay() -> Result<()> {
 
     let (notif_tx, mut notif_rx) = tokio::sync::mpsc::channel(1);
     let mut handlers = sessions::SessionCapabilityHandlers::new(std::env::temp_dir());
-    handlers.on_notification_received = Some(Arc::new(move |post| {
+    handlers.on_notification_received = Some(Arc::new(move |_peer, post| {
         let _ = notif_tx.try_send(post);
     }));
 

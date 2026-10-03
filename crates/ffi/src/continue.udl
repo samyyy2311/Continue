@@ -54,6 +54,8 @@ namespace continue {
 
     void answer_permission_request(u64 id, PermissionDecisionFfi decision);
 
+    ReceivedFfi? next_received(u32 timeout_ms);
+
     [Throws=ContinueFfiError]
     void connect_to_peer(string peer_fingerprint, string endpoint);
 
@@ -88,6 +90,15 @@ enum PermissionDecisionFfi {
     "Allow",
     "AlwaysAllow",
     "Decline",
+};
+
+dictionary ReceivedFfi {
+    string peer_fingerprint;
+    string peer_name;
+    string? file_path;
+    string? file_name;
+    u64 size;
+    string? text;
 };
 
 dictionary TrustedPeerFfi {

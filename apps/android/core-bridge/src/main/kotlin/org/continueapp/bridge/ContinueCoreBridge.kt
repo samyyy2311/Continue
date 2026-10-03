@@ -3,6 +3,7 @@ package org.continueapp.bridge
 import org.continueapp.bridge.ffi.ContinueFfiException
 import org.continueapp.bridge.ffi.PermissionDecisionFfi
 import org.continueapp.bridge.ffi.PermissionRequestFfi
+import org.continueapp.bridge.ffi.ReceivedFfi
 import org.continueapp.bridge.ffi.TrustedPeerFfi
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
@@ -20,6 +21,7 @@ import org.continueapp.bridge.ffi.initCore as coreInitCore
 import org.continueapp.bridge.ffi.isPeerConnected as coreIsPeerConnected
 import org.continueapp.bridge.ffi.listTrustedPeers as coreListTrustedPeers
 import org.continueapp.bridge.ffi.nextPermissionRequest as coreNextPermissionRequest
+import org.continueapp.bridge.ffi.nextReceived as coreNextReceived
 import org.continueapp.bridge.ffi.pairFromQr as corePairFromQr
 import org.continueapp.bridge.ffi.queryPermission as coreQueryPermission
 import org.continueapp.bridge.ffi.reconnect as coreReconnect
@@ -95,6 +97,9 @@ interface ContinueCoreBridge {
         answer: PermissionAnswer,
     )
 
+    /** Waits up to [timeoutMs] for the next file or text a paired device sent, or returns null. */
+    fun nextReceived(timeoutMs: Long): Received?
+
     fun connectToPeer(
         peerFingerprint: String,
         endpoint: String,
@@ -139,11 +144,17 @@ class MockContinueCoreBridge : ContinueCoreBridge {
     private val permissions = ConcurrentHashMap<String, String>()
     private val connectedPeers = ConcurrentHashMap<String, String>()
     private val questions = LinkedBlockingQueue<PermissionQuestion>()
+    private val received = LinkedBlockingQueue<Received>()
     val answers = ConcurrentHashMap<Long, PermissionAnswer>()
 
     /** Puts a question to the app as a device set to Ask would. */
     fun ask(question: PermissionQuestion) {
         questions.put(question)
+    }
+
+    /** Hands the app a file or text as if a paired device had sent it. */
+    fun receive(item: Received) {
+        received.put(item)
     }
 
     override fun initCore(dbPath: String) {
@@ -269,6 +280,8 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         answers[id] = answer
     }
 
+    override fun nextReceived(timeoutMs: Long): Received? = received.poll(timeoutMs, MILLISECONDS)
+
     override fun connectToPeer(
         peerFingerprint: String,
         endpoint: String,
@@ -387,6 +400,8 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
         },
     )
 
+    override fun nextReceived(timeoutMs: Long): Received? = coreNextReceived(timeoutMs.toUInt())?.toReceived()
+
     override fun connectToPeer(
         peerFingerprint: String,
         endpoint: String,
@@ -431,6 +446,17 @@ private fun PermissionRequestFfi.toPermissionQuestion() =
         capability = Capability.fromId(capabilityId.toInt()),
         detail = detail,
     )
+
+private fun ReceivedFfi.toReceived(): Received {
+    val path = filePath ?: return ReceivedText(peerFingerprint, peerName, text.orEmpty())
+    return ReceivedFile(
+        peerFingerprint = peerFingerprint,
+        peerName = peerName,
+        path = path,
+        name = fileName ?: path.substringAfterLast('/'),
+        size = size.toLong(),
+    )
+}
 
 /** Runs a core call, turning its errors into the bridge's own exception types. */
 private inline fun <T> native(call: () -> T): T =

@@ -98,15 +98,17 @@ fn session_handlers(
         .with_permission_store(permission_store)
         .with_permission_prompt(permission_prompt(
             app_handle.clone(),
-            trust_store,
+            trust_store.clone(),
             pending_answers,
         ));
 
-    let app_handle_files = app_handle.clone();
-    handlers.on_file_received = Some(Arc::new(move |file| {
-        let _ = app_handle_files.emit(
+    let (app, peers) = (app_handle.clone(), trust_store.clone());
+    handlers.on_file_received = Some(Arc::new(move |peer, file| {
+        let _ = app.emit(
             "file-received",
             serde_json::json!({
+                "peerId": peer,
+                "peerName": peer_name(&peers, peer),
                 "fileName": file.file_name,
                 "path": file.path.to_string_lossy(),
                 "bytesReceived": file.bytes_received,
@@ -114,14 +116,14 @@ fn session_handlers(
         );
     }));
 
-    let app_handle_clips = app_handle.clone();
-    handlers.on_clipboard_received = Some(Arc::new(move |update| {
-        let text = String::from_utf8_lossy(&update.payload).to_string();
-        let _ = app_handle_clips.emit(
+    let app = app_handle.clone();
+    handlers.on_clipboard_received = Some(Arc::new(move |peer, update| {
+        let _ = app.emit(
             "clipboard-received",
             serde_json::json!({
-                "format": format!("{:?}", update.format),
-                "content": text,
+                "peerId": peer,
+                "peerName": peer_name(&trust_store, peer),
+                "content": String::from_utf8_lossy(&update.payload),
             }),
         );
     }));

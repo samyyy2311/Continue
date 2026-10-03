@@ -23,18 +23,20 @@ private const val QUESTION_WAIT_MS = 1_000L
 
 enum class TransferKind { File, Text }
 
-enum class TransferStatus { Sending, Sent, Failed }
+enum class TransferStatus { Sending, Sent, Failed, Received }
 
-/** Something sent from this phone during this session. */
+/** Something sent from or to this phone during this session. */
 data class Transfer(
     val id: Long,
     val kind: TransferKind,
     val label: String,
     val peerName: String,
     val status: TransferStatus,
+    /** Where a received file was saved, when it can be opened. */
+    val uri: Uri? = null,
 )
 
-/** What this phone has sent while the app runs, newest first. The core keeps no history. */
+/** What this phone has sent and received while the app runs, newest first. */
 class RecentTransfers {
     var items by mutableStateOf<List<Transfer>>(emptyList())
         private set
@@ -53,6 +55,16 @@ class RecentTransfers {
         val status = if (error == null) TransferStatus.Sent else TransferStatus.Failed
         items = items.map { if (it.id == id) it.copy(status = status) else it }
         return error
+    }
+
+    fun received(
+        kind: TransferKind,
+        label: String,
+        peerName: String,
+        uri: Uri?,
+    ) {
+        val transfer = Transfer(nextId++, kind, label, peerName, TransferStatus.Received, uri)
+        items = (listOf(transfer) + items).take(RECENT_LIMIT)
     }
 }
 
@@ -91,6 +103,7 @@ class AppState(private val bridge: ContinueCoreBridge) {
         private set
     val recent = RecentTransfers()
     val questions = PermissionQuestions(bridge)
+    val incoming = Incoming(bridge, recent)
 
     /** Keeps what's on screen if the core can't be read this time; the next refresh tries again. */
     suspend fun refresh() {

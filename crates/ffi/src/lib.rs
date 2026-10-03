@@ -78,51 +78,144 @@ pub enum PermissionDecisionFfi {
     Decline,
 }
 
-/// Questions waiting for the app to pick up, and the answers the core is waiting on. Kept
-/// outside `CORE` so waiting for a question never holds up other calls.
-struct Questions {
-    waiting: Mutex<VecDeque<PermissionRequestFfi>>,
+/// A file or text a paired device sent to this phone. Files arrive as `file_path` and
+/// `file_name`, text as `text`.
+pub struct ReceivedFfi {
+    pub peer_fingerprint: String,
+    pub peer_name: String,
+    pub file_path: Option<String>,
+    pub file_name: Option<String>,
+    pub size: u64,
+    pub text: Option<String>,
+}
+
+/// Items for the app to pick up whenever it next asks. Kept outside `CORE` so waiting on one
+/// never holds up other calls.
+struct Inbox<T> {
+    items: Mutex<VecDeque<T>>,
     arrived: Condvar,
+}
+
+impl<T> Inbox<T> {
+    const fn new() -> Self {
+        Self {
+            items: Mutex::new(VecDeque::new()),
+            arrived: Condvar::new(),
+        }
+    }
+
+    /// Adds an item, dropping the oldest beyond `limit` so an app that stops listening
+    /// doesn't grow the queue forever.
+    fn push(&self, item: T, limit: usize) {
+        let mut items = self.items.lock().unwrap();
+        items.push_back(item);
+        while items.len() > limit {
+            items.pop_front();
+        }
+        self.arrived.notify_all();
+    }
+
+    fn next(&self, timeout: Duration) -> Option<T> {
+        let items = self.items.lock().unwrap();
+        let (mut items, _) = self
+            .arrived
+            .wait_timeout_while(items, timeout, |items| items.is_empty())
+            .unwrap();
+        items.pop_front()
+    }
+}
+
+/// Questions waiting for the app to pick up, and the answers the core is waiting on.
+struct Questions {
+    waiting: Inbox<PermissionRequestFfi>,
     answers: Mutex<BTreeMap<u64, tokio::sync::oneshot::Sender<PermissionDecision>>>,
     next_id: AtomicU64,
 }
 
 static QUESTIONS: Questions = Questions {
-    waiting: Mutex::new(VecDeque::new()),
-    arrived: Condvar::new(),
+    waiting: Inbox::new(),
     answers: Mutex::new(BTreeMap::new()),
     next_id: AtomicU64::new(0),
 };
+
+static RECEIVED: Inbox<ReceivedFfi> = Inbox::new();
+const RECEIVED_LIMIT: usize = 100;
+
+fn peer_name(trust_store: &TrustStore, fingerprint: &str) -> String {
+    trust_store
+        .get_peer(fingerprint)
+        .ok()
+        .flatten()
+        .map(|p| p.display_name)
+        .unwrap_or_default()
+}
+
+/// Hands received files and text to the app through `next_received`.
+fn deliver_received(
+    mut handlers: sessions::SessionCapabilityHandlers,
+    trust_store: TrustStore,
+) -> sessions::SessionCapabilityHandlers {
+    let peers = trust_store.clone();
+    handlers.on_file_received = Some(Arc::new(move |peer, file| {
+        RECEIVED.push(
+            ReceivedFfi {
+                peer_fingerprint: peer.to_string(),
+                peer_name: peer_name(&peers, peer),
+                file_path: Some(file.path.to_string_lossy().into_owned()),
+                file_name: Some(file.file_name),
+                size: file.bytes_received,
+                text: None,
+            },
+            RECEIVED_LIMIT,
+        );
+    }));
+    handlers.on_clipboard_received = Some(Arc::new(move |peer, update| {
+        RECEIVED.push(
+            ReceivedFfi {
+                peer_fingerprint: peer.to_string(),
+                peer_name: peer_name(&trust_store, peer),
+                file_path: None,
+                file_name: None,
+                size: update.payload.len() as u64,
+                text: Some(String::from_utf8_lossy(&update.payload).into_owned()),
+            },
+            RECEIVED_LIMIT,
+        );
+    }));
+    handlers
+}
+
+/// Waits up to `timeout_ms` for the next file or text a paired device sent.
+pub fn next_received(timeout_ms: u32) -> Option<ReceivedFfi> {
+    RECEIVED.next(Duration::from_millis(timeout_ms.into()))
+}
 
 fn permission_prompt(trust_store: TrustStore) -> sessions::PermissionPrompt {
     Arc::new(move |request| {
         let (answer, decision) = tokio::sync::oneshot::channel();
         let id = QUESTIONS.next_id.fetch_add(1, Ordering::Relaxed);
         QUESTIONS.answers.lock().unwrap().insert(id, answer);
-        let peer_name = trust_store
-            .get_peer(&request.peer)
-            .ok()
-            .flatten()
-            .map(|p| p.display_name)
-            .unwrap_or_default();
-        QUESTIONS
-            .waiting
-            .lock()
-            .unwrap()
-            .push_back(PermissionRequestFfi {
+        QUESTIONS.waiting.push(
+            PermissionRequestFfi {
                 id,
+                peer_name: peer_name(&trust_store, &request.peer),
                 peer_fingerprint: request.peer,
-                peer_name,
                 capability_id: request.capability.raw(),
                 detail: request.detail,
-            });
-        QUESTIONS.arrived.notify_all();
+            },
+            usize::MAX,
+        );
 
         // The core stops waiting after PROMPT_TIMEOUT; drop the question then too.
         tokio::spawn(async move {
             tokio::time::sleep(sessions::PROMPT_TIMEOUT).await;
             QUESTIONS.answers.lock().unwrap().remove(&id);
-            QUESTIONS.waiting.lock().unwrap().retain(|q| q.id != id);
+            QUESTIONS
+                .waiting
+                .items
+                .lock()
+                .unwrap()
+                .retain(|q| q.id != id);
         });
         decision
     })
@@ -130,14 +223,9 @@ fn permission_prompt(trust_store: TrustStore) -> sessions::PermissionPrompt {
 
 /// Waits up to `timeout_ms` for the next question for the user.
 pub fn next_permission_request(timeout_ms: u32) -> Option<PermissionRequestFfi> {
-    let waiting = QUESTIONS.waiting.lock().unwrap();
-    let (mut waiting, _) = QUESTIONS
-        .arrived
-        .wait_timeout_while(waiting, Duration::from_millis(timeout_ms.into()), |q| {
-            q.is_empty()
-        })
-        .unwrap();
-    waiting.pop_front()
+    QUESTIONS
+        .waiting
+        .next(Duration::from_millis(timeout_ms.into()))
 }
 
 /// Answers a question from `next_permission_request`. Late answers are ignored.
@@ -199,15 +287,22 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
             .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?,
     )
     .to_string();
-    let download_dir = std::env::temp_dir().join("continue_downloads");
+    // Next to the database, in the app's own storage; the app moves files on from there.
+    let download_dir = std::path::Path::new(&db_path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("received");
     let _ = std::fs::create_dir_all(&download_dir);
     let grants = permission_store.clone();
     let sessions = SessionRegistry::new(
         local_fingerprint,
         transport_cert.clone(),
-        sessions::SessionCapabilityHandlers::new(download_dir)
-            .with_permission_store(Arc::new(permission_store.clone()))
-            .with_permission_prompt(permission_prompt(trust_store.clone())),
+        deliver_received(
+            sessions::SessionCapabilityHandlers::new(download_dir)
+                .with_permission_store(Arc::new(permission_store.clone()))
+                .with_permission_prompt(permission_prompt(trust_store.clone())),
+            trust_store.clone(),
+        ),
         sessions::RegistryConfig::default(),
         Some(Arc::new(move |peer, session_state| {
             if matches!(
@@ -875,5 +970,28 @@ mod tests {
 
         answer_permission_request(question.id, PermissionDecisionFfi::AlwaysAllow);
         assert_eq!(decision.await.unwrap(), PermissionDecision::AlwaysAllow);
+    }
+
+    #[test]
+    fn received_files_and_text_reach_the_app_with_their_sender() {
+        let handlers = deliver_received(
+            sessions::SessionCapabilityHandlers::new(std::env::temp_dir()),
+            TrustStore::in_memory().unwrap(),
+        );
+        (handlers.on_file_received.unwrap())(
+            "laptop",
+            transfer::ReceivedFile {
+                path: "/data/received/report.pdf".into(),
+                file_name: "report.pdf".to_string(),
+                bytes_received: 2048,
+            },
+        );
+
+        let file = next_received(100).expect("the file");
+        assert_eq!(file.peer_fingerprint, "laptop");
+        assert_eq!(file.file_name.as_deref(), Some("report.pdf"));
+        assert_eq!(file.size, 2048);
+        assert!(file.text.is_none());
+        assert!(next_received(10).is_none());
     }
 }
