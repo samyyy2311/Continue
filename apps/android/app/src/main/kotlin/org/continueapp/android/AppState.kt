@@ -68,10 +68,7 @@ class AppState(private val bridge: ContinueCoreBridge) {
             val outbox = File(context.cacheDir, "outgoing/${UUID.randomUUID()}").apply { mkdirs() }
             try {
                 for (uri in uris) {
-                    val file = File(outbox, displayName(context, uri))
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        file.outputStream().use { input.copyTo(it) }
-                    } ?: throw ContinueException.InternalErrorException("Can't read the file")
+                    val file = copyInto(outbox, context, uri)
                     bridge.sendFile(peer, file.absolutePath)
                     file.delete()
                 }
@@ -127,6 +124,19 @@ private fun messageFor(
             "Couldn't pair. Check that both devices are on the same network and try again."
         else -> fallback
     }
+
+private fun copyInto(
+    dir: File,
+    context: Context,
+    uri: Uri,
+): File {
+    val file = File(dir, displayName(context, uri))
+    val input =
+        context.contentResolver.openInputStream(uri)
+            ?: throw ContinueException.InternalErrorException("Can't read the file")
+    input.use { source -> file.outputStream().use { source.copyTo(it) } }
+    return file
+}
 
 /** The file's own name, reduced to a single safe path segment. */
 private fun displayName(

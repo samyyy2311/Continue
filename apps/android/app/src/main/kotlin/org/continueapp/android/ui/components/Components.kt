@@ -45,6 +45,10 @@ import androidx.compose.ui.unit.dp
 
 val ScreenPadding = 20.dp
 
+private val LinkDash = floatArrayOf(10f, 12f)
+private const val GLYPH_CORNER_RATIO = 0.32f
+private const val GLYPH_ICON_RATIO = 0.45f
+
 @Composable
 fun PageTitle(
     text: String,
@@ -126,7 +130,7 @@ fun LinkHero(
                 end = Offset(size.width, y),
                 strokeWidth = 3.dp.toPx(),
                 cap = StrokeCap.Round,
-                pathEffect = if (connected) null else PathEffect.dashPathEffect(floatArrayOf(10f, 12f)),
+                pathEffect = if (connected) null else PathEffect.dashPathEffect(LinkDash),
             )
         }
         DeviceGlyph(Icons.Outlined.Laptop, active = connected)
@@ -144,10 +148,10 @@ fun DeviceGlyph(
     val container = if (active) colors.primaryContainer else colors.surfaceContainerHigh
     val content = if (active) colors.onPrimaryContainer else colors.onSurfaceVariant
     Box(
-        modifier = modifier.size(size).clip(RoundedCornerShape(size * 0.32f)).background(container),
+        modifier = modifier.size(size).clip(RoundedCornerShape(size * GLYPH_CORNER_RATIO)).background(container),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(size * 0.45f))
+        Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(size * GLYPH_ICON_RATIO))
     }
 }
 

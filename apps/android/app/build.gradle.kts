@@ -50,6 +50,9 @@ android {
         abortOnError = true
         checkReleaseBuilds = false
         warningsAsErrors = false
+        // These Compose checks come with the Material 3 alpha and crash the lint bundled
+        // with AGP 8.7. Turn them back on after upgrading AGP.
+        disable += setOf("RememberInComposition", "FrequentlyChangingValue")
     }
 }
 
