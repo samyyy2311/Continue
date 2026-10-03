@@ -58,6 +58,7 @@ private fun RecentRow(
 ) {
     val context = LocalContext.current
     val name = transfer.peerName
+    val link = linkIn(transfer.text)
     SettingsRow(
         title = transfer.label,
         icon = if (transfer.kind == TransferKind.File) Icons.Outlined.Description else Icons.Outlined.ContentPaste,
@@ -72,15 +73,19 @@ private fun RecentRow(
             },
         onClick =
             when {
-                transfer.uri != null -> { -> openFile(context, transfer.uri, transfer.label) }
+                transfer.uri != null -> { -> openFile(context, transfer.uri, transfer.label, onMessage) }
                 transfer.text != null -> { -> copyAgain(context, transfer.text, onMessage) }
                 else -> null
             },
         trailing =
-            if (transfer.status == TransferStatus.Received) {
-                null
-            } else {
-                { StatusIcon(transfer.status) }
+            when {
+                link != null -> {
+                    { TextButton(onClick = { openLink(context, link, onMessage) }) { Text("Open") } }
+                }
+                transfer.status == TransferStatus.Received -> null
+                else -> {
+                    { StatusIcon(transfer.status) }
+                }
             },
     )
 }
@@ -121,6 +126,7 @@ private fun openFile(
     context: Context,
     uri: Uri,
     name: String,
+    onMessage: (String) -> Unit,
 ) {
     val intent =
         Intent(Intent.ACTION_VIEW)
@@ -129,5 +135,26 @@ private fun openFile(
     try {
         context.startActivity(intent)
     } catch (_: ActivityNotFoundException) {
+        onMessage("No app on this phone can open $name.")
     }
+}
+
+private fun openLink(
+    context: Context,
+    link: Uri,
+    onMessage: (String) -> Unit,
+) {
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, link))
+    } catch (_: ActivityNotFoundException) {
+        onMessage("No app on this phone can open links.")
+    }
+}
+
+/** The web link, if the text is nothing but one. */
+private fun linkIn(text: String?): Uri? {
+    val trimmed = text?.trim().orEmpty()
+    val uri = Uri.parse(trimmed)
+    val web = uri.scheme == "https" || uri.scheme == "http"
+    return uri.takeIf { web && !uri.host.isNullOrEmpty() && trimmed.none(Char::isWhitespace) }
 }

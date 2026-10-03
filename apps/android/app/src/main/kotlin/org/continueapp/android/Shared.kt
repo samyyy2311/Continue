@@ -73,6 +73,8 @@ suspend fun AppState.sendShared(
     peer: TrustedPeer,
     shared: Shared,
 ): String? {
+    // Puts the computers shared to most often first in the share sheet.
+    ShortcutManagerCompat.reportShortcutUsed(context, peer.fingerprint)
     if (peer.fingerprint !in connected) reconnect(peer.fingerprint)?.let { return it }
     return if (shared.uris.isNotEmpty()) {
         sendFiles(context, peer, shared.uris)

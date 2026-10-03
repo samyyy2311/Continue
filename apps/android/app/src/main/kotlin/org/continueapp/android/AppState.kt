@@ -182,15 +182,17 @@ class AppState(private val bridge: ContinueCoreBridge) {
 
     /** Returns what to tell the user if pairing failed, or null once paired. */
     suspend fun pair(code: String): String? =
-        run("Something went wrong while pairing. Try again.") {
+        run("Pairing didn't work. Try again.") {
             bridge.pairFromQr(code)
         }
 
     suspend fun disconnect(peer: String): String? = run("Couldn't disconnect.") { bridge.disconnect(peer) }
 
-    suspend fun reconnect(peer: String): String? = run("Couldn't reconnect.") { bridge.reconnect(peer) }
+    suspend fun reconnect(peer: String): String? =
+        run("Couldn't connect. Check that both are on the same Wi-Fi.") { bridge.reconnect(peer) }
 
-    suspend fun forget(peer: String): String? = run("Couldn't forget this device.") { bridge.removeTrustedPeer(peer) }
+    suspend fun forget(peer: String): String? =
+        run("Couldn't forget this computer. Try again.") { bridge.removeTrustedPeer(peer) }
 
     suspend fun sendText(
         peer: TrustedPeer,
@@ -239,7 +241,7 @@ class AppState(private val bridge: ContinueCoreBridge) {
         peer: String,
         capability: Int,
         grant: PermissionGrant,
-    ): String? = run("Couldn't change the permission.") { bridge.setPermission(peer, capability, grant.rawValue) }
+    ): String? = run("Couldn't save that change. Try again.") { bridge.setPermission(peer, capability, grant.rawValue) }
 
     private suspend fun run(
         fallback: String,
