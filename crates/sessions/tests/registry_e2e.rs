@@ -59,7 +59,7 @@ fn node(
     let clips = Arc::new(Mutex::new(Vec::new()));
     let mut handlers = SessionCapabilityHandlers::new(std::env::temp_dir());
     let received = clips.clone();
-    handlers.on_clipboard_received = Some(Arc::new(move |update| {
+    handlers.on_clipboard_received = Some(Arc::new(move |_peer, update| {
         received.lock().unwrap().push(update.payload);
     }));
     let registry = SessionRegistry::new(

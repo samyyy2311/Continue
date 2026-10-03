@@ -231,7 +231,13 @@ export default function App() {
         const unState = await listen("peer-state-changed", () => void refreshPeers());
         cleanups.push(unState);
 
-        const unFile = await listen<{ fileName: string; path: string; bytesReceived: number }>(
+        const unFile = await listen<{
+          peerId: string;
+          peerName: string;
+          fileName: string;
+          path: string;
+          bytesReceived: number;
+        }>(
           "file-received",
           (event) => {
             showToast(`Received ${event.payload.fileName}`);
@@ -240,9 +246,9 @@ export default function App() {
                 id: `rx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 kind: "file",
                 label: event.payload.fileName,
-                peerId: "remote",
-                peerName: "Phone",
-                status: "sent",
+                peerId: event.payload.peerId,
+                peerName: event.payload.peerName,
+                status: "received",
                 timestamp: Date.now(),
                 path: event.payload.path,
                 bytesSent: event.payload.bytesReceived,
@@ -254,19 +260,19 @@ export default function App() {
         );
         cleanups.push(unFile);
 
-        const unClip = await listen<{ format: string; content: string }>(
+        const unClip = await listen<{ peerId: string; peerName: string; content: string }>(
           "clipboard-received",
           (event) => {
-            showToast("Clipboard synced from device");
+            showToast(`Copied text from ${event.payload.peerName}`);
             void navigator.clipboard?.writeText?.(event.payload.content).catch(() => {});
             setActivity((prev) => [
               {
                 id: `rx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 kind: "text",
-                label: event.payload.content.slice(0, 50),
-                peerId: "remote",
-                peerName: "Phone",
-                status: "sent",
+                label: event.payload.content,
+                peerId: event.payload.peerId,
+                peerName: event.payload.peerName,
+                status: "received",
                 timestamp: Date.now(),
               },
               ...prev,
@@ -695,7 +701,8 @@ function ActivityRow(props: { item: Activity; onRetry: (item: Activity) => void;
           </>
         ) : (
           <span className="list-sub">
-            {item.peerName} · {formatRelativeTime(item.timestamp)}
+            {item.status === "received" ? `From ${item.peerName}` : item.peerName} ·{" "}
+            {formatRelativeTime(item.timestamp)}
             {item.kind === "file" && item.bytesSent !== undefined && ` · ${formatBytes(item.bytesSent)}`}
           </span>
         )}

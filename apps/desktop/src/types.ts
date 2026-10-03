@@ -60,7 +60,7 @@ export interface Activity {
   label: string;
   peerId: string;
   peerName: string;
-  status: "sending" | "sent" | "failed";
+  status: "sending" | "sent" | "failed" | "received";
   timestamp: number;
   path?: string;
   bytesSent?: number;

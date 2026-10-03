@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -125,6 +126,8 @@ private fun ContinueApp(
         }
     }
     PermissionPrompts(state.questions)
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { state.incoming.listen(context.applicationContext) }
     BackHandler(enabled = overlay != null) { overlay = null }
 
     Scaffold(

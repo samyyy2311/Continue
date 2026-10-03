@@ -15,8 +15,8 @@ pub mod state;
 pub use auto_connect::connect_paired_peers;
 pub use backoff::ReconnectPolicy;
 pub use capabilities_router::{
-    spawn_capabilities_dispatcher, PermissionDecision, PermissionPrompt, PermissionRequest,
-    SessionCapabilityHandlers, PROMPT_TIMEOUT,
+    spawn_capabilities_dispatcher, OnReceived, PermissionDecision, PermissionPrompt,
+    PermissionRequest, SessionCapabilityHandlers, PROMPT_TIMEOUT,
 };
 pub use error::SessionError;
 pub use keepalive::KeepaliveTracker;
