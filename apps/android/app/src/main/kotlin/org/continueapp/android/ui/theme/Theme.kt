@@ -29,44 +29,44 @@ import org.continueapp.android.R
 
 enum class ThemeMode { System, Light, Dark }
 
-// Every foreground/background pair here meets WCAG AA contrast.
+// The same palette as the desktop app. Every foreground/background pair meets WCAG AA contrast.
 private val DarkColors =
     darkColorScheme(
-        primary = Color(0xFF4CC2BD),
-        onPrimary = Color(0xFF0E2A2A),
-        primaryContainer = Color(0xFF1D4A4A),
-        onPrimaryContainer = Color(0xFFBFEDEA),
-        secondaryContainer = Color(0xFF2B3A4A),
-        onSecondaryContainer = Color(0xFFD6E2F0),
-        tertiary = Color(0xFFF2B544),
-        background = Color(0xFF1B2130),
-        onBackground = Color(0xFFE8ECF3),
-        surface = Color(0xFF1B2130),
-        onSurface = Color(0xFFE8ECF3),
-        onSurfaceVariant = Color(0xFF8C97A8),
-        surfaceContainer = Color(0xFF222A3B),
-        surfaceContainerHigh = Color(0xFF2A3345),
-        outline = Color(0xFF4A5568),
-        outlineVariant = Color(0xFF2E3748),
-        error = Color(0xFFFF8A80),
+        primary = Color(0xFF5CBCB5),
+        onPrimary = Color(0xFF06201F),
+        primaryContainer = Color(0xFF233839),
+        onPrimaryContainer = Color(0xFF9DD7D3),
+        secondaryContainer = Color(0xFF2A2F35),
+        onSecondaryContainer = Color(0xFFE7E9EC),
+        background = Color(0xFF15171A),
+        onBackground = Color(0xFFE7E9EC),
+        surface = Color(0xFF15171A),
+        onSurface = Color(0xFFE7E9EC),
+        onSurfaceVariant = Color(0xFF9BA1A8),
+        surfaceContainer = Color(0xFF1C1F23),
+        surfaceContainerHigh = Color(0xFF23272B),
+        surfaceContainerHighest = Color(0xFF2C3035),
+        outline = Color(0xFF4A5057),
+        outlineVariant = Color(0xFF2A2E33),
+        error = Color(0xFFF2877E),
     )
 
 private val LightColors =
     lightColorScheme(
         primary = Color(0xFF156E6D),
         onPrimary = Color.White,
-        primaryContainer = Color(0xFFCDEDEA),
-        onPrimaryContainer = Color(0xFF0B3534),
+        primaryContainer = Color(0xFFDAE8E8),
+        onPrimaryContainer = Color(0xFF0E4847),
         secondaryContainer = Color(0xFFD8E3EE),
         onSecondaryContainer = Color(0xFF16202B),
-        tertiary = Color(0xFF9A6200),
-        background = Color(0xFFEEF2F6),
+        background = Color(0xFFF3F6F9),
         onBackground = Color(0xFF16202B),
-        surface = Color(0xFFEEF2F6),
+        surface = Color(0xFFF3F6F9),
         onSurface = Color(0xFF16202B),
         onSurfaceVariant = Color(0xFF5B6576),
         surfaceContainer = Color.White,
-        surfaceContainerHigh = Color(0xFFE4E9EF),
+        surfaceContainerHigh = Color(0xFFE9EDF2),
+        surfaceContainerHighest = Color(0xFFDBE2EA),
         outline = Color(0xFF8A94A4),
         outlineVariant = Color(0xFFD3D9E1),
         error = Color(0xFFB3261E),
@@ -97,8 +97,8 @@ private fun style(
 
 private val AppTypography =
     Typography(
-        headlineLarge = style(34, 40, FontWeight.SemiBold, -0.02),
-        headlineSmall = style(24, 30, FontWeight.SemiBold, -0.01),
+        headlineLarge = style(30, 36, FontWeight.SemiBold, -0.015),
+        headlineSmall = style(22, 28, FontWeight.SemiBold, -0.01),
         titleLarge = style(20, 26, FontWeight.SemiBold),
         titleMedium = style(17, 22, FontWeight.Medium),
         bodyLarge = style(16, 23),
@@ -110,10 +110,10 @@ private val AppTypography =
 
 private val AppShapes =
     Shapes(
-        small = RoundedCornerShape(12.dp),
-        medium = RoundedCornerShape(20.dp),
-        large = RoundedCornerShape(28.dp),
-        extraLarge = RoundedCornerShape(36.dp),
+        small = RoundedCornerShape(10.dp),
+        medium = RoundedCornerShape(14.dp),
+        large = RoundedCornerShape(20.dp),
+        extraLarge = RoundedCornerShape(24.dp),
     )
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

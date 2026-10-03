@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -36,7 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
-import org.continueapp.android.ui.components.ExpressiveButton
+import org.continueapp.android.ui.components.ActionButton
 import org.continueapp.android.ui.components.PageTitle
 import org.continueapp.android.ui.components.ScreenPadding
 
@@ -116,8 +115,8 @@ fun PairScreen(
                                 Modifier
                                     .fillMaxWidth()
                                     .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(28.dp))
-                                    .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(28.dp)),
+                                    .clip(MaterialTheme.shapes.large)
+                                    .border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.large),
                         )
                     }
                 else -> {
@@ -128,7 +127,7 @@ fun PairScreen(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                     )
-                    ExpressiveButton(onClick = { pair(typedCode.trim()) }, enabled = typedCode.isNotBlank()) {
+                    ActionButton(onClick = { pair(typedCode.trim()) }, enabled = typedCode.isNotBlank()) {
                         Text("Pair")
                     }
                 }

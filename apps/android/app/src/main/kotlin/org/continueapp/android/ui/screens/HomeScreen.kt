@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material.icons.outlined.Wifi
@@ -45,8 +46,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.continueapp.android.AppState
-import org.continueapp.android.ui.components.ExpressiveButton
-import org.continueapp.android.ui.components.LinkHero
+import org.continueapp.android.ui.components.ActionButton
+import org.continueapp.android.ui.components.DeviceGlyph
 import org.continueapp.android.ui.components.PageTitle
 import org.continueapp.android.ui.components.ScreenPadding
 import org.continueapp.android.ui.components.SectionLabel
@@ -129,7 +130,7 @@ private fun NoDevices(onPair: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        LinkHero(peerName = "your computer", connected = false)
+        DeviceGlyph(Icons.Outlined.Laptop, active = false)
         Text("Pair with your computer", style = MaterialTheme.typography.headlineSmall)
         Text(
             "Open Continue on your computer, choose Pair Device, and scan the code it shows.",
@@ -137,7 +138,7 @@ private fun NoDevices(onPair: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        ExpressiveButton(onClick = onPair) {
+        ActionButton(onClick = onPair) {
             Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
             Text("Scan code", modifier = Modifier.padding(start = 8.dp))
         }
@@ -162,9 +163,9 @@ private fun LinkPanel(
                 .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        LinkHero(peerName = peer.displayName, connected = connected)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            DeviceGlyph(Icons.Outlined.Laptop, active = connected, size = 56.dp)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(peer.displayName, style = MaterialTheme.typography.titleLarge)
                 StatusLabel(connected = connected)
             }
@@ -254,7 +255,7 @@ private fun SendButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    ExpressiveButton(onClick = onClick, enabled = enabled, tonal = true, modifier = modifier) {
+    ActionButton(onClick = onClick, enabled = enabled, tonal = true, modifier = modifier) {
         Icon(icon, contentDescription = null)
         Text(label, modifier = Modifier.padding(start = 8.dp))
     }

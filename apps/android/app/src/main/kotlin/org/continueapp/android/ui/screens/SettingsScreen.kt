@@ -3,9 +3,7 @@ package org.continueapp.android.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -17,13 +15,12 @@ import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Wifi
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import org.continueapp.android.ui.components.ChoiceRow
 import org.continueapp.android.ui.components.PageTitle
 import org.continueapp.android.ui.components.ScreenPadding
 import org.continueapp.android.ui.components.SectionLabel
@@ -71,18 +68,12 @@ fun SettingsScreen(
 
         SectionLabel("Appearance")
         SettingsRow(title = "Theme", icon = Icons.Outlined.DarkMode)
-        Row(
+        ChoiceRow(
+            choices = ThemeMode.entries.map { it to it.name },
+            selected = appearance.themeMode,
+            onSelect = appearance.onThemeModeChange,
             modifier = Modifier.padding(start = 40.dp, bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ThemeMode.entries.forEach { mode ->
-                FilterChip(
-                    selected = appearance.themeMode == mode,
-                    onClick = { appearance.onThemeModeChange(mode) },
-                    label = { Text(mode.name) },
-                )
-            }
-        }
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             SettingsRow(
                 title = "Match wallpaper colours",

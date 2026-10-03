@@ -14,7 +14,6 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Laptop
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +33,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.continueapp.android.AppState
+import org.continueapp.android.ui.components.ChoiceRow
 import org.continueapp.android.ui.components.DeviceGlyph
 import org.continueapp.android.ui.components.PageTitle
 import org.continueapp.android.ui.components.ScreenPadding
@@ -100,7 +100,7 @@ fun DeviceScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            DeviceGlyph(Icons.Outlined.Laptop, active = connected, size = 96.dp)
+            DeviceGlyph(Icons.Outlined.Laptop, active = connected, size = 72.dp)
             Text(peer.displayName, style = MaterialTheme.typography.headlineSmall)
             StatusLabel(connected = connected)
             OutlinedButton(
@@ -177,23 +177,17 @@ private fun PermissionRow(
     LaunchedEffect(peer.fingerprint, capability) { grant = state.permission(peer.fingerprint, capability) }
 
     SettingsRow(title = title, icon = icon)
-    Row(
+    ChoiceRow(
+        choices = GRANT_CHOICES,
+        selected = grant,
+        onSelect = { choice ->
+            scope.launch {
+                val error = state.setPermission(peer.fingerprint, capability, choice)
+                if (error == null) grant = choice else onMessage(error)
+            }
+        },
         modifier = Modifier.padding(start = 40.dp, bottom = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        GRANT_CHOICES.forEach { (choice, label) ->
-            FilterChip(
-                selected = grant == choice,
-                onClick = {
-                    scope.launch {
-                        val error = state.setPermission(peer.fingerprint, capability, choice)
-                        if (error == null) grant = choice else onMessage(error)
-                    }
-                },
-                label = { Text(label) },
-            )
-        }
-    }
+    )
 }
 
 private val GRANT_CHOICES =
