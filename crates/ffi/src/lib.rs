@@ -79,7 +79,8 @@ impl From<TrustedPeer> for TrustedPeerFfi {
 pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
     // Shut the previous core down first so its listener gives up the port.
     let previous = CORE.lock().unwrap().take();
-    if let Some(previous) = previous {
+    if let Some(mut previous) = previous {
+        stop_tasks(&mut previous.discovery_tasks);
         previous.listener.close(0u32.into(), b"restarting");
     }
 

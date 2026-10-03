@@ -1,5 +1,6 @@
 package org.continueapp.android.ui.screens
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -80,7 +81,13 @@ fun SettingsScreen(
             title = "Open source",
             subtitle = "No accounts, no cloud. Read the code on GitHub.",
             icon = Icons.Outlined.Code,
-            onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SOURCE_URL))) },
+            onClick = {
+                // Nothing to open it with, e.g. no browser in a work profile.
+                try {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SOURCE_URL)))
+                } catch (_: ActivityNotFoundException) {
+                }
+            },
         )
     }
 }

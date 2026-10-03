@@ -283,6 +283,11 @@ async fn start_pairing(
             .complete_handshake(&mut send_stream, &mut recv_stream, recorded_hash)
             .await;
         if let Ok(peer) = &result {
+            // Trust the new key before redialing, and even if a newer attempt replaced this one,
+            // or the listener turns the phone away.
+            if let Ok(mut allowed) = allowed_hashes.write() {
+                allowed.insert(peer.transport_spki_hash);
+            }
             sessions::remember_peer_address(
                 &trust_store,
                 &peer.fingerprint,
@@ -306,21 +311,16 @@ async fn start_pairing(
         }
 
         let _ = match result {
-            Ok(peer) => {
-                if let Ok(mut allowed) = allowed_hashes.write() {
-                    allowed.insert(peer.transport_spki_hash);
-                }
-                app.emit(
-                    "pairing-completed",
-                    TrustedPeerDto {
-                        fingerprint: peer.fingerprint,
-                        display_name: peer.display_name,
-                        paired_at: peer.paired_at,
-                        is_connected: false,
-                        endpoint: None,
-                    },
-                )
-            }
+            Ok(peer) => app.emit(
+                "pairing-completed",
+                TrustedPeerDto {
+                    fingerprint: peer.fingerprint,
+                    display_name: peer.display_name,
+                    paired_at: peer.paired_at,
+                    is_connected: false,
+                    endpoint: None,
+                },
+            ),
             Err(e) => app.emit("pairing-failed", user_error(PAIRING_FAILED)(e)),
         };
     });

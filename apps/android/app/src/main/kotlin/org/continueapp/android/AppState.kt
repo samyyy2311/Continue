@@ -64,12 +64,17 @@ class AppState(private val bridge: ContinueCoreBridge) {
         private set
     val recent = RecentTransfers()
 
+    /** Keeps what's on screen if the core can't be read this time; the next refresh tries again. */
     suspend fun refresh() {
         val (latestPeers, latestConnected) =
             withContext(Dispatchers.IO) {
-                val list = bridge.listTrustedPeers()
-                list to list.filter { bridge.isPeerConnected(it.fingerprint) }.map { it.fingerprint }.toSet()
-            }
+                try {
+                    val list = bridge.listTrustedPeers()
+                    list to list.filter { bridge.isPeerConnected(it.fingerprint) }.map { it.fingerprint }.toSet()
+                } catch (_: ContinueException) {
+                    null
+                }
+            } ?: return
         peers = latestPeers
         connected = latestConnected
     }
