@@ -430,6 +430,7 @@ private fun PermissionRequestFfi.toPermissionQuestion() =
         peerName = peerName,
         capability = Capability.fromId(capabilityId.toInt()),
         detail = detail,
+        expiresAt = expiresAt.toLong(),
     )
 
 /** Runs a core call, turning its errors into the bridge's own exception types. */

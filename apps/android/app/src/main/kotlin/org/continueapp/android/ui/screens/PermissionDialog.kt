@@ -15,9 +15,6 @@ import org.continueapp.bridge.Capability
 import org.continueapp.bridge.PermissionAnswer
 import org.continueapp.bridge.PermissionQuestion
 
-/** The core declines a question after waiting this long, so the dialog goes away with it. */
-private const val QUESTION_TIMEOUT_MS = 30_000L
-
 /** Shows questions from devices set to Ask while the app is open. */
 @Composable
 fun PermissionPrompts(questions: PermissionQuestions) {
@@ -25,8 +22,9 @@ fun PermissionPrompts(questions: PermissionQuestions) {
     LaunchedEffect(Unit) { questions.listen() }
     val question = questions.current ?: return
     PermissionDialog(question, onAnswer = { answer -> scope.launch { questions.answer(answer) } })
+    // The core declines at expiresAt, so the question goes away then, not 30 seconds after it showed.
     LaunchedEffect(question.id) {
-        delay(QUESTION_TIMEOUT_MS)
+        delay(question.expiresAt - System.currentTimeMillis())
         questions.dismiss(question.id)
     }
 }

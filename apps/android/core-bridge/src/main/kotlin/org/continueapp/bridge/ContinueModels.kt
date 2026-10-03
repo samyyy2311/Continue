@@ -31,6 +31,8 @@ data class PermissionQuestion(
     val capability: Capability?,
     /** The file name, for files. */
     val detail: String?,
+    /** Unix time in milliseconds when the core declines it if nobody answers. */
+    val expiresAt: Long,
 )
 
 enum class PermissionAnswer {

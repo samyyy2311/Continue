@@ -58,7 +58,6 @@ import {
   getFileCategory,
 } from "./format.ts";
 import { PairDialog } from "./PairDialog.tsx";
-import { PermissionDialog } from "./PermissionDialog.tsx";
 import {
   ACCENT_PALETTE,
   type AccentName,
@@ -662,7 +661,6 @@ export default function App() {
       )}
 
       {showPairDialog && <PairDialog onPaired={handlePaired} onClose={() => setShowPairDialog(false)} />}
-      <PermissionDialog />
 
       {toast && (
         <div className={`snackbar ${toast.tone}`} role={toast.tone === "error" ? "alert" : "status"}>

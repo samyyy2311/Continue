@@ -131,20 +131,25 @@ async fn ask_shows_the_file_name_and_allowing_once_asks_again_next_time() {
     assert!(send_file(&link, "first.jpg").await);
     assert!(send_file(&link, "second.jpg").await);
 
-    let asked = asked.lock().unwrap();
+    let asked: Vec<_> = asked
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|q| (q.peer.clone(), q.capability, q.detail.clone()))
+        .collect();
     assert_eq!(
-        *asked,
-        vec![
-            PermissionRequest {
-                peer: PHONE.to_string(),
-                capability: CapabilityId::FILE_TRANSFER,
-                detail: Some("first.jpg".to_string()),
-            },
-            PermissionRequest {
-                peer: PHONE.to_string(),
-                capability: CapabilityId::FILE_TRANSFER,
-                detail: Some("second.jpg".to_string()),
-            },
+        asked,
+        [
+            (
+                PHONE.to_string(),
+                CapabilityId::FILE_TRANSFER,
+                Some("first.jpg".to_string())
+            ),
+            (
+                PHONE.to_string(),
+                CapabilityId::FILE_TRANSFER,
+                Some("second.jpg".to_string())
+            ),
         ]
     );
     assert!(downloads.join("first.jpg").exists());
