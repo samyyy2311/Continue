@@ -117,3 +117,12 @@ sealed class ContinueException(
 
     class NotInitializedException(message: String) : ContinueException(message)
 }
+
+/** A file on its way in. */
+data class IncomingFile(
+    val transferId: String,
+    val peerName: String,
+    val fileName: String,
+    val received: Long,
+    val total: Long,
+)

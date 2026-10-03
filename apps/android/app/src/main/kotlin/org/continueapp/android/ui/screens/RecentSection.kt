@@ -19,12 +19,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import org.continueapp.android.Incoming
 import org.continueapp.android.RecentTransfers
 import org.continueapp.android.Transfer
 import org.continueapp.android.TransferKind
@@ -34,21 +36,48 @@ import org.continueapp.android.ui.components.SectionLabel
 import org.continueapp.android.ui.components.SettingsRow
 import org.continueapp.android.ui.theme.success
 import org.continueapp.android.viewIntent
+import org.continueapp.bridge.IncomingFile
 
 private const val RECENT_ON_HOME = 5
+private const val PERCENT = 100
 
 @Composable
 fun RecentSection(
     recent: RecentTransfers,
+    incoming: Incoming,
     onMessage: (String) -> Unit,
 ) {
-    if (recent.items.isEmpty()) return
+    LaunchedEffect(incoming) { incoming.watchArriving() }
+    if (recent.items.isEmpty() && incoming.arriving.isEmpty()) return
     val scope = rememberCoroutineScope()
     Row(verticalAlignment = Alignment.Bottom) {
         SectionLabel("Recent", modifier = Modifier.weight(1f))
         TextButton(onClick = { scope.launch { recent.clear()?.let(onMessage) } }) { Text("Clear") }
     }
+    incoming.arriving.forEach { file ->
+        ArrivingRow(file, onCancel = { scope.launch { incoming.cancel(file.transferId) } })
+    }
     recent.items.take(RECENT_ON_HOME).forEach { RecentRow(it, onMessage) }
+}
+
+/** A file on its way in, with how far along it is. */
+@Composable
+private fun ArrivingRow(
+    file: IncomingFile,
+    onCancel: () -> Unit,
+) {
+    val fraction = if (file.total > 0) file.received.toFloat() / file.total else 0f
+    SettingsRow(
+        title = file.fileName,
+        icon = Icons.Outlined.Description,
+        subtitle = "Receiving from ${file.peerName.ifBlank { "your computer" }} · ${(fraction * PERCENT).toInt()}%",
+        trailing = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(progress = { fraction }, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                TextButton(onClick = onCancel) { Text("Cancel") }
+            }
+        },
+    )
 }
 
 @Composable
