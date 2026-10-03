@@ -17,6 +17,22 @@ use protocol::CapabilityId;
 use sessions::{SessionRegistry, SessionState};
 use transport::{DialConfig, TransportCertificate};
 
+/// Logs what actually went wrong and gives the UI a sentence a person can act on.
+fn user_error<E: std::fmt::Display>(message: &'static str) -> impl FnOnce(E) -> String {
+    move |error| {
+        tracing::warn!("{message} ({error})");
+        message.to_string()
+    }
+}
+
+const NOT_CONNECTED: &str = "That device isn't connected.";
+const PAIRING_SETUP_FAILED: &str = "Couldn't get a pairing code ready. Try again.";
+const PAIRING_FAILED: &str = "Pairing didn't finish. Try again.";
+const BAD_CODE: &str = "That code doesn't look right. Copy the whole code and try again.";
+const UNREACHABLE: &str = "Couldn't reach the other device. Check that both are on the same Wi-Fi.";
+const NO_NETWORK: &str = "This computer isn't on a network. Connect to Wi-Fi and try again.";
+const SAVE_FAILED: &str = "Couldn't save that change. Try again.";
+
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
     bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -133,7 +149,7 @@ fn get_device_identity(state: State<DesktopRuntimeState>) -> Result<DeviceIdenti
     let verifying_key = state
         .identity_signer
         .verifying_key()
-        .map_err(|e| format!("Key derivation error: {e}"))?;
+        .map_err(user_error("Couldn't load this computer's details."))?;
     let fingerprint = identity::Fingerprint::from_verifying_key(&verifying_key)
         .as_str()
         .to_string();
@@ -151,7 +167,7 @@ fn get_trusted_peers(state: State<DesktopRuntimeState>) -> Result<Vec<TrustedPee
     let peers = state
         .trust_store
         .list_peers()
-        .map_err(|e| format!("Database error: {e}"))?;
+        .map_err(user_error("Couldn't load your devices."))?;
 
     let dtos = peers
         .into_iter()
@@ -190,7 +206,7 @@ async fn remove_trusted_peer(
     let removed = state
         .trust_store
         .remove_peer(&fingerprint)
-        .map_err(|e| format!("Database error: {e}"))?;
+        .map_err(user_error("Couldn't forget this device. Try again."))?;
     state.sessions.remove(&fingerprint).await;
     Ok(removed)
 }
@@ -199,15 +215,14 @@ async fn remove_trusted_peer(
 /// socket only selects a route; no packet is sent, so this works offline as long
 /// as the machine has a default route.
 fn local_lan_ip() -> Result<std::net::IpAddr, String> {
-    let socket =
-        std::net::UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Network unavailable: {e}"))?;
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").map_err(user_error(NO_NETWORK))?;
     socket
         .connect("192.0.2.1:9")
-        .map_err(|e| format!("No local network route: {e}"))?;
+        .map_err(user_error(NO_NETWORK))?;
     socket
         .local_addr()
         .map(|addr| addr.ip())
-        .map_err(|e| format!("Network unavailable: {e}"))
+        .map_err(user_error(NO_NETWORK))
 }
 
 #[tauri::command]
@@ -227,15 +242,15 @@ async fn start_pairing(
     let server_tls = state
         .transport_cert
         .build_pairing_server_tls(recorded_spki.clone())
-        .map_err(|e| format!("TLS configuration failed: {e}"))?;
+        .map_err(user_error(PAIRING_SETUP_FAILED))?;
 
     let lan_ip = local_lan_ip()?;
     let bind_addr = std::net::SocketAddr::from(([0, 0, 0, 0], 0));
     let server_endpoint = transport::create_server_endpoint(bind_addr, server_tls)
-        .map_err(|e| format!("Failed to create server endpoint: {e}"))?;
+        .map_err(user_error(PAIRING_SETUP_FAILED))?;
     let listen_port = server_endpoint
         .local_addr()
-        .map_err(|e| format!("Failed to read listening port: {e}"))?
+        .map_err(user_error(PAIRING_SETUP_FAILED))?
         .port();
     let advertised_endpoint = std::net::SocketAddr::new(lan_ip, listen_port).to_string();
 
@@ -248,7 +263,7 @@ async fn start_pairing(
 
     let qr = initiator
         .generate_qr(advertised_endpoint)
-        .map_err(|e| format!("Failed to generate pairing payload: {e}"))?;
+        .map_err(user_error(PAIRING_SETUP_FAILED))?;
 
     let pairing_server = Arc::new(ActivePairingServer {
         server_endpoint: server_endpoint.clone(),
@@ -323,7 +338,7 @@ async fn start_pairing(
                     },
                 )
             }
-            Err(e) => app.emit("pairing-failed", format!("Pairing handshake failed: {e}")),
+            Err(e) => app.emit("pairing-failed", user_error(PAIRING_FAILED)(e)),
         };
     });
 
@@ -344,13 +359,9 @@ async fn pair_from_qr(
     state: State<'_, DesktopRuntimeState>,
     qr_payload: String,
 ) -> Result<TrustedPeerDto, String> {
-    let qr =
-        pairing::QrPayload::decode(&qr_payload).map_err(|e| format!("Invalid QR payload: {e}"))?;
+    let qr = pairing::QrPayload::decode(&qr_payload).map_err(user_error(BAD_CODE))?;
 
-    let addr: std::net::SocketAddr = qr
-        .endpoint
-        .parse()
-        .map_err(|e| format!("Invalid endpoint address: {e}"))?;
+    let addr: std::net::SocketAddr = qr.endpoint.parse().map_err(user_error(BAD_CODE))?;
 
     let connection = transport::connect_pinned(
         &state.transport_cert,
@@ -359,12 +370,12 @@ async fn pair_from_qr(
         &DialConfig::default(),
     )
     .await
-    .map_err(|e| format!("Connect failed: {e}"))?;
+    .map_err(user_error(UNREACHABLE))?;
 
     let (mut send_stream, mut recv_stream) = connection
         .open_bi()
         .await
-        .map_err(|e| format!("Stream open failed: {e}"))?;
+        .map_err(user_error(UNREACHABLE))?;
 
     let responder = pairing::ResponderPairing::new(
         state.identity_signer.clone(),
@@ -375,7 +386,7 @@ async fn pair_from_qr(
     let trusted_peer = responder
         .complete_handshake(&qr, &mut send_stream, &mut recv_stream)
         .await
-        .map_err(|e| format!("Pairing handshake failed: {e}"))?;
+        .map_err(user_error(PAIRING_FAILED))?;
 
     if let Ok(mut allowed) = state.allowed_spki_hashes.write() {
         allowed.insert(trusted_peer.transport_spki_hash);
@@ -409,7 +420,7 @@ fn get_permissions(
     for (cap_id, name) in capabilities {
         let perm_state = store
             .query_state(&peer_fingerprint, cap_id)
-            .map_err(|e| format!("Database error: {e}"))?;
+            .map_err(user_error("Couldn't load what this device can do."))?;
 
         let grant_str = match perm_state {
             permissions::PermissionState::Allow => "Allow",
@@ -445,7 +456,7 @@ fn set_permission(
                 .grant_allow_once(&peer_fingerprint, CapabilityId(capability_id));
             return Ok(());
         }
-        _ => return Err(format!("Unsupported grant type: {grant}")),
+        _ => return Err(user_error(SAVE_FAILED)(format!("unknown grant {grant}"))),
     };
 
     state
@@ -456,7 +467,7 @@ fn set_permission(
             1,
             parsed_grant,
         )
-        .map_err(|e| format!("Database error: {e}"))?;
+        .map_err(user_error(SAVE_FAILED))?;
 
     Ok(())
 }
@@ -470,23 +481,27 @@ async fn connect_to_peer(
     let peer = state
         .trust_store
         .get_peer(&peer_fingerprint)
-        .map_err(|e| format!("Database error: {e}"))?
-        .ok_or_else(|| "Peer not found in trust store".to_string())?;
+        .map_err(user_error("Couldn't load this device."))?
+        .ok_or_else(|| "This device isn't paired any more.".to_string())?;
 
-    let addr: std::net::SocketAddr = endpoint
-        .parse()
-        .map_err(|e| format!("Invalid endpoint address: {e}"))?;
+    let addr: std::net::SocketAddr = endpoint.trim().parse().map_err(user_error(
+        "Enter the address with its port, like 192.168.1.20:47470.",
+    ))?;
 
     state
         .sessions
         .connect(&peer_fingerprint, peer.transport_spki_hash, addr)
         .await
-        .map_err(|e| format!("Connect failed: {e}"))?;
+        .map_err(user_error("Couldn't reach the device at that address."))?;
 
-    state
+    // The connection is up either way; failing to remember the address only matters next time.
+    if let Err(error) = state
         .trust_store
         .set_last_endpoint(&peer_fingerprint, &addr.to_string())
-        .map_err(|e| format!("Database error: {e}"))
+    {
+        tracing::warn!("Couldn't save the address for {peer_fingerprint} ({error})");
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -523,7 +538,7 @@ async fn send_file_to_peer(
     let mux = state
         .sessions
         .get(&peer_fingerprint)
-        .ok_or_else(|| "Peer is not connected".to_string())?;
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
 
     let path = std::path::PathBuf::from(file_path);
     let now = std::time::SystemTime::now()
@@ -547,7 +562,7 @@ async fn send_file_to_peer(
 
     mux.send_file_to_peer(&path, transfer_id, Some(report))
         .await
-        .map_err(|e| format!("Failed to send file: {e}"))
+        .map_err(user_error("Couldn't send the file."))
 }
 
 #[tauri::command]
@@ -559,7 +574,7 @@ async fn send_clipboard_text(
     let mux = state
         .sessions
         .get(&peer_fingerprint)
-        .ok_or_else(|| "Peer is not connected".to_string())?;
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
 
     let mut caps = std::collections::HashSet::new();
     caps.insert(protocol::CapabilityId::CLIPBOARD);
@@ -577,7 +592,7 @@ async fn send_clipboard_text(
         &query,
     )
     .await
-    .map_err(|e| format!("Clipboard sync error: {e}"))?;
+    .map_err(user_error("Couldn't send the text."))?;
 
     Ok(())
 }
@@ -593,7 +608,7 @@ async fn send_notification(
     let mux = state
         .sessions
         .get(&peer_fingerprint)
-        .ok_or_else(|| "Peer is not connected".to_string())?;
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
 
     let dispatcher = notifications::NotificationDispatcher::new();
     let mut caps = std::collections::HashSet::new();
@@ -623,7 +638,7 @@ async fn send_notification(
 
     mux.send_notification_to_peer(&dispatcher, post, &query)
         .await
-        .map_err(|e| format!("Notification error: {e}"))?;
+        .map_err(user_error("Couldn't send the notification."))?;
 
     Ok(())
 }

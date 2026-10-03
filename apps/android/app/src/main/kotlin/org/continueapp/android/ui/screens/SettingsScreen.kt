@@ -11,9 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
@@ -38,7 +36,6 @@ class AppearanceSettings(
 
 @Composable
 fun SettingsScreen(
-    deviceKey: String,
     visible: Boolean,
     onVisibleChange: (Boolean) -> Unit,
     appearance: AppearanceSettings,
@@ -49,14 +46,6 @@ fun SettingsScreen(
 
     Column(modifier = modifier.verticalScroll(rememberScrollState()).padding(horizontal = ScreenPadding)) {
         PageTitle("Settings")
-
-        SectionLabel("This phone")
-        SettingsRow(
-            title = "Model",
-            subtitle = "${Build.MANUFACTURER} ${Build.MODEL}",
-            icon = Icons.Outlined.PhoneAndroid,
-        )
-        SettingsRow(title = "Device key", subtitle = deviceKey, icon = Icons.Outlined.Key)
 
         SectionLabel("Connectivity")
         SettingsRow(

@@ -20,7 +20,6 @@ import {
   History,
   Home,
   Info,
-  KeyRound,
   Laptop,
   Loader,
   Plus,
@@ -54,7 +53,6 @@ import {
 import {
   fileNameFromPath,
   formatBytes,
-  formatPairedDate,
   formatRelativeTime,
   getFileCategory,
 } from "./format.ts";
@@ -610,24 +608,19 @@ export default function App() {
     [refreshPeers, showToast],
   );
 
-  const ready = !loadError && peers !== null;
-
-  if (!ready) {
+  if (loadError) {
     return (
       <main className="standalone">
         <DeviceGlyph icon={<Laptop size={28} strokeWidth={1.75} />} size="lg" />
-        <h1 className="headline">{loadError ? "Continue couldn't start" : "Continue"}</h1>
-        <p className="supporting">
-          {loadError || "Open this window from the Continue app, or start it with pnpm tauri dev."}
-        </p>
-        {isTauri() && (
-          <button type="button" className="btn btn-filled" onClick={() => window.location.reload()}>
-            Try again
-          </button>
-        )}
+        <h1 className="headline">Continue couldn't start</h1>
+        <p className="supporting">{loadError}</p>
+        <button type="button" className="btn btn-filled" onClick={() => window.location.reload()}>
+          Try again
+        </button>
       </main>
     );
   }
+  if (peers === null) return null;
 
   const activeTransfers = activity.filter((a) => a.status === "sending");
   const recentActivity = activity.filter((a) => a.status !== "sending").slice(0, 5);
@@ -713,7 +706,6 @@ export default function App() {
               accent={accent}
               onThemeChange={setTheme}
               onAccentChange={setAccent}
-              onCopy={copyToClipboard}
             />
           )}
         </div>
@@ -869,7 +861,7 @@ function HomeView(props: HomeViewProps) {
         </div>
         <p className="supporting">
           {online
-            ? `On your network${peer.endpoint ? ` at ${peer.endpoint}` : ""}. Drop files anywhere in this window to send them.`
+            ? "Drop files anywhere in this window to send them."
             : "It connects on its own when both devices are on the same Wi-Fi."}
         </p>
         {online ? (
@@ -1040,7 +1032,7 @@ function DeviceCard(props: {
         <div className="card-title">
           <h2 className="headline">{peer.displayName}</h2>
           <span className={`status ${peer.isConnected ? "online" : ""}`}>
-            {peer.isConnected ? "Connected" : "Not connected"} · paired {formatPairedDate(peer.pairedAt)}
+            {peer.isConnected ? "Connected" : "Not connected"}
           </span>
         </div>
         <div className="card-actions">
@@ -1188,7 +1180,6 @@ interface SettingsViewProps {
   accent: AccentName;
   onThemeChange: (theme: Theme) => void;
   onAccentChange: (accent: AccentName) => void;
-  onCopy: (text: string) => void;
 }
 
 const THEME_OPTIONS = [
@@ -1198,7 +1189,7 @@ const THEME_OPTIONS = [
 ] as const;
 
 function SettingsView(props: SettingsViewProps) {
-  const { identity, theme, accent, onThemeChange, onAccentChange, onCopy } = props;
+  const { identity, theme, accent, onThemeChange, onAccentChange } = props;
   const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
@@ -1257,33 +1248,23 @@ function SettingsView(props: SettingsViewProps) {
                 <span className="list-sub">{identity.deviceName}</span>
               </div>
             </li>
-            <li className="list-item">
-              <span className="list-leading">
-                <KeyRound size={20} />
-              </span>
-              <div className="list-text">
-                <span className="list-title">Device key</span>
-                <span className="list-sub mono">{identity.fingerprint}</span>
-              </div>
-              <button type="button" className="icon-btn" title="Copy" onClick={() => onCopy(identity.fingerprint)}>
-                <Copy size={18} />
-              </button>
-            </li>
           </ul>
         </>
       )}
 
       <h2 className="label">About</h2>
       <ul className="list">
-        <li className="list-item">
-          <span className="list-leading">
-            <Info size={20} />
-          </span>
-          <div className="list-text">
-            <span className="list-title">Version</span>
-            <span className="list-sub">{appVersion || "0.1.0"}</span>
-          </div>
-        </li>
+        {appVersion && (
+          <li className="list-item">
+            <span className="list-leading">
+              <Info size={20} />
+            </span>
+            <div className="list-text">
+              <span className="list-title">Version</span>
+              <span className="list-sub">{appVersion}</span>
+            </div>
+          </li>
+        )}
         <li className="list-item">
           <span className="list-leading">
             <Code size={20} />

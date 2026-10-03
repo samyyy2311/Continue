@@ -45,10 +45,6 @@ import org.continueapp.bridge.CAPABILITY_FILE_TRANSFER_ID
 import org.continueapp.bridge.CAPABILITY_NOTIFICATIONS_ID
 import org.continueapp.bridge.PermissionGrant
 import org.continueapp.bridge.TrustedPeer
-import java.text.DateFormat
-import java.util.Date
-
-private const val MILLIS_PER_SECOND = 1000L
 
 @Composable
 fun DevicesScreen(
@@ -127,13 +123,6 @@ fun DeviceScreen(
             Icons.Outlined.Notifications,
             onMessage,
         )
-
-        SectionLabel("About this device")
-        SettingsRow(
-            title = "Paired",
-            subtitle = DateFormat.getDateInstance().format(Date(peer.pairedAt * MILLIS_PER_SECOND)),
-        )
-        SettingsRow(title = "Device key", subtitle = peer.fingerprint)
 
         TextButton(onClick = { confirmingForget = true }, modifier = Modifier.padding(vertical = 16.dp)) {
             Text("Forget this device", color = MaterialTheme.colorScheme.error)

@@ -26,8 +26,6 @@ class AppState(private val bridge: ContinueCoreBridge) {
     var connected by mutableStateOf<Set<String>>(emptySet())
         private set
 
-    val deviceKey: String = bridge.getDeviceFingerprint()
-
     suspend fun refresh() {
         val (latestPeers, latestConnected) =
             withContext(Dispatchers.IO) {

@@ -193,7 +193,6 @@ private fun ContinueApp(
                             )
                         Tab.Settings ->
                             SettingsScreen(
-                                deviceKey = state.deviceKey,
                                 visible = visible,
                                 onVisibleChange = onVisibleChange,
                                 appearance = appearance,
