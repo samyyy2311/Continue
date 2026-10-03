@@ -37,6 +37,8 @@ data class Transfer(
     val uri: Uri? = null,
     /** Unix time in milliseconds. */
     val at: Long = System.currentTimeMillis(),
+    /** The whole text, for text that was sent or received. */
+    val text: String? = null,
 )
 
 /** What this phone has sent and received, newest first. The core saves it across restarts. */
@@ -76,10 +78,12 @@ class RecentTransfers(private val bridge: ContinueCoreBridge) {
         kind: TransferKind,
         label: String,
         peerName: String,
+        text: String? = null,
         send: suspend () -> String?,
     ): String? {
         val id = "live-${nextId++}"
-        items = (listOf(Transfer(id, kind, label, peerName, TransferStatus.Sending)) + items).take(RECENT_LIMIT)
+        val transfer = Transfer(id, kind, label, peerName, TransferStatus.Sending, text = text)
+        items = (listOf(transfer) + items).take(RECENT_LIMIT)
         val error = send()
         val status = if (error == null) TransferStatus.Sent else TransferStatus.Failed
         items = items.map { if (it.id == id) it.copy(status = status) else it }
@@ -90,9 +94,10 @@ class RecentTransfers(private val bridge: ContinueCoreBridge) {
         kind: TransferKind,
         label: String,
         peerName: String,
-        uri: Uri?,
+        uri: Uri? = null,
+        text: String? = null,
     ) {
-        val transfer = Transfer("live-${nextId++}", kind, label, peerName, TransferStatus.Received, uri)
+        val transfer = Transfer("live-${nextId++}", kind, label, peerName, TransferStatus.Received, uri, text = text)
         items = (listOf(transfer) + items).take(RECENT_LIMIT)
     }
 }
@@ -114,6 +119,7 @@ private fun HistoryEntry.toTransfer() =
             },
         uri = location?.takeIf { it.startsWith("content://") }?.let(Uri::parse),
         at = at,
+        text = label.takeIf { isText },
     )
 
 /** Questions from devices set to Ask. The core asks one at a time. */
@@ -185,7 +191,7 @@ class AppState(private val bridge: ContinueCoreBridge) {
         peer: TrustedPeer,
         text: String,
     ): String? =
-        recent.track(TransferKind.Text, firstLine(text), peer.displayName) {
+        recent.track(TransferKind.Text, firstLine(text), peer.displayName, text) {
             run("Couldn't send the text.") { bridge.sendClipboardText(peer.fingerprint, text) }
         }
 

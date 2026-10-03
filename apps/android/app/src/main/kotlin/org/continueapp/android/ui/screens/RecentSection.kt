@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.text.format.DateUtils
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -28,6 +29,7 @@ import org.continueapp.android.RecentTransfers
 import org.continueapp.android.Transfer
 import org.continueapp.android.TransferKind
 import org.continueapp.android.TransferStatus
+import org.continueapp.android.copyToClipboard
 import org.continueapp.android.mimeType
 import org.continueapp.android.ui.components.SectionLabel
 import org.continueapp.android.ui.components.SettingsRow
@@ -46,11 +48,14 @@ fun RecentSection(
         SectionLabel("Recent", modifier = Modifier.weight(1f))
         TextButton(onClick = { scope.launch { recent.clear()?.let(onMessage) } }) { Text("Clear") }
     }
-    recent.items.take(RECENT_ON_HOME).forEach { RecentRow(it) }
+    recent.items.take(RECENT_ON_HOME).forEach { RecentRow(it, onMessage) }
 }
 
 @Composable
-private fun RecentRow(transfer: Transfer) {
+private fun RecentRow(
+    transfer: Transfer,
+    onMessage: (String) -> Unit,
+) {
     val context = LocalContext.current
     val name = transfer.peerName
     SettingsRow(
@@ -65,7 +70,12 @@ private fun RecentRow(transfer: Transfer) {
                     (if (transfer.kind == TransferKind.Text) "Copied from $name" else "From $name") +
                         " · ${whenText(transfer.at)}"
             },
-        onClick = transfer.uri?.let { uri -> { openFile(context, uri, transfer.label) } },
+        onClick =
+            when {
+                transfer.uri != null -> { -> openFile(context, transfer.uri, transfer.label) }
+                transfer.text != null -> { -> copyAgain(context, transfer.text, onMessage) }
+                else -> null
+            },
         trailing =
             if (transfer.status == TransferStatus.Received) {
                 null
@@ -94,6 +104,16 @@ private fun whenText(at: Long): String {
     } else {
         DateUtils.getRelativeTimeSpanString(at, now, DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_ALL).toString()
     }
+}
+
+/** Android 13 and newer confirm a copy themselves, so only older versions get a message. */
+private fun copyAgain(
+    context: Context,
+    text: String,
+    onMessage: (String) -> Unit,
+) {
+    copyToClipboard(context, text)
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onMessage("Copied")
 }
 
 /** Opens a received file in whatever app handles it, if there is one. */

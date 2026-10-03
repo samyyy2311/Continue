@@ -38,7 +38,7 @@ class Incoming(
                 }
                 is ReceivedText -> {
                     copyToClipboard(context, item.text)
-                    recent.received(TransferKind.Text, firstLine(item.text), item.peerName, null)
+                    recent.received(TransferKind.Text, firstLine(item.text), item.peerName, text = item.text)
                 }
                 null -> Unit
             }
@@ -59,7 +59,7 @@ class Incoming(
 
 fun mimeType(name: String): String = URLConnection.guessContentTypeFromName(name) ?: "application/octet-stream"
 
-private fun copyToClipboard(
+fun copyToClipboard(
     context: Context,
     text: String,
 ) {

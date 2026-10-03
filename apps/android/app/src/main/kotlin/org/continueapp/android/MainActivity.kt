@@ -1,5 +1,6 @@
 package org.continueapp.android
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -29,6 +30,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,12 +50,19 @@ import org.continueapp.android.ui.screens.HomeScreen
 import org.continueapp.android.ui.screens.PairScreen
 import org.continueapp.android.ui.screens.PermissionPrompts
 import org.continueapp.android.ui.screens.SettingsScreen
+import org.continueapp.android.ui.screens.SharePrompt
 import org.continueapp.android.ui.theme.ContinueTheme
 
 class MainActivity : ComponentActivity() {
+    /** Something shared from another app, waiting for the user to pick a computer. */
+    private val shared = mutableStateOf<Shared?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // Rotating or reopening from recent apps shouldn't ask again about a share already answered.
+        val fromRecents = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        if (savedInstanceState == null && !fromRecents) shared.value = sharedFrom(intent)
         val app = application as ContinueApplication
         val state = AppState(app.coreBridge)
 
@@ -83,9 +92,15 @@ class MainActivity : ComponentActivity() {
                         app.visible = it
                     },
                     appearance = appearance,
+                    shared = shared,
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        sharedFrom(intent)?.let { shared.value = it }
     }
 }
 
@@ -111,6 +126,7 @@ private fun ContinueApp(
     visible: Boolean,
     onVisibleChange: (Boolean) -> Unit,
     appearance: AppearanceSettings,
+    shared: MutableState<Shared?>,
 ) {
     var tab by remember { mutableStateOf(Tab.Home) }
     var overlay by remember { mutableStateOf<Overlay?>(null) }
@@ -132,6 +148,10 @@ private fun ContinueApp(
         state.incoming.listen(context.applicationContext)
     }
     BackHandler(enabled = overlay != null) { overlay = null }
+    SharePrompt(shared, state, onMessage = showMessage) {
+        overlay = null
+        tab = Tab.Home
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
