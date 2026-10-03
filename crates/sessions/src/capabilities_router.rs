@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Notify};
 use tracing::{debug, error, info, warn};
 
 use capabilities::CapabilityQuery;
@@ -14,6 +14,7 @@ use notifications::{NotificationAck, NotificationDispatcher, NotificationPost};
 use protocol::CapabilityId;
 use transfer::{receive_file, send_file, ReceivedFile};
 
+use crate::incoming::{IncomingFiles, SaveFolder};
 use crate::multiplexer::SessionMultiplexer;
 
 /// How long a question waits for the user before it counts as declined.
@@ -50,7 +51,8 @@ pub type OnReceived<T> = Arc<dyn Fn(&str, T) + Send + Sync>;
 /// Callbacks and configuration for active capabilities over a multiplexed session.
 #[derive(Clone)]
 pub struct SessionCapabilityHandlers {
-    pub download_dir: PathBuf,
+    pub save_folder: SaveFolder,
+    pub incoming: IncomingFiles,
     pub notification_dispatcher: Arc<NotificationDispatcher>,
     pub on_file_received: Option<OnReceived<ReceivedFile>>,
     pub on_clipboard_received: Option<OnReceived<ClipboardUpdate>>,
@@ -63,9 +65,10 @@ pub struct SessionCapabilityHandlers {
 }
 
 impl SessionCapabilityHandlers {
-    pub fn new(download_dir: impl Into<PathBuf>) -> Self {
+    pub fn new(save_folder: impl Into<PathBuf>) -> Self {
         Self {
-            download_dir: download_dir.into(),
+            save_folder: SaveFolder::new(save_folder),
+            incoming: IncomingFiles::default(),
             notification_dispatcher: Arc::new(NotificationDispatcher::new()),
             on_file_received: None,
             on_clipboard_received: None,
@@ -78,6 +81,12 @@ impl SessionCapabilityHandlers {
 
     pub fn with_permission_store(mut self, store: Arc<permissions::PermissionStore>) -> Self {
         self.permission_store = Some(store);
+        self
+    }
+
+    /// Reports files as they come in, to whoever holds a clone of `incoming`.
+    pub fn with_incoming(mut self, incoming: IncomingFiles) -> Self {
+        self.incoming = incoming;
         self
     }
 
@@ -184,15 +193,25 @@ pub fn spawn_capabilities_dispatcher(
                             }
                         };
 
-                        match receive_file(
+                        // Signalled by `IncomingFiles::cancel`.
+                        let stop = Arc::new(Notify::new());
+                        let progress = |req: &protocol::v1::FileTransferRequest, received| {
+                            handlers_ref.incoming.update(peer_ref, req, received, &stop);
+                        };
+                        let stopped = {
+                            let stop = stop.clone();
+                            async move { stop.notified().await }
+                        };
+                        let result = receive_file(
                             &mut stream.send_stream,
                             &mut stream.recv_stream,
-                            &handlers.download_dir,
+                            &handlers.save_folder.get(),
                             Some(check),
-                            None::<fn(u64, u64)>,
+                            Some(progress),
+                            stopped,
                         )
-                        .await
-                        {
+                        .await;
+                        match result {
                             Ok(received) => {
                                 info!(
                                     "Successfully received file {} ({} bytes) from {peer_fp}",
@@ -212,6 +231,7 @@ pub fn spawn_capabilities_dispatcher(
                                 error!("Failed to receive file from {peer_fp}: {e}");
                             }
                         }
+                        handlers.incoming.end(&stop);
                     }
                     CapabilityId::CLIPBOARD => {
                         debug!("Handling incoming clipboard stream from {peer_fp}");
