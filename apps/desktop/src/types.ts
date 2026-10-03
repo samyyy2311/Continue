@@ -60,12 +60,24 @@ export interface Activity {
   label: string;
   peerId: string;
   peerName: string;
-  status: "sending" | "sent" | "failed" | "received";
+  status: "sending" | "sent" | "failed" | "receiving" | "received";
   timestamp: number;
   path?: string;
   bytesSent?: number;
   totalBytes?: number;
   error?: string;
+  /** For a file coming in, the id that cancels it. */
+  transferId?: string;
+}
+
+/** A file on its way in. */
+export interface IncomingTransfer {
+  transferId: string;
+  peerId: string;
+  peerName: string;
+  fileName: string;
+  received: number;
+  total: number;
 }
 
 /** A saved send or receive, newest first from `getHistory`. */
