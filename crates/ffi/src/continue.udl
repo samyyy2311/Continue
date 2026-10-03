@@ -50,6 +50,10 @@ namespace continue {
     [Throws=ContinueFfiError]
     void revoke_permission(string peer_fingerprint, u32 capability_id);
 
+    PermissionRequestFfi? next_permission_request(u32 timeout_ms);
+
+    void answer_permission_request(u64 id, PermissionDecisionFfi decision);
+
     [Throws=ContinueFfiError]
     void connect_to_peer(string peer_fingerprint, string endpoint);
 
@@ -70,6 +74,21 @@ namespace continue {
 
     [Throws=ContinueFfiError]
     void send_notification(string peer_fingerprint, string title, string body, string app_name);
+};
+
+dictionary PermissionRequestFfi {
+    u64 id;
+    string peer_fingerprint;
+    string peer_name;
+    u32 capability_id;
+    string? detail;
+    u64 expires_at;
+};
+
+enum PermissionDecisionFfi {
+    "Allow",
+    "AlwaysAllow",
+    "Decline",
 };
 
 dictionary TrustedPeerFfi {

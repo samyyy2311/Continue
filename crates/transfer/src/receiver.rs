@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use sha2::{Digest, Sha256};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 
@@ -24,7 +25,10 @@ pub struct ReceivedFile {
 }
 
 /// Receive an incoming file transfer over a dedicated QUIC bidirectional stream.
-pub async fn receive_file<P, F>(
+///
+/// `permission_checker` sees the request before anything is written and may take its time,
+/// e.g. to ask the user; the sender waits for the answer.
+pub async fn receive_file<P, Fut, F>(
     send_stream: &mut quinn::SendStream,
     recv_stream: &mut quinn::RecvStream,
     destination_dir: &Path,
@@ -32,7 +36,8 @@ pub async fn receive_file<P, F>(
     on_progress: Option<F>,
 ) -> Result<ReceivedFile, TransferError>
 where
-    P: Fn(&FileTransferRequest) -> bool,
+    P: FnOnce(&FileTransferRequest) -> Fut,
+    Fut: Future<Output = bool>,
     F: Fn(u64, u64),
 {
     let req: FileTransferRequest = read_msg(recv_stream, MAX_FRAME_TRANSFER_META_BYTES).await?;
@@ -50,8 +55,8 @@ where
         }
     };
 
-    if let Some(ref checker) = permission_checker {
-        if !checker(&req) {
+    if let Some(checker) = permission_checker {
+        if !checker(&req).await {
             let resp = FileTransferResponse {
                 transfer_id: req.transfer_id,
                 status: TransferResponseStatus::Rejected as i32,

@@ -23,6 +23,27 @@ enum class Capability(val id: Int) {
     }
 }
 
+/** Something a device set to Ask wants to send. */
+data class PermissionQuestion(
+    val id: Long,
+    val peerFingerprint: String,
+    val peerName: String,
+    val capability: Capability?,
+    /** The file name, for files. */
+    val detail: String?,
+    /** Unix time in milliseconds when the core declines it if nobody answers. */
+    val expiresAt: Long,
+)
+
+enum class PermissionAnswer {
+    /** Just this once. */
+    ALLOW,
+
+    /** This one, and everything of this kind from the device from now on. */
+    ALWAYS_ALLOW,
+    DECLINE,
+}
+
 /** Grant strings as the Rust core reads and writes them. */
 enum class PermissionGrant(val rawValue: String) {
     ALLOW("Allow"),

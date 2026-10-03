@@ -956,6 +956,41 @@ ol {
   color: var(--text-2);
 }
 
+.dialog-small {
+  gap: 20px;
+  width: min(460px, calc(100% - 48px));
+}
+
+dialog.dialog {
+  margin: auto;
+  color: var(--text);
+}
+
+dialog.dialog:not([open]) {
+  display: none;
+}
+
+dialog.dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.dialog-small .dialog-title {
+  margin-bottom: 6px;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.dialog-detail {
+  font-weight: 700;
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .segmented-tabs {
   align-self: flex-start;
 }

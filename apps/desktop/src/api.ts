@@ -3,7 +3,14 @@
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { DeviceIdentity, Grant, PeerPermission, TrustedPeer } from "./types.ts";
+import type {
+  DeviceIdentity,
+  Grant,
+  PeerPermission,
+  PermissionAnswer,
+  PermissionQuestion,
+  TrustedPeer,
+} from "./types.ts";
 
 export const getDeviceIdentity = () => invoke<DeviceIdentity>("get_device_identity");
 
@@ -34,6 +41,19 @@ export const getPermissions = (peerFingerprint: string) =>
 
 export const setPermission = (peerFingerprint: string, capabilityId: number, grant: Grant) =>
   invoke<void>("set_permission", { peerFingerprint, capabilityId, grant });
+
+export const answerPermission = (id: number, answer: PermissionAnswer) =>
+  invoke<void>("answer_permission", { id, answer });
+
+export const onPermissionRequest = (handler: (question: PermissionQuestion) => void): Promise<UnlistenFn> =>
+  listen<PermissionQuestion>("permission-request", (event) => handler(event.payload));
+
+/** Questions asked before the window started listening. */
+export const pendingPermissionQuestions = () => invoke<PermissionQuestion[]>("pending_permission_questions");
+
+/** The question went unanswered for too long and was declined. */
+export const onPermissionRequestClosed = (handler: (id: number) => void): Promise<UnlistenFn> =>
+  listen<number>("permission-request-closed", (event) => handler(event.payload));
 
 export interface TransferProgress {
   bytesSent: number;

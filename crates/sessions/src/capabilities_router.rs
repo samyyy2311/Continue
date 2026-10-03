@@ -4,7 +4,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use std::time::Duration;
+use tokio::sync::oneshot;
+use tracing::{debug, error, info, warn};
 
 use capabilities::CapabilityQuery;
 use clipboard::{ClipboardAck, ClipboardFormat, ClipboardUpdate};
@@ -13,6 +15,34 @@ use protocol::CapabilityId;
 use transfer::{receive_file, send_file, ReceivedFile};
 
 use crate::multiplexer::SessionMultiplexer;
+
+/// How long a question waits for the user before it counts as declined.
+pub const PROMPT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Something a device set to Ask is trying to send.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionRequest {
+    pub peer: String,
+    pub capability: CapabilityId,
+    /// The file name, for files.
+    pub detail: Option<String>,
+    /// When the core stops waiting and declines. Apps should drop the question then too.
+    pub deadline: tokio::time::Instant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionDecision {
+    /// Just this once.
+    Allow,
+    /// This one, and everything of this kind from the device from now on.
+    AlwaysAllow,
+    Decline,
+}
+
+/// Shows a request to the user and hands back a receiver for the answer. Dropping the sender
+/// counts as declining.
+pub type PermissionPrompt =
+    Arc<dyn Fn(PermissionRequest) -> oneshot::Receiver<PermissionDecision> + Send + Sync>;
 
 /// Callbacks and configuration for active capabilities over a multiplexed session.
 #[derive(Clone)]
@@ -23,6 +53,10 @@ pub struct SessionCapabilityHandlers {
     pub on_clipboard_received: Option<Arc<dyn Fn(ClipboardUpdate) + Send + Sync>>,
     pub on_notification_received: Option<Arc<dyn Fn(NotificationPost) + Send + Sync>>,
     pub permission_store: Option<Arc<permissions::PermissionStore>>,
+    pub permission_prompt: Option<PermissionPrompt>,
+    /// Keeps to one question at a time, so a batch of files asks once when the first answer is
+    /// "always".
+    prompt_turn: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl SessionCapabilityHandlers {
@@ -34,6 +68,8 @@ impl SessionCapabilityHandlers {
             on_clipboard_received: None,
             on_notification_received: None,
             permission_store: None,
+            permission_prompt: None,
+            prompt_turn: Arc::default(),
         }
     }
 
@@ -41,19 +77,73 @@ impl SessionCapabilityHandlers {
         self.permission_store = Some(store);
         self
     }
+
+    pub fn with_permission_prompt(mut self, prompt: PermissionPrompt) -> Self {
+        self.permission_prompt = Some(prompt);
+        self
+    }
 }
 
-fn is_permitted(
+/// Whether the device may send this. A device set to Ask gets a question; no answer, or no
+/// way to ask, means no.
+async fn permitted(
     handlers: &SessionCapabilityHandlers,
     peer: &str,
     capability: CapabilityId,
+    detail: Option<String>,
 ) -> bool {
-    match &handlers.permission_store {
-        Some(store) => matches!(
-            store.query_state(peer, capability),
-            Ok(permissions::PermissionState::Allow | permissions::PermissionState::AllowOnce)
-        ),
-        None => true,
+    let Some(store) = &handlers.permission_store else {
+        return true;
+    };
+    if let Some(answer) = stored_answer(store, peer, capability) {
+        return answer;
+    }
+    let Some(prompt) = &handlers.permission_prompt else {
+        return false;
+    };
+
+    // One deadline from arrival covers waiting for a turn and the question itself, so a
+    // backlog from one device can't hold up everyone else for longer than that.
+    let deadline = tokio::time::Instant::now() + PROMPT_TIMEOUT;
+    let Ok(_turn) = tokio::time::timeout_at(deadline, handlers.prompt_turn.lock()).await else {
+        return false;
+    };
+    // An "always" given while this request waited its turn already answers it.
+    if let Some(answer) = stored_answer(store, peer, capability) {
+        return answer;
+    }
+    let request = PermissionRequest {
+        peer: peer.to_string(),
+        capability,
+        detail,
+        deadline,
+    };
+    match tokio::time::timeout_at(deadline, prompt(request)).await {
+        Ok(Ok(PermissionDecision::Allow)) => true,
+        Ok(Ok(PermissionDecision::AlwaysAllow)) => {
+            if let Err(error) =
+                store.set_persisted_grant(peer, capability, 1, permissions::PersistedGrant::Allow)
+            {
+                warn!("Could not save the permission for {peer}: {error}");
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// The saved answer, or None when the device is set to Ask.
+fn stored_answer(
+    store: &permissions::PermissionStore,
+    peer: &str,
+    capability: CapabilityId,
+) -> Option<bool> {
+    match store.query_state(peer, capability) {
+        Ok(permissions::PermissionState::Allow | permissions::PermissionState::AllowOnce) => {
+            Some(true)
+        }
+        Ok(permissions::PermissionState::Ask) => None,
+        Ok(permissions::PermissionState::Deny) | Err(_) => Some(false),
     }
 }
 
@@ -77,14 +167,25 @@ pub fn spawn_capabilities_dispatcher(
                 match stream.capability {
                     CapabilityId::FILE_TRANSFER => {
                         debug!("Handling incoming file transfer stream from {peer_fp}");
-                        let is_permitted =
-                            is_permitted(&handlers, &peer_fp, CapabilityId::FILE_TRANSFER);
+                        let (handlers_ref, peer_ref) = (&handlers, &peer_fp);
+                        let check = |req: &protocol::v1::FileTransferRequest| {
+                            let detail = Some(req.file_name.clone());
+                            async move {
+                                permitted(
+                                    handlers_ref,
+                                    peer_ref,
+                                    CapabilityId::FILE_TRANSFER,
+                                    detail,
+                                )
+                                .await
+                            }
+                        };
 
                         match receive_file(
                             &mut stream.send_stream,
                             &mut stream.recv_stream,
                             &handlers.download_dir,
-                            Some(|_req: &protocol::v1::FileTransferRequest| is_permitted),
+                            Some(check),
                             None::<fn(u64, u64)>,
                         )
                         .await
@@ -112,7 +213,7 @@ pub fn spawn_capabilities_dispatcher(
                     CapabilityId::CLIPBOARD => {
                         debug!("Handling incoming clipboard stream from {peer_fp}");
                         let is_permitted =
-                            is_permitted(&handlers, &peer_fp, CapabilityId::CLIPBOARD);
+                            permitted(&handlers, &peer_fp, CapabilityId::CLIPBOARD, None).await;
 
                         let mut caps = HashSet::new();
                         caps.insert(CapabilityId::CLIPBOARD);
@@ -157,7 +258,7 @@ pub fn spawn_capabilities_dispatcher(
                     CapabilityId::NOTIFICATIONS => {
                         debug!("Handling incoming notification stream from {peer_fp}");
                         let is_permitted =
-                            is_permitted(&handlers, &peer_fp, CapabilityId::NOTIFICATIONS);
+                            permitted(&handlers, &peer_fp, CapabilityId::NOTIFICATIONS, None).await;
 
                         let mut caps = HashSet::new();
                         caps.insert(CapabilityId::NOTIFICATIONS);

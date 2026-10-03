@@ -5,8 +5,9 @@
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -14,7 +15,7 @@ use identity::{FileSecretStore, IdentitySigner};
 use pairing::{DeviceKeys, InitiatorPairing, ReplayCache, TrustStore};
 use permissions::PermissionStore;
 use protocol::CapabilityId;
-use sessions::{SessionRegistry, SessionState};
+use sessions::{PermissionDecision, SessionRegistry, SessionState};
 use transport::{DialConfig, TransportCertificate};
 
 /// Logs what actually went wrong and gives the UI a sentence a person can act on.
@@ -61,6 +62,24 @@ struct ActivePairingServer {
     server_endpoint: quinn::Endpoint,
 }
 
+/// A question for the window, as it shows it.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionQuestionDto {
+    pub id: u64,
+    pub peer_name: String,
+    pub kind: &'static str,
+    pub detail: Option<String>,
+}
+
+struct PendingQuestion {
+    question: PermissionQuestionDto,
+    answer: tokio::sync::oneshot::Sender<PermissionDecision>,
+}
+
+/// Questions waiting for the user, by the id the window answers with.
+type PendingAnswers = Arc<Mutex<HashMap<u64, PendingQuestion>>>;
+
 pub struct DesktopRuntimeState {
     device_name: String,
     identity_signer: Arc<dyn IdentitySigner>,
@@ -71,15 +90,32 @@ pub struct DesktopRuntimeState {
     allowed_spki_hashes: Arc<std::sync::RwLock<HashSet<[u8; 32]>>>,
     active_pairing: Arc<Mutex<Option<Arc<ActivePairingServer>>>>,
     sessions: SessionRegistry,
+    pending_answers: PendingAnswers,
+}
+
+fn peer_name(trust_store: &TrustStore, fingerprint: &str) -> String {
+    trust_store
+        .get_peer(fingerprint)
+        .ok()
+        .flatten()
+        .map(|p| p.display_name)
+        .unwrap_or_default()
 }
 
 fn session_handlers(
     download_dir: PathBuf,
     permission_store: Arc<PermissionStore>,
+    trust_store: TrustStore,
+    pending_answers: PendingAnswers,
     app_handle: &AppHandle,
 ) -> sessions::SessionCapabilityHandlers {
     let mut handlers = sessions::SessionCapabilityHandlers::new(download_dir)
-        .with_permission_store(permission_store);
+        .with_permission_store(permission_store)
+        .with_permission_prompt(permission_prompt(
+            app_handle.clone(),
+            trust_store,
+            pending_answers,
+        ));
 
     let app_handle_files = app_handle.clone();
     handlers.on_file_received = Some(Arc::new(move |file| {
@@ -108,6 +144,80 @@ fn session_handlers(
     handlers
 }
 
+/// Asks in the window, which answers through `answer_permission`. The core stops waiting
+/// after `PROMPT_TIMEOUT`, and so does the window.
+fn permission_prompt(
+    app_handle: AppHandle,
+    trust_store: TrustStore,
+    pending_answers: PendingAnswers,
+) -> sessions::PermissionPrompt {
+    let next_id = AtomicU64::new(0);
+    Arc::new(move |request| {
+        let (answer, decision) = tokio::sync::oneshot::channel();
+        let question = PermissionQuestionDto {
+            id: next_id.fetch_add(1, Ordering::Relaxed),
+            peer_name: peer_name(&trust_store, &request.peer),
+            kind: match request.capability {
+                CapabilityId::FILE_TRANSFER => "file",
+                CapabilityId::CLIPBOARD => "text",
+                _ => "notification",
+            },
+            detail: request.detail,
+        };
+        let id = question.id;
+        pending_answers.lock().insert(
+            id,
+            PendingQuestion {
+                question: question.clone(),
+                answer,
+            },
+        );
+        let _ = app_handle.emit("permission-request", question);
+
+        let (pending, app) = (pending_answers.clone(), app_handle.clone());
+        tokio::spawn(async move {
+            tokio::time::sleep_until(request.deadline).await;
+            if pending.lock().remove(&id).is_some() {
+                let _ = app.emit("permission-request-closed", id);
+            }
+        });
+        decision
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum Answer {
+    Allow,
+    AlwaysAllow,
+    Decline,
+}
+
+#[tauri::command]
+fn answer_permission(state: State<DesktopRuntimeState>, id: u64, answer: Answer) {
+    let decision = match answer {
+        Answer::Allow => PermissionDecision::Allow,
+        Answer::AlwaysAllow => PermissionDecision::AlwaysAllow,
+        Answer::Decline => PermissionDecision::Decline,
+    };
+    if let Some(waiting) = state.pending_answers.lock().remove(&id) {
+        let _ = waiting.answer.send(decision);
+    }
+}
+
+/// Questions asked before the window was listening, so none go unseen.
+#[tauri::command]
+fn pending_permission_questions(state: State<DesktopRuntimeState>) -> Vec<PermissionQuestionDto> {
+    let mut questions: Vec<_> = state
+        .pending_answers
+        .lock()
+        .values()
+        .map(|pending| pending.question.clone())
+        .collect();
+    questions.sort_by_key(|q| q.id);
+    questions
+}
+
 fn session_state_listener(
     app_handle: AppHandle,
     trust_store: TrustStore,
@@ -121,17 +231,11 @@ fn session_state_listener(
             }),
         );
         if session_state == SessionState::Connected {
-            let display_name = trust_store
-                .get_peer(peer)
-                .ok()
-                .flatten()
-                .map(|p| p.display_name)
-                .unwrap_or_default();
             let _ = app_handle.emit(
                 "peer-connected",
                 serde_json::json!({
                     "fingerprint": peer,
-                    "displayName": display_name,
+                    "displayName": peer_name(&trust_store, peer),
                 }),
             );
         }
@@ -646,10 +750,17 @@ fn initialize_desktop_runtime(
 
     let local_fingerprint =
         identity::Fingerprint::from_verifying_key(&identity_signer.verifying_key()?).to_string();
+    let pending_answers = PendingAnswers::default();
     let sessions = SessionRegistry::new(
         local_fingerprint,
         transport_cert.clone(),
-        session_handlers(download_dir, permission_store.clone(), app_handle),
+        session_handlers(
+            download_dir,
+            permission_store.clone(),
+            trust_store.clone(),
+            pending_answers.clone(),
+            app_handle,
+        ),
         sessions::RegistryConfig::default(),
         Some(session_state_listener(
             app_handle.clone(),
@@ -671,6 +782,7 @@ fn initialize_desktop_runtime(
         allowed_spki_hashes,
         active_pairing: Arc::new(Mutex::new(None)),
         sessions,
+        pending_answers,
     })
 }
 
@@ -741,6 +853,8 @@ fn main() {
             pair_from_qr,
             get_permissions,
             set_permission,
+            answer_permission,
+            pending_permission_questions,
             connect_to_peer,
             disconnect_peer,
             reconnect_peer,
