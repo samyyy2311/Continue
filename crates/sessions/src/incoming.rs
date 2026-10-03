@@ -118,12 +118,12 @@ impl IncomingFiles {
     }
 }
 
+/// An empty file counts as complete.
 fn percent(received: u64, total: u64) -> u64 {
-    if total == 0 {
-        100
-    } else {
-        received.saturating_mul(100) / total
-    }
+    received
+        .saturating_mul(100)
+        .checked_div(total)
+        .unwrap_or(100)
 }
 
 /// Where received files are saved. Cheap to clone; clones share the folder, so changing it
