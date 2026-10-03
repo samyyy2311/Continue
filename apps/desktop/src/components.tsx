@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
+import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function DeviceGlyph(props: { icon: ReactNode; active?: boolean; size?: "md" | "lg" }) {
@@ -48,6 +49,7 @@ export function ButtonGroup<T extends string>(props: {
           aria-checked={value === option.value}
           onClick={() => onChange(option.value)}
         >
+          {value === option.value && <Check size={16} aria-hidden="true" />}
           {option.label}
         </button>
       ))}

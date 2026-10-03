@@ -687,6 +687,7 @@ function ActivityRow(props: { item: Activity; onRetry: (item: Activity) => void;
   const { item, onRetry, onCopy } = props;
   const progress =
     item.status === "sending" && item.totalBytes ? (item.bytesSent ?? 0) / item.totalBytes : null;
+  const who = item.status === "received" ? `From ${item.peerName}` : `To ${item.peerName}`;
   return (
     <li className={`list-item ${item.status}`}>
       <span className="list-leading">{item.kind === "file" ? getFileIcon(item.label) : <Type size={18} />}</span>
@@ -701,18 +702,19 @@ function ActivityRow(props: { item: Activity; onRetry: (item: Activity) => void;
               {item.totalBytes
                 ? `${formatBytes(item.bytesSent ?? 0)} of ${formatBytes(item.totalBytes)}`
                 : "Getting ready"}{" "}
-              · {item.peerName}
+              · {who}
             </span>
           </>
         ) : (
           <span className="list-sub">
-            {item.status === "received" ? `From ${item.peerName}` : item.peerName} ·{" "}
+            {who} ·{" "}
             {formatRelativeTime(item.timestamp)}
             {item.kind === "file" && item.bytesSent !== undefined && ` · ${formatBytes(item.bytesSent)}`}
           </span>
         )}
       </div>
       <div className="list-trailing">
+        {progress !== null && <span className="status-text">{Math.round(progress * 100)}%</span>}
         {item.status === "failed" && (
           <>
             <span className="status-text error" title={item.error}>

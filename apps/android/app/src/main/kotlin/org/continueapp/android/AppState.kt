@@ -35,6 +35,8 @@ data class Transfer(
     val status: TransferStatus,
     /** Where a received file was saved, when it can be opened. */
     val uri: Uri? = null,
+    /** Unix time in milliseconds. */
+    val at: Long = System.currentTimeMillis(),
 )
 
 /** What this phone has sent and received, newest first. The core saves it across restarts. */
@@ -111,6 +113,7 @@ private fun HistoryEntry.toTransfer() =
                 else -> TransferStatus.Sent
             },
         uri = location?.takeIf { it.startsWith("content://") }?.let(Uri::parse),
+        at = at,
     )
 
 /** Questions from devices set to Ask. The core asks one at a time. */

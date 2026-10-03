@@ -35,6 +35,11 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(now - 5 * 60_000, now)).toBe("5 min ago");
     expect(formatRelativeTime(now - 3 * 3_600_000, now)).toBe("3 h ago");
   });
+
+  it("names yesterday instead of giving a date", () => {
+    const evening = new Date(2026, 9, 3, 22).getTime();
+    expect(formatRelativeTime(new Date(2026, 9, 2, 9).getTime(), evening)).toBe("Yesterday");
+  });
 });
 
 describe("getFileCategory", () => {

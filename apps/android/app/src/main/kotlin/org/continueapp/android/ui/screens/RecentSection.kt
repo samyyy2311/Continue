@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.text.format.DateUtils
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -58,9 +59,11 @@ private fun RecentRow(transfer: Transfer) {
         subtitle =
             when (transfer.status) {
                 TransferStatus.Sending -> "Sending to $name"
-                TransferStatus.Sent -> "Sent to $name"
+                TransferStatus.Sent -> "Sent to $name · ${whenText(transfer.at)}"
                 TransferStatus.Failed -> "Couldn't send to $name"
-                TransferStatus.Received -> if (transfer.kind == TransferKind.Text) "Copied from $name" else "From $name"
+                TransferStatus.Received ->
+                    (if (transfer.kind == TransferKind.Text) "Copied from $name" else "From $name") +
+                        " · ${whenText(transfer.at)}"
             },
         onClick = transfer.uri?.let { uri -> { openFile(context, uri, transfer.label) } },
         trailing =
@@ -80,6 +83,16 @@ private fun StatusIcon(status: TransferStatus) {
         TransferStatus.Sent -> Icon(Icons.Outlined.Done, null, tint = colors.success)
         TransferStatus.Failed -> Icon(Icons.Outlined.ErrorOutline, null, tint = colors.error)
         TransferStatus.Received -> Unit
+    }
+}
+
+/** "Just now", "5 minutes ago", "Yesterday" or a short date. */
+private fun whenText(at: Long): String {
+    val now = System.currentTimeMillis()
+    return if (now - at < DateUtils.MINUTE_IN_MILLIS) {
+        "Just now"
+    } else {
+        DateUtils.getRelativeTimeSpanString(at, now, DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_ALL).toString()
     }
 }
 

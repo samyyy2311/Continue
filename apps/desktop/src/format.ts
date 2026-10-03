@@ -20,7 +20,12 @@ export function formatRelativeTime(timestamp: number, now = Date.now()): string 
   if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours} h ago`;
-  return new Date(timestamp).toLocaleDateString();
+  const date = new Date(timestamp);
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  const sameYear = date.getFullYear() === new Date(now).getFullYear();
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: sameYear ? undefined : "numeric" });
 }
 
 export type FileCategory = "image" | "video" | "audio" | "archive" | "code" | "document" | "other";

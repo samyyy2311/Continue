@@ -619,16 +619,20 @@ ol {
   color: var(--success);
 }
 
-.status-text.error {
-  color: var(--error);
+.status-text {
+  color: var(--text-2);
   font-size: 13.5px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-text.error {
+  color: var(--error);
 }
 
 .progress {
   position: relative;
   width: 100%;
-  max-width: 420px;
   height: 4px;
   margin: 6px 0 4px;
   border-radius: 2px;
@@ -708,6 +712,8 @@ ol {
   align-items: center;
   gap: 6px;
   height: 40px;
+  justify-content: center;
+  min-width: 96px;
   padding: 0 18px;
   border-radius: 6px;
   background: var(--container-high);
@@ -964,6 +970,10 @@ ol {
 dialog.dialog {
   margin: auto;
   color: var(--text);
+}
+
+dialog.dialog:focus {
+  outline: none;
 }
 
 dialog.dialog:not([open]) {
