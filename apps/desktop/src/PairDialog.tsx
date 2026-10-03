@@ -4,7 +4,6 @@
 import React, { useEffect, useState } from "react";
 import { Check, Copy, Loader, QrCode, Smartphone, X } from "lucide-react";
 import { renderSVG } from "uqr";
-import { isTauri } from "@tauri-apps/api/core";
 import {
   cancelPairing,
   errorMessage,
@@ -100,10 +99,6 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
 
   useEffect(() => {
     let active = true;
-    if (!isTauri()) {
-      setState({ status: "waiting", code: "continue://pair?v=1&addr=192.168.1.50:4433&fp=e49a:21fc:87aa" });
-      return;
-    }
 
     const unlisteners = Promise.all([
       onPairingCompleted((peer) => active && onPaired(peer)),
@@ -213,16 +208,6 @@ function EnterCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
     setPending(true);
     setError("");
     try {
-      if (!isTauri()) {
-        onPaired({
-          displayName: "Paired Phone",
-          fingerprint: "a1b2:c3d4:e5f6:7890",
-          pairedAt: Math.floor(Date.now() / 1000),
-          isConnected: true,
-          endpoint: "192.168.1.55:4433",
-        });
-        return;
-      }
       const peer = await pairFromCode(code.trim());
       onPaired(peer);
     } catch (err) {

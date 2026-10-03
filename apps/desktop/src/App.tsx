@@ -201,31 +201,7 @@ export default function App() {
 
   useEffect(() => {
     if (!isTauri()) {
-      setIdentity({
-        deviceName: "Continue-PC",
-        fingerprint: "e49a:21fc:87aa:3201:99dc:b174:4410:f029",
-        spkiHash: "3f821ac90278ef40182379d4ba728901cb48217f9012e8471209384918234710",
-      });
-      setPeers((prev) =>
-        prev && prev.length > 0
-          ? prev
-          : [
-              {
-                displayName: "Pixel 8 Pro",
-                fingerprint: "f210:48bc:9901:14a2",
-                pairedAt: Math.floor(Date.now() / 1000) - 86400 * 3,
-                isConnected: true,
-                endpoint: "192.168.1.45:4433",
-              },
-              {
-                displayName: "Galaxy Tab S9",
-                fingerprint: "389a:11cc:55bb:8812",
-                pairedAt: Math.floor(Date.now() / 1000) - 86400 * 14,
-                isConnected: false,
-                endpoint: "192.168.1.80:4433",
-              },
-            ],
-      );
+      setLoadError("Open Continue from your apps to use it.");
       return;
     }
     Promise.all([getDeviceIdentity(), getTrustedPeers()])
@@ -315,18 +291,6 @@ export default function App() {
       return;
     }
     setConnecting(peer.fingerprint);
-    if (!isTauri()) {
-      setTimeout(() => {
-        setPeers((prev) =>
-          prev?.map((p) =>
-            p.fingerprint === peer.fingerprint ? { ...p, isConnected: true, endpoint: address } : p,
-          ) ?? null,
-        );
-        setConnecting(null);
-        showToast(`Connected to ${peer.displayName}`);
-      }, 500);
-      return;
-    }
     try {
       await connectToPeer(peer.fingerprint, address);
       await refreshPeers();
@@ -339,15 +303,6 @@ export default function App() {
   };
 
   const handleDisconnect = async (peer: TrustedPeer) => {
-    if (!isTauri()) {
-      setPeers((prev) =>
-        prev?.map((p) =>
-          p.fingerprint === peer.fingerprint ? { ...p, isConnected: false } : p,
-        ) ?? null,
-      );
-      showToast(`Disconnected ${peer.displayName}`);
-      return;
-    }
     try {
       await disconnectPeer(peer.fingerprint);
       await refreshPeers();
@@ -358,14 +313,6 @@ export default function App() {
   };
 
   const handleRemovePeer = async (peer: TrustedPeer) => {
-    if (!isTauri()) {
-      setPeers((prev) => prev?.filter((p) => p.fingerprint !== peer.fingerprint) ?? null);
-      showToast(`Unpaired ${peer.displayName}`);
-      if (selectedPeerId === peer.fingerprint) {
-        setSelectedPeerId(null);
-      }
-      return;
-    }
     try {
       await removeTrustedPeer(peer.fingerprint);
       showToast(`Unpaired ${peer.displayName}`);
@@ -397,20 +344,6 @@ export default function App() {
   };
 
   const sendFile = (peer: TrustedPeer, path: string) => {
-    if (!isTauri()) {
-      return trackTransfer(
-        { kind: "file", label: fileNameFromPath(path), path, peerId: peer.fingerprint, peerName: peer.displayName },
-        async (update) => {
-          const total = 4800000;
-          update({ bytesSent: 0, totalBytes: total });
-          await new Promise((r) => setTimeout(r, 200));
-          update({ bytesSent: Math.round(total * 0.45), totalBytes: total });
-          await new Promise((r) => setTimeout(r, 200));
-          update({ bytesSent: total, totalBytes: total });
-          return total;
-        },
-      );
-    }
     return trackTransfer(
       { kind: "file", label: fileNameFromPath(path), path, peerId: peer.fingerprint, peerName: peer.displayName },
       (update) => sendFileToPeer(peer.fingerprint, path, (progress) => update(progress)),
@@ -418,12 +351,6 @@ export default function App() {
   };
 
   const sendText = (peer: TrustedPeer, text: string) => {
-    if (!isTauri()) {
-      return trackTransfer({ kind: "text", label: text, peerId: peer.fingerprint, peerName: peer.displayName }, async () => {
-        await new Promise((r) => setTimeout(r, 150));
-        return 0;
-      });
-    }
     return trackTransfer({ kind: "text", label: text, peerId: peer.fingerprint, peerName: peer.displayName }, () =>
       sendClipboardText(peer.fingerprint, text),
     );
@@ -490,10 +417,6 @@ export default function App() {
     }
     if (!selectedPeer.isConnected) {
       showError(`Connect to ${selectedPeer.displayName} first.`);
-      return;
-    }
-    if (!isTauri()) {
-      sendFiles(["annual_financials.pdf", "presentation_deck.key"]);
       return;
     }
     const picked = await openFileDialog({ multiple: true, directory: false });
@@ -603,7 +526,7 @@ export default function App() {
       setPeers((prev) => (prev ? [...prev.filter((p) => p.fingerprint !== peer.fingerprint), peer] : [peer]));
       setView("transfer");
       showToast(`Paired with ${peer.displayName}`);
-      if (isTauri()) refreshPeers();
+      refreshPeers();
     },
     [refreshPeers, showToast],
   );
@@ -989,14 +912,6 @@ function DeviceCard(props: {
   const [confirmingForget, setConfirmingForget] = useState(false);
 
   useEffect(() => {
-    if (!isTauri()) {
-      setPermissions([
-        { capabilityId: 1, capabilityName: "File Transfer", grant: "Allow" },
-        { capabilityId: 2, capabilityName: "Clipboard Sync", grant: "Allow" },
-        { capabilityId: 3, capabilityName: "Notification Relay", grant: "Ask" },
-      ]);
-      return;
-    }
     getPermissions(peer.fingerprint)
       .then(setPermissions)
       .catch((err) => onError(errorMessage(err)));
@@ -1013,10 +928,6 @@ function DeviceCard(props: {
       setPermissions((prev) =>
         prev ? prev.map((p) => (p.capabilityId === permission.capabilityId ? { ...p, grant } : p)) : null,
       );
-    if (!isTauri()) {
-      apply();
-      return;
-    }
     try {
       await setPermission(peer.fingerprint, permission.capabilityId, grant);
       apply();
