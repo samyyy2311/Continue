@@ -17,6 +17,7 @@ import {
   FileImage,
   FileText,
   FileVideo,
+  FolderOpen,
   History,
   Home,
   Info,
@@ -48,6 +49,8 @@ import {
   getHistory,
   getPermissions,
   getTrustedPeers,
+  openReceived,
+  savePastedFile,
   removeTrustedPeer,
   sendClipboardText,
   sendFileToPeer,
@@ -113,6 +116,15 @@ function fromHistory(entry: HistoryEntry): Activity {
     bytesSent: entry.size,
     totalBytes: entry.size,
   };
+}
+
+/** Screenshots paste as a bare "image.png"; give them a name worth keeping. */
+function pastedName(file: File) {
+  if (file.name && file.name !== "image.png") return file.name;
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}.${pad(d.getMinutes())}.${pad(d.getSeconds())}`;
+  return `Pasted image ${stamp}.png`;
 }
 
 function getFileIcon(name: string) {
@@ -377,17 +389,24 @@ export default function App() {
     );
   };
 
-  const sendFiles = async (paths: string[]) => {
+  /** The selected device if it's ready to send to; otherwise says why not. */
+  const readyPeer = () => {
     if (!selectedPeer) {
       showError("Pair a device first.");
-      return;
+      return null;
     }
     if (!selectedPeer.isConnected) {
       showError(`Connect to ${selectedPeer.displayName} first.`);
-      return;
+      return null;
     }
+    return selectedPeer;
+  };
+
+  const sendFiles = async (paths: string[]) => {
+    const peer = readyPeer();
+    if (!peer) return;
     for (const path of paths) {
-      await sendFile(selectedPeer, path);
+      await sendFile(peer, path);
     }
   };
 
@@ -432,14 +451,7 @@ export default function App() {
   }, []);
 
   const chooseFiles = async () => {
-    if (!selectedPeer) {
-      showError("Pair a device before selecting files.");
-      return;
-    }
-    if (!selectedPeer.isConnected) {
-      showError(`Connect to ${selectedPeer.displayName} first.`);
-      return;
-    }
+    if (!readyPeer()) return;
     const picked = await openFileDialog({ multiple: true, directory: false });
     if (picked) {
       const paths = Array.isArray(picked) ? picked : [picked];
@@ -450,39 +462,46 @@ export default function App() {
   const handleSendText = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const text = textInput.trim();
-    if (!selectedPeer) {
-      showError("Pair a device first.");
-      return;
-    }
-    if (!selectedPeer.isConnected) {
-      showError(`Connect to ${selectedPeer.displayName} first.`);
-      return;
-    }
-    if (!text) return;
+    const peer = readyPeer();
+    if (!peer || !text) return;
     setTextInput("");
-    const sent = await sendText(selectedPeer, text);
+    const sent = await sendText(peer, text);
     if (!sent) setTextInput(text);
   };
 
   const handleSendClipboard = async () => {
-    if (!selectedPeer) {
-      showError("Pair a device first.");
-      return;
-    }
-    if (!selectedPeer.isConnected) {
-      showError(`Connect to ${selectedPeer.displayName} first.`);
-      return;
-    }
+    const peer = readyPeer();
+    if (!peer) return;
     try {
       const text = await navigator.clipboard.readText();
       if (!text || !text.trim()) {
         showError("System clipboard is empty.");
         return;
       }
-      await sendText(selectedPeer, text.trim());
+      await sendText(peer, text.trim());
       showToast("Clipboard sent to device");
     } catch {
       showError("Unable to access clipboard. Please paste into text field.");
+    }
+  };
+
+  /** Pasting on Home sends what was copied: files if there are any, otherwise text. */
+  const handlePaste = async (data: DataTransfer) => {
+    const files = Array.from(data.files);
+    const text = data.getData("text/plain").trim();
+    if (files.length === 0 && !text) return;
+    const peer = readyPeer();
+    if (!peer) return;
+    if (files.length === 0) {
+      await sendText(peer, text);
+      return;
+    }
+    for (const file of files) {
+      try {
+        await sendFile(peer, await savePastedFile(file, pastedName(file)));
+      } catch (error) {
+        showError(errorMessage(error));
+      }
     }
   };
 
@@ -495,11 +514,35 @@ export default function App() {
     }
   };
 
+  const rowActions: RowActions = {
+    retry: retryItem,
+    copy: copyToClipboard,
+    open: (path, reveal) => openReceived(path, reveal).catch((error) => showError(errorMessage(error))),
+  };
+
   const chooseFilesRef = useRef(chooseFiles);
   chooseFilesRef.current = chooseFiles;
 
   const handleSendClipboardRef = useRef(handleSendClipboard);
   handleSendClipboardRef.current = handleSendClipboard;
+
+  const handlePasteRef = useRef(handlePaste);
+  handlePasteRef.current = handlePaste;
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const typing = e.target instanceof Element && e.target.closest("input, textarea, [contenteditable]");
+      if (viewRef.current !== "transfer" || typing || !e.clipboardData || document.querySelector("dialog[open]")) {
+        return;
+      }
+      e.preventDefault();
+      void handlePasteRef.current(e.clipboardData);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
 
   useEffect(() => {
     const handleGlobalKeydown = (e: KeyboardEvent) => {
@@ -618,8 +661,7 @@ export default function App() {
               isConnecting={connecting === selectedPeer?.fingerprint}
               activeTransfers={activeTransfers}
               recentActivity={recentActivity}
-              onRetry={retryItem}
-              onCopy={copyToClipboard}
+              rowActions={rowActions}
               onNavigateHistory={() => setView("history")}
             />
           )}
@@ -642,7 +684,7 @@ export default function App() {
           )}
 
           {view === "history" && (
-            <HistoryView activity={activity} onRetry={retryItem} onCopy={copyToClipboard} onClear={handleClearHistory} />
+            <HistoryView activity={activity} rowActions={rowActions} onClear={handleClearHistory} />
           )}
 
           {view === "settings" && (
@@ -683,8 +725,16 @@ export default function App() {
   );
 }
 
-function ActivityRow(props: { item: Activity; onRetry: (item: Activity) => void; onCopy: (text: string) => void }) {
-  const { item, onRetry, onCopy } = props;
+/** What a row in Recent or Activity can do. */
+interface RowActions {
+  retry: (item: Activity) => void;
+  copy: (text: string) => void;
+  open: (path: string, reveal: boolean) => void;
+}
+
+function ActivityRow(props: { item: Activity; actions: RowActions }) {
+  const { item, actions } = props;
+  const openable = item.status === "received" && item.kind === "file" ? item.path : undefined;
   const progress =
     item.status === "sending" && item.totalBytes ? (item.bytesSent ?? 0) / item.totalBytes : null;
   const who = item.status === "received" ? `From ${item.peerName}` : `To ${item.peerName}`;
@@ -720,14 +770,24 @@ function ActivityRow(props: { item: Activity; onRetry: (item: Activity) => void;
             <span className="status-text error" title={item.error}>
               Didn't send
             </span>
-            <button type="button" className="btn btn-tonal btn-small" onClick={() => onRetry(item)}>
+            <button type="button" className="btn btn-tonal btn-small" onClick={() => actions.retry(item)}>
               Retry
+            </button>
+          </>
+        )}
+        {openable && (
+          <>
+            <button type="button" className="icon-btn" title="Show in folder" onClick={() => actions.open(openable, true)}>
+              <FolderOpen size={18} />
+            </button>
+            <button type="button" className="btn btn-tonal btn-small" onClick={() => actions.open(openable, false)}>
+              Open
             </button>
           </>
         )}
         {item.status === "sent" && <CheckCheck size={18} className="delivered" aria-label="Delivered" />}
         {item.kind === "text" && item.status !== "sending" && (
-          <button type="button" className="icon-btn" title="Copy" onClick={() => onCopy(item.label)}>
+          <button type="button" className="icon-btn" title="Copy" onClick={() => actions.copy(item.label)}>
             <Copy size={18} />
           </button>
         )}
@@ -752,15 +812,14 @@ interface HomeViewProps {
   isConnecting: boolean;
   activeTransfers: Activity[];
   recentActivity: Activity[];
-  onRetry: (item: Activity) => void;
-  onCopy: (text: string) => void;
+  rowActions: RowActions;
   onNavigateHistory: () => void;
 }
 
 function HomeView(props: HomeViewProps) {
   const { peer, peers, onSelectPeer, onOpenPair, onChooseFiles, onSendClipboard, textInput } = props;
   const { onTextInputChange, onSendText, onConnect, onReconnect, onDisconnect, isConnecting } = props;
-  const { activeTransfers, recentActivity, onRetry, onCopy, onNavigateHistory } = props;
+  const { activeTransfers, recentActivity, rowActions, onNavigateHistory } = props;
 
   if (!peer) {
     return (
@@ -811,7 +870,7 @@ function HomeView(props: HomeViewProps) {
         </div>
         <p className="supporting">
           {online
-            ? "Drop files anywhere in this window to send them."
+            ? "Drop or paste files anywhere in this window to send them."
             : "It connects on its own when both devices are on the same Wi-Fi."}
         </p>
         {online ? (
@@ -875,7 +934,7 @@ function HomeView(props: HomeViewProps) {
           </div>
           <ul className="list">
             {[...activeTransfers, ...recentActivity].map((item) => (
-              <ActivityRow key={item.id} item={item} onRetry={onRetry} onCopy={onCopy} />
+              <ActivityRow key={item.id} item={item} actions={rowActions} />
             ))}
           </ul>
         </section>
@@ -1044,8 +1103,7 @@ function DeviceCard(props: {
 
 interface HistoryViewProps {
   activity: Activity[];
-  onRetry: (item: Activity) => void;
-  onCopy: (text: string) => void;
+  rowActions: RowActions;
   onClear: () => void;
 }
 
@@ -1057,7 +1115,7 @@ const HISTORY_FILTERS = [
 ] as const;
 
 function HistoryView(props: HistoryViewProps) {
-  const { activity, onRetry, onCopy, onClear } = props;
+  const { activity, rowActions, onClear } = props;
   const [filter, setFilter] = useState<HistoryFilter>("all");
   const [search, setSearch] = useState("");
 
@@ -1114,7 +1172,7 @@ function HistoryView(props: HistoryViewProps) {
       ) : (
         <ul className="list">
           {filtered.map((item) => (
-            <ActivityRow key={item.id} item={item} onRetry={onRetry} onCopy={onCopy} />
+            <ActivityRow key={item.id} item={item} actions={rowActions} />
           ))}
         </ul>
       )}

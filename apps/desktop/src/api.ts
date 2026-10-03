@@ -47,6 +47,15 @@ export const getHistory = () => invoke<HistoryEntry[]>("get_history");
 
 export const clearHistory = () => invoke<void>("clear_history");
 
+/** Saves a pasted file to disk so it can be sent, and returns its path. */
+export const savePastedFile = async (file: File, name: string) =>
+  invoke<string>("save_pasted_file", new Uint8Array(await file.arrayBuffer()), {
+    headers: { "x-file-name": encodeURIComponent(name) },
+  });
+
+/** Opens a received file, or with `reveal` shows it in its folder. */
+export const openReceived = (path: string, reveal: boolean) => invoke<void>("open_received", { path, reveal });
+
 export const answerPermission = (id: number, answer: PermissionAnswer) =>
   invoke<void>("answer_permission", { id, answer });
 

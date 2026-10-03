@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use history::{Direction, HistoryStore, Kind};
 use identity::{FileSecretStore, IdentitySigner};
@@ -93,6 +94,7 @@ pub struct DesktopRuntimeState {
     sessions: SessionRegistry,
     pending_answers: PendingAnswers,
     history: HistoryStore,
+    download_dir: PathBuf,
 }
 
 /// Saves to history; a failure there shouldn't fail what was actually done.
@@ -149,6 +151,70 @@ fn clear_history(state: State<DesktopRuntimeState>) -> Result<(), String> {
         .history
         .clear()
         .map_err(user_error("Couldn't clear your history."))
+}
+
+/// Opens a received file, or shows it in its folder. Only files in the
+/// received-files folder can be opened this way.
+#[tauri::command]
+fn open_received(
+    app: AppHandle,
+    state: State<DesktopRuntimeState>,
+    path: String,
+    reveal: bool,
+) -> Result<(), String> {
+    const MISSING: &str = "Couldn't find that file. It may have been moved or deleted.";
+    let file = std::fs::canonicalize(&path).map_err(user_error(MISSING))?;
+    let folder = std::fs::canonicalize(&state.download_dir).map_err(user_error(MISSING))?;
+    if !file.starts_with(&folder) {
+        return Err(MISSING.to_string());
+    }
+    let opener = app.opener();
+    let result = if reveal {
+        opener.reveal_item_in_dir(&file)
+    } else {
+        opener.open_path(file.to_string_lossy(), None::<&str>)
+    };
+    result.map_err(user_error("Couldn't open that file."))
+}
+
+/// Where pasted files wait to be sent. Emptied on each start.
+fn pasted_dir(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_cache_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("continue"))
+        .join("pasted")
+}
+
+/// Saves a pasted file so it can be sent like one picked from disk. The
+/// bytes are the request body and the name is in the `x-file-name` header.
+#[tauri::command]
+fn save_pasted_file(app: AppHandle, request: tauri::ipc::Request) -> Result<String, String> {
+    const FAILED: &str = "Couldn't send what you pasted.";
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(FAILED.to_string());
+    };
+    let name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            percent_encoding::percent_decode_str(value)
+                .decode_utf8_lossy()
+                .into_owned()
+        })
+        .unwrap_or_default();
+    let name = Path::new(&name).file_name().map_or_else(
+        || "Pasted file".into(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    // A folder per paste keeps the original name without clashing.
+    let folder = pasted_dir(&app).join(NEXT.fetch_add(1, Ordering::Relaxed).to_string());
+    let path = folder.join(name);
+    std::fs::create_dir_all(&folder)
+        .and_then(|()| std::fs::write(&path, bytes))
+        .map_err(user_error(FAILED))?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 fn peer_name(trust_store: &TrustStore, fingerprint: &str) -> String {
@@ -875,7 +941,7 @@ fn initialize_desktop_runtime(
         local_fingerprint,
         transport_cert.clone(),
         session_handlers(
-            download_dir,
+            download_dir.clone(),
             permission_store.clone(),
             trust_store.clone(),
             pending_answers.clone(),
@@ -905,6 +971,7 @@ fn initialize_desktop_runtime(
         sessions,
         pending_answers,
         history,
+        download_dir,
     })
 }
 
@@ -918,6 +985,7 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let app_data = app
                 .path()
@@ -928,6 +996,8 @@ fn main() {
             let db_path = app_data.join("continue_desktop.db");
             let secrets_dir = app_data.join("secrets");
             let _ = std::fs::create_dir_all(&secrets_dir);
+
+            let _ = std::fs::remove_dir_all(pasted_dir(app.handle()));
 
             let download_dir = app
                 .path()
@@ -979,6 +1049,8 @@ fn main() {
             pending_permission_questions,
             get_history,
             clear_history,
+            open_received,
+            save_pasted_file,
             connect_to_peer,
             disconnect_peer,
             reconnect_peer,
