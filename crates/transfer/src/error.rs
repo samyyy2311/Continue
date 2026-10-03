@@ -43,4 +43,7 @@ pub enum TransferError {
 
     #[error("Unexpected response from peer")]
     UnexpectedResponse,
+
+    #[error("Cancelled")]
+    Cancelled,
 }

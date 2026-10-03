@@ -5,6 +5,7 @@ pub mod auto_connect;
 pub mod backoff;
 pub mod capabilities_router;
 pub mod error;
+pub mod incoming;
 pub mod keepalive;
 pub mod listener;
 pub mod multiplexer;
@@ -19,6 +20,7 @@ pub use capabilities_router::{
     PermissionRequest, SessionCapabilityHandlers, PROMPT_TIMEOUT,
 };
 pub use error::SessionError;
+pub use incoming::{IncomingEvent, IncomingFile, IncomingFiles, IncomingListener, SaveFolder};
 pub use keepalive::KeepaliveTracker;
 pub use listener::{accept_peers, listen_for_peers, remember_peer_address, DEFAULT_LISTEN_PORT};
 pub use multiplexer::{

@@ -49,7 +49,8 @@ async fn file_transfer_e2e_success() {
             &mut recv_stream,
             &recv_dir_clone,
             None::<fn(&_) -> std::future::Ready<bool>>,
-            None::<fn(u64, u64)>,
+            None::<fn(&protocol::v1::FileTransferRequest, u64)>,
+            std::future::pending(),
         )
         .await;
         // Dropping the connection here would discard the final reply before the sender reads it.
@@ -129,7 +130,8 @@ async fn file_transfer_rejected_by_permission_checker() {
             &mut recv_stream,
             &recv_dir_clone,
             Some(|_req: &protocol::v1::FileTransferRequest| std::future::ready(false)),
-            None::<fn(u64, u64)>,
+            None::<fn(&protocol::v1::FileTransferRequest, u64)>,
+            std::future::pending(),
         )
         .await;
         // Dropping the connection here would discard the final reply before the sender reads it.
@@ -157,6 +159,89 @@ async fn file_transfer_rejected_by_permission_checker() {
         Err(transfer::TransferError::Rejected(_))
     ));
     assert!(recv_handle.await.unwrap().0.is_err());
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+}
+
+#[tokio::test]
+async fn receiver_can_stop_a_transfer_part_way() {
+    let temp_dir = std::env::temp_dir().join(format!("continue_test_{}", rand::random::<u32>()));
+    let send_dir = temp_dir.join("sender");
+    let recv_dir = temp_dir.join("receiver");
+    tokio::fs::create_dir_all(&send_dir).await.unwrap();
+
+    let test_file = send_dir.join("big_video.mp4");
+    tokio::fs::write(&test_file, vec![7u8; 8 * 1024 * 1024])
+        .await
+        .unwrap();
+
+    let server_cert = TransportCertificate::generate().unwrap();
+    let client_cert = TransportCertificate::generate().unwrap();
+    let server_tls = server_cert
+        .build_pinned_server_tls(client_cert.spki_hash)
+        .unwrap();
+    let client_tls = client_cert
+        .build_pinned_client_tls(server_cert.spki_hash)
+        .unwrap();
+    let any: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let server_endpoint = create_server_endpoint(any, server_tls).unwrap();
+    let bound_addr = server_endpoint.local_addr().unwrap();
+    let client_endpoint = create_client_endpoint(any, client_tls).unwrap();
+
+    let recv_dir_clone = recv_dir.clone();
+    let recv_handle = tokio::spawn(async move {
+        let conn = server_endpoint.accept().await.unwrap().await.unwrap();
+        let (mut send_stream, mut recv_stream) = conn.accept_bi().await.unwrap();
+        // Stops once the first bytes have arrived.
+        let started = std::sync::Arc::new(tokio::sync::Notify::new());
+        let notify = started.clone();
+        let result = receive_file(
+            &mut send_stream,
+            &mut recv_stream,
+            &recv_dir_clone,
+            None::<fn(&_) -> std::future::Ready<bool>>,
+            Some(
+                move |_: &protocol::v1::FileTransferRequest, received: u64| {
+                    if received > 0 {
+                        notify.notify_one();
+                    }
+                },
+            ),
+            async move { started.notified().await },
+        )
+        .await;
+        (result, conn)
+    });
+
+    let client_conn = client_endpoint
+        .connect(bound_addr, "continue-device")
+        .unwrap()
+        .await
+        .unwrap();
+    let (mut client_send, mut client_recv) = client_conn.open_bi().await.unwrap();
+    let send_result = send_file(
+        &mut client_send,
+        &mut client_recv,
+        &test_file,
+        "tx-003".to_string(),
+        None::<fn(u64, u64)>,
+    )
+    .await;
+
+    let (recv_result, _conn) = recv_handle.await.unwrap();
+    assert!(matches!(
+        recv_result,
+        Err(transfer::TransferError::Cancelled)
+    ));
+    assert!(
+        send_result.is_err(),
+        "the sender should hear it was stopped"
+    );
+    let mut left = tokio::fs::read_dir(&recv_dir).await.unwrap();
+    assert!(
+        left.next_entry().await.unwrap().is_none(),
+        "the partial file should be gone"
+    );
 
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }

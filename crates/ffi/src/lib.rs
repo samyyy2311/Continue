@@ -1153,6 +1153,7 @@ mod tests {
         (handlers.on_file_received.unwrap())(
             "laptop",
             transfer::ReceivedFile {
+                transfer_id: "tx-1".to_string(),
                 path: "/data/received/report.pdf".into(),
                 file_name: "report.pdf".to_string(),
                 bytes_received: 2048,
