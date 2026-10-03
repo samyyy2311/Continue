@@ -156,6 +156,10 @@ class AppState(private val bridge: ContinueCoreBridge) {
         private set
     var connected by mutableStateOf<Set<String>>(emptySet())
         private set
+
+    /** False until the core has been read once, so screens don't flash "nothing paired". */
+    var loaded by mutableStateOf(false)
+        private set
     val recent = RecentTransfers(bridge)
     val questions = PermissionQuestions(bridge)
     val incoming = Incoming(bridge, recent)
@@ -173,6 +177,7 @@ class AppState(private val bridge: ContinueCoreBridge) {
             } ?: return
         peers = latestPeers
         connected = latestConnected
+        loaded = true
     }
 
     /** Returns what to tell the user if pairing failed, or null once paired. */
