@@ -53,6 +53,9 @@ export const savePastedFile = async (file: File, name: string) =>
     headers: { "x-file-name": encodeURIComponent(name) },
   });
 
+/** Turns sending what's copied on this computer on or off. */
+export const setClipboardSyncEnabled = (enabled: boolean) => invoke<void>("set_clipboard_sync", { enabled });
+
 /** Opens a web link in the default browser. */
 export const openLink = (url: string) => invoke<void>("open_link", { url });
 

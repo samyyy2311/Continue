@@ -615,6 +615,45 @@ ol {
   white-space: nowrap;
 }
 
+.list-sub.wrap {
+  white-space: normal;
+}
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 52px;
+  height: 32px;
+  border: 2px solid var(--outline);
+  border-radius: 16px;
+  background: var(--container-highest);
+  transition: background-color 150ms var(--ease), border-color 150ms var(--ease);
+}
+
+.switch span {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--outline);
+  transition: transform 150ms var(--ease), width 150ms var(--ease), height 150ms var(--ease), top 150ms var(--ease);
+}
+
+.switch[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.switch[aria-checked="true"] span {
+  top: 2px;
+  width: 24px;
+  height: 24px;
+  background: var(--on-accent);
+  transform: translateX(20px);
+}
+
 .list-trailing {
   display: flex;
   align-items: center;

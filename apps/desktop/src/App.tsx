@@ -38,7 +38,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
-import { ButtonGroup, DeviceGlyph, ProgressBar } from "./components.tsx";
+import { ButtonGroup, DeviceGlyph, ProgressBar, Switch } from "./components.tsx";
 import {
   clearHistory,
   connectToPeer,
@@ -52,6 +52,7 @@ import {
   openLink,
   openReceived,
   savePastedFile,
+  setClipboardSyncEnabled,
   removeTrustedPeer,
   sendClipboardText,
   sendFileToPeer,
@@ -89,6 +90,7 @@ import {
 const ACCENT_KEY = "continue.accent";
 const THEME_KEY = "continue.theme";
 const PEER_KEY = "continue.peer";
+const CLIPBOARD_SYNC_KEY = "continue.clipboardSync";
 
 /** Storage can be unavailable in restrictive environments, so reads fall back to nothing. */
 function readStored(key: string): string | null {
@@ -198,6 +200,12 @@ export default function App() {
 
   useEffect(() => writeStored(PEER_KEY, selectedPeerId), [selectedPeerId]);
 
+  const [clipboardSync, setClipboardSync] = useState(() => readChoice(CLIPBOARD_SYNC_KEY, ["on", "off"], "on") === "on");
+  useEffect(() => {
+    writeStored(CLIPBOARD_SYNC_KEY, clipboardSync ? "on" : "off");
+    if (isTauri()) setClipboardSyncEnabled(clipboardSync).catch(() => {});
+  }, [clipboardSync]);
+
   useEffect(() => {
     writeStored(THEME_KEY, theme);
     const query = window.matchMedia("(prefers-color-scheme: dark)");
@@ -288,8 +296,8 @@ export default function App() {
         const unClip = await listen<{ peerId: string; peerName: string; content: string }>(
           "clipboard-received",
           (event) => {
+            // The app has already put it on the clipboard, even if this window is in the background.
             showToast(`Copied text from ${event.payload.peerName}`);
-            void navigator.clipboard?.writeText?.(event.payload.content).catch(() => {});
             setActivity((prev) => [
               {
                 id: `rx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -305,6 +313,24 @@ export default function App() {
           },
         );
         cleanups.push(unClip);
+
+        const unSynced = await listen<{ peerId: string; peerName: string; text: string; failed: boolean }>(
+          "clipboard-synced",
+          ({ payload }) =>
+            setActivity((prev) => [
+              {
+                id: `sync-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                kind: "text",
+                label: payload.text,
+                peerId: payload.peerId,
+                peerName: payload.peerName,
+                status: payload.failed ? "failed" : "sent",
+                timestamp: Date.now(),
+              },
+              ...prev,
+            ]),
+        );
+        cleanups.push(unSynced);
       } catch {
         // Tauri events unsupported in current environment.
       }
@@ -708,6 +734,8 @@ export default function App() {
               accent={accent}
               onThemeChange={setTheme}
               onAccentChange={setAccent}
+              clipboardSync={clipboardSync}
+              onClipboardSyncChange={setClipboardSync}
             />
           )}
         </div>
@@ -1234,6 +1262,8 @@ function HistoryView(props: HistoryViewProps) {
 
 interface SettingsViewProps {
   identity: DeviceIdentity | null;
+  clipboardSync: boolean;
+  onClipboardSyncChange: (on: boolean) => void;
   theme: Theme;
   accent: AccentName;
   onThemeChange: (theme: Theme) => void;
@@ -1247,7 +1277,7 @@ const THEME_OPTIONS = [
 ] as const;
 
 function SettingsView(props: SettingsViewProps) {
-  const { identity, theme, accent, onThemeChange, onAccentChange } = props;
+  const { identity, theme, accent, onThemeChange, onAccentChange, clipboardSync, onClipboardSyncChange } = props;
   const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
@@ -1290,6 +1320,22 @@ function SettingsView(props: SettingsViewProps) {
               </button>
             ))}
           </div>
+        </li>
+      </ul>
+
+      <h2 className="label">Clipboard</h2>
+      <ul className="list">
+        <li className="list-item">
+          <div className="list-text">
+            <span className="list-title" id="clipboard-sync-label">
+              Send what you copy
+            </span>
+            <span className="list-sub wrap">
+              Text you copy here goes to your connected phone straight away. Passwords from password managers are
+              left out.
+            </span>
+          </div>
+          <Switch labelledBy="clipboard-sync-label" checked={clipboardSync} onChange={onClipboardSyncChange} />
         </li>
       </ul>
 

@@ -3,6 +3,9 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod clipboard_sync;
+
+use clipboard_sync::ClipboardSync;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -96,6 +99,7 @@ pub struct DesktopRuntimeState {
     pending_answers: PendingAnswers,
     history: HistoryStore,
     download_dir: PathBuf,
+    clipboard: ClipboardSync,
 }
 
 /// Saves to history; a failure there shouldn't fail what was actually done.
@@ -269,6 +273,7 @@ fn session_handlers(
     trust_store: TrustStore,
     pending_answers: PendingAnswers,
     history: HistoryStore,
+    clipboard: ClipboardSync,
     app_handle: &AppHandle,
 ) -> sessions::SessionCapabilityHandlers {
     let mut handlers = sessions::SessionCapabilityHandlers::new(download_dir)
@@ -315,6 +320,7 @@ fn session_handlers(
     let app = app_handle.clone();
     handlers.on_clipboard_received = Some(Arc::new(move |peer, update| {
         let text = String::from_utf8_lossy(&update.payload);
+        clipboard.write(text.to_string());
         let name = peer_name(&trust_store, peer);
         notify_if_away(
             &app,
@@ -891,8 +897,83 @@ async fn send_clipboard_text(
     peer_fingerprint: String,
     text: String,
 ) -> Result<(), String> {
-    let mux = state
-        .sessions
+    push_text(
+        &state.sessions,
+        &state.trust_store,
+        &state.history,
+        peer_fingerprint,
+        text,
+    )
+    .await
+}
+
+/// Text copied here while sync is on, as the window lists it.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncedTextDto {
+    peer_id: String,
+    peer_name: String,
+    text: String,
+    failed: bool,
+}
+
+/// Sends what was just copied here to every connected device.
+fn send_copied_text(app: &AppHandle, text: String) {
+    let state = app.state::<DesktopRuntimeState>();
+    let (sessions, trust_store, history) = (
+        state.sessions.clone(),
+        state.trust_store.clone(),
+        state.history.clone(),
+    );
+    let peers = trust_store.list_peers().unwrap_or_default();
+    for peer in peers
+        .into_iter()
+        .filter(|p| sessions.get(&p.fingerprint).is_some())
+    {
+        let (app, sessions, trust_store, history, text) = (
+            app.clone(),
+            sessions.clone(),
+            trust_store.clone(),
+            history.clone(),
+            text.clone(),
+        );
+        tauri::async_runtime::spawn(async move {
+            let result = push_text(
+                &sessions,
+                &trust_store,
+                &history,
+                peer.fingerprint.clone(),
+                text.clone(),
+            )
+            .await;
+            let _ = app.emit(
+                "clipboard-synced",
+                SyncedTextDto {
+                    peer_id: peer.fingerprint,
+                    peer_name: peer.display_name,
+                    text,
+                    failed: result.is_err(),
+                },
+            );
+        });
+    }
+}
+
+/// Turns sending what's copied here on or off. The window says on start and on each change.
+#[tauri::command]
+fn set_clipboard_sync(state: State<DesktopRuntimeState>, enabled: bool) {
+    state.clipboard.set_enabled(enabled);
+}
+
+/// Sends text to a connected device and saves it to history.
+async fn push_text(
+    sessions: &SessionRegistry,
+    trust_store: &TrustStore,
+    history: &HistoryStore,
+    peer_fingerprint: String,
+    text: String,
+) -> Result<(), String> {
+    let mux = sessions
         .get(&peer_fingerprint)
         .ok_or_else(|| NOT_CONNECTED.to_string())?;
 
@@ -914,13 +995,13 @@ async fn send_clipboard_text(
         )
         .await;
     remember(
-        &state.history,
+        history,
         history::Item {
             direction: Direction::Sent,
             kind: Kind::Text,
             size: text.len() as u64,
             label: text,
-            peer_name: peer_name(&state.trust_store, &peer_fingerprint),
+            peer_name: peer_name(trust_store, &peer_fingerprint),
             peer_fingerprint,
             failed: result.is_err(),
             location: None,
@@ -982,6 +1063,7 @@ fn initialize_desktop_runtime(
     db_path: &Path,
     secrets_dir: &Path,
     download_dir: PathBuf,
+    clipboard: ClipboardSync,
 ) -> Result<DesktopRuntimeState, Box<dyn std::error::Error>> {
     let trust_store = TrustStore::open(db_path)?;
     let permission_store = Arc::new(PermissionStore::open(db_path)?);
@@ -1008,6 +1090,7 @@ fn initialize_desktop_runtime(
             trust_store.clone(),
             pending_answers.clone(),
             history.clone(),
+            clipboard.clone(),
             app_handle,
         ),
         sessions::RegistryConfig::default(),
@@ -1034,6 +1117,7 @@ fn initialize_desktop_runtime(
         pending_answers,
         history,
         download_dir,
+        clipboard,
     })
 }
 
@@ -1068,9 +1152,15 @@ fn main() {
                 .unwrap_or_else(|_| app_data.join("downloads"));
             let _ = std::fs::create_dir_all(&download_dir);
 
-            let runtime_state =
-                initialize_desktop_runtime(app.handle(), &db_path, &secrets_dir, download_dir)
-                    .expect("Failed to initialize Continue desktop runtime engine");
+            let (clipboard, clipboard_watcher) = clipboard_sync::new();
+            let runtime_state = initialize_desktop_runtime(
+                app.handle(),
+                &db_path,
+                &secrets_dir,
+                download_dir,
+                clipboard,
+            )
+            .expect("Failed to initialize Continue desktop runtime engine");
 
             // quinn needs a running async runtime to open the endpoint, which `setup` doesn't have.
             let cert = runtime_state.transport_cert.clone();
@@ -1097,6 +1187,8 @@ fn main() {
             });
 
             app.manage(runtime_state);
+            let handle = app.handle().clone();
+            clipboard_watcher.start(move |text| send_copied_text(&handle, text));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1114,6 +1206,7 @@ fn main() {
             clear_history,
             open_received,
             open_link,
+            set_clipboard_sync,
             save_pasted_file,
             connect_to_peer,
             disconnect_peer,

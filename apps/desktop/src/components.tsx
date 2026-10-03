@@ -56,3 +56,20 @@ export function ButtonGroup<T extends string>(props: {
     </div>
   );
 }
+
+/** An on/off switch. */
+export function Switch(props: { checked: boolean; onChange: (checked: boolean) => void; labelledBy: string }) {
+  const { checked, onChange, labelledBy } = props;
+  return (
+    <button
+      type="button"
+      role="switch"
+      className="switch"
+      aria-checked={checked}
+      aria-labelledby={labelledBy}
+      onClick={() => onChange(!checked)}
+    >
+      <span />
+    </button>
+  );
+}
