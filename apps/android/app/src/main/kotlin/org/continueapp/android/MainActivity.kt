@@ -1,11 +1,13 @@
 package org.continueapp.android
 
+import android.Manifest
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -39,7 +41,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -54,6 +55,8 @@ import org.continueapp.android.ui.screens.SharePrompt
 import org.continueapp.android.ui.theme.ContinueTheme
 
 class MainActivity : ComponentActivity() {
+    private val askForNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
     /** Something shared from another app, waiting for the user to pick a computer. */
     private val shared = mutableStateOf<Shared?>(null)
 
@@ -64,7 +67,11 @@ class MainActivity : ComponentActivity() {
         val fromRecents = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
         if (savedInstanceState == null && !fromRecents) shared.value = sharedFrom(intent)
         val app = application as ContinueApplication
-        val state = AppState(app.coreBridge)
+        val state = app.state
+        app.applyBackground()
+        if (app.receiveInBackground && needsNotificationPermission(this)) {
+            askForNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
 
         setContent {
             var themeMode by remember { mutableStateOf(app.themeMode) }
@@ -142,11 +149,6 @@ private fun ContinueApp(
         }
     }
     PermissionPrompts(state.questions)
-    val context = LocalContext.current
-    LaunchedEffect(Unit) {
-        state.recent.load()
-        state.incoming.listen(context.applicationContext)
-    }
     BackHandler(enabled = overlay != null) { overlay = null }
     SharePrompt(shared, state, onMessage = showMessage) {
         overlay = null

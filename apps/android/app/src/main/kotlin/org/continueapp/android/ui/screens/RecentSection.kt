@@ -30,10 +30,10 @@ import org.continueapp.android.Transfer
 import org.continueapp.android.TransferKind
 import org.continueapp.android.TransferStatus
 import org.continueapp.android.copyToClipboard
-import org.continueapp.android.mimeType
 import org.continueapp.android.ui.components.SectionLabel
 import org.continueapp.android.ui.components.SettingsRow
 import org.continueapp.android.ui.theme.success
+import org.continueapp.android.viewIntent
 
 private const val RECENT_ON_HOME = 5
 
@@ -128,12 +128,8 @@ private fun openFile(
     name: String,
     onMessage: (String) -> Unit,
 ) {
-    val intent =
-        Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, mimeType(name))
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     try {
-        context.startActivity(intent)
+        context.startActivity(viewIntent(uri, name))
     } catch (_: ActivityNotFoundException) {
         onMessage("No app on this phone can open $name.")
     }

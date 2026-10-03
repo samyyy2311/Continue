@@ -2,13 +2,27 @@ package org.continueapp.android
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.net.wifi.WifiManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.launch
 import org.continueapp.android.ui.theme.ThemeMode
 import org.continueapp.bridge.ContinueCoreBridge
 
 class ContinueApplication : Application() {
     lateinit var coreBridge: ContinueCoreBridge
         private set
+
+    /** Shared by the screens and the background work, so both see the same thing. */
+    val state by lazy { AppState(coreBridge) }
+
+    /** For work that outlives any one screen. */
+    val scope = MainScope()
+
+    private val onScreen: Boolean
+        get() = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
     // Android drops incoming multicast without this lock, and mDNS discovery relies on it.
     // It's kept in a field because the lock is released once it's garbage collected.
@@ -32,6 +46,23 @@ class ContinueApplication : Application() {
         get() = settings.getBoolean(KEY_WALLPAPER_COLORS, false)
         set(value) = settings.edit().putBoolean(KEY_WALLPAPER_COLORS, value).apply()
 
+    /** Whether files and text keep arriving with the app closed. */
+    var receiveInBackground: Boolean
+        get() = settings.getBoolean(KEY_BACKGROUND, true)
+        set(value) {
+            settings.edit().putBoolean(KEY_BACKGROUND, value).apply()
+            applyBackground()
+        }
+
+    /**
+     * Starts or stops the background service to match the setting. Android only allows
+     * starting it while the app is on screen, so screens call this, not [onCreate].
+     */
+    fun applyBackground() {
+        val service = Intent(this, ConnectionService::class.java)
+        if (receiveInBackground) startForegroundService(service) else stopService(service)
+    }
+
     override fun onCreate() {
         super.onCreate()
         coreBridge = ContinueCoreBridge.create()
@@ -39,6 +70,22 @@ class ContinueApplication : Application() {
         dbFile.parentFile?.mkdirs()
         coreBridge.initCore(dbFile.absolutePath)
         applyVisibility(visible)
+        createNotificationChannels(this)
+        listen()
+    }
+
+    /** Takes in what paired computers send, for as long as the process runs. */
+    private fun listen() {
+        // On screen, the app shows these itself; otherwise they become notifications.
+        state.incoming.onArrival = { title, detail, open -> if (!onScreen) notifyArrival(this, title, detail, open) }
+        state.questions.onChange = { question ->
+            if (question != null && !onScreen) notifyQuestion(this, question) else cancelQuestion(this)
+        }
+        scope.launch {
+            state.recent.load()
+            state.incoming.listen(this@ContinueApplication)
+        }
+        scope.launch { state.questions.listen() }
     }
 
     private fun applyVisibility(visible: Boolean) {
@@ -62,5 +109,6 @@ class ContinueApplication : Application() {
         const val KEY_VISIBLE = "visible"
         const val KEY_THEME = "theme"
         const val KEY_WALLPAPER_COLORS = "wallpaper_colors"
+        const val KEY_BACKGROUND = "receive_in_background"
     }
 }

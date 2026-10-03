@@ -1,9 +1,12 @@
 package org.continueapp.android.ui.screens
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -13,12 +16,19 @@ import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import org.continueapp.android.ContinueApplication
+import org.continueapp.android.needsNotificationPermission
 import org.continueapp.android.ui.components.ChoiceRow
 import org.continueapp.android.ui.components.PageTitle
 import org.continueapp.android.ui.components.ScreenPadding
@@ -34,6 +44,34 @@ class AppearanceSettings(
     val onThemeModeChange: (ThemeMode) -> Unit,
     val onWallpaperColorsChange: (Boolean) -> Unit,
 )
+
+/** Keeps receiving with the app closed. Turning it on asks to show notifications if needed. */
+@Composable
+private fun BackgroundRow() {
+    val context = LocalContext.current
+    val app = context.applicationContext as ContinueApplication
+    var on by remember { mutableStateOf(app.receiveInBackground) }
+    val askForNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    SettingsRow(
+        title = "Keep receiving when closed",
+        subtitle =
+            "Files and text from your computer arrive even with Continue closed. " +
+                "A quiet notification stays while this is on.",
+        icon = Icons.Outlined.Sync,
+        trailing = {
+            Switch(
+                checked = on,
+                onCheckedChange = {
+                    on = it
+                    app.receiveInBackground = it
+                    if (it && needsNotificationPermission(context)) {
+                        askForNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                },
+            )
+        },
+    )
+}
 
 @Composable
 fun SettingsScreen(
@@ -55,6 +93,7 @@ fun SettingsScreen(
             icon = Icons.Outlined.Wifi,
             trailing = { Switch(checked = visible, onCheckedChange = onVisibleChange) },
         )
+        BackgroundRow()
 
         SectionLabel("Appearance")
         SettingsRow(title = "Theme", icon = Icons.Outlined.DarkMode)

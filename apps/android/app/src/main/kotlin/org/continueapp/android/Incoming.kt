@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -27,18 +28,25 @@ class Incoming(
     private val bridge: ContinueCoreBridge,
     private val recent: RecentTransfers,
 ) {
+    /** Hears about each arrival: a title, a line of detail, and what tapping it should open. */
+    var onArrival: (title: String, detail: String, open: Intent?) -> Unit = { _, _, _ -> }
+
     suspend fun listen(context: Context) {
         while (true) {
             when (val item = withContext(Dispatchers.IO) { bridge.nextReceived(RECEIVE_WAIT_MS) }) {
                 is ReceivedFile -> {
                     val uri = withContext(Dispatchers.IO) { saveToDownloads(context, item) }
                     recent.received(TransferKind.File, item.name, item.peerName, uri)
+                    val open = uri?.let { viewIntent(it, item.name) }
+                    onArrival("${item.peerName.ifBlank { "Your computer" }} sent a file", item.name, open)
                     val id = item.historyId
                     if (uri != null && id != null) remember(id, uri)
                 }
                 is ReceivedText -> {
                     copyToClipboard(context, item.text)
                     recent.received(TransferKind.Text, firstLine(item.text), item.peerName, text = item.text)
+                    val from = item.peerName.ifBlank { "your computer" }
+                    onArrival("Copied text from $from", firstLine(item.text), null)
                 }
                 null -> Unit
             }
@@ -56,6 +64,15 @@ class Incoming(
         }
     }
 }
+
+/** Opens a received file in whatever app handles its type. */
+fun viewIntent(
+    uri: Uri,
+    name: String,
+): Intent =
+    Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uri, mimeType(name))
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
 fun mimeType(name: String): String = URLConnection.guessContentTypeFromName(name) ?: "application/octet-stream"
 

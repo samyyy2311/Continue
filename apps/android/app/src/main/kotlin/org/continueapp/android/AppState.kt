@@ -7,6 +7,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.continueapp.bridge.ContinueCoreBridge
 import org.continueapp.bridge.ContinueException
@@ -124,26 +127,44 @@ private fun HistoryEntry.toTransfer() =
 
 /** Questions from devices set to Ask. The core asks one at a time. */
 class PermissionQuestions(private val bridge: ContinueCoreBridge) {
-    var current by mutableStateOf<PermissionQuestion?>(null)
-        private set
+    private var shown by mutableStateOf<PermissionQuestion?>(null)
 
-    /** Picks up questions from the core for as long as the caller keeps it running. */
-    suspend fun listen() {
-        while (true) {
-            val next = withContext(Dispatchers.IO) { bridge.nextPermissionQuestion(QUESTION_WAIT_MS) }
-            if (next != null && next.expiresAt > System.currentTimeMillis()) current = next
+    /** The question waiting for an answer, if there is one. */
+    val current: PermissionQuestion? get() = shown
+
+    /** Hears each new question, and null once it's answered or has run out of time. */
+    var onChange: (PermissionQuestion?) -> Unit = {}
+
+    /**
+     * Picks up questions from the core for as long as the caller keeps it running. Each one
+     * goes away when the core stops waiting for it.
+     */
+    suspend fun listen() =
+        coroutineScope {
+            while (true) {
+                val next = withContext(Dispatchers.IO) { bridge.nextPermissionQuestion(QUESTION_WAIT_MS) }
+                if (next != null && next.expiresAt > System.currentTimeMillis()) {
+                    show(next)
+                    launch {
+                        delay(next.expiresAt - System.currentTimeMillis())
+                        if (shown?.id == next.id) show(null)
+                    }
+                }
+            }
         }
+
+    /** Answers question [id]. An answer to a question that already went away is ignored. */
+    suspend fun answer(
+        id: Long,
+        answer: PermissionAnswer,
+    ) {
+        if (shown?.id == id) show(null)
+        withContext(Dispatchers.IO) { bridge.answerPermissionQuestion(id, answer) }
     }
 
-    suspend fun answer(answer: PermissionAnswer) {
-        val asked = current ?: return
-        current = null
-        withContext(Dispatchers.IO) { bridge.answerPermissionQuestion(asked.id, answer) }
-    }
-
-    /** Hides a question the core has stopped waiting on. */
-    fun dismiss(id: Long) {
-        if (current?.id == id) current = null
+    private fun show(question: PermissionQuestion?) {
+        shown = question
+        onChange(question)
     }
 }
 
