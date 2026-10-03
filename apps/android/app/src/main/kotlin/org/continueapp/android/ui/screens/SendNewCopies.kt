@@ -6,6 +6,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
 import org.continueapp.android.AppState
 import org.continueapp.android.ContinueApplication
+import org.continueapp.android.markSent
 import org.continueapp.android.newCopy
 import org.continueapp.android.sendToConnected
 
@@ -20,10 +21,16 @@ fun SendNewCopies(
 ) {
     val context = LocalContext.current
     val focused = LocalWindowInfo.current.isWindowFocused
-    LaunchedEffect(focused, state.loaded) {
+    // Connections are a key too, so a computer that connects after the app opens still gets it.
+    LaunchedEffect(focused, state.loaded, state.connected) {
         val app = context.applicationContext as ContinueApplication
         val ready = focused && state.loaded && state.connected.isNotEmpty()
-        val text = if (ready && app.sendNewCopies) newCopy(context, app) else null
-        if (text != null) onMessage(state.sendToConnected(text).replace("Sent to", "Sent what you copied to"))
+        val copy = if (ready && app.sendNewCopies) newCopy(context, app) else null
+        if (copy != null) {
+            val (sent, message) = state.sendToConnected(copy.text)
+            // Only a copy that went counts as sent; otherwise the next opening tries again.
+            if (sent) markSent(app, copy)
+            onMessage(message.replace("Sent to", "Sent what you copied to"))
+        }
     }
 }

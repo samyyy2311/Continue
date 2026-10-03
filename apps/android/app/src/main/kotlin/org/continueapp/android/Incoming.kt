@@ -9,6 +9,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.continueapp.bridge.ContinueCoreBridge
 import org.continueapp.bridge.ContinueException
@@ -29,8 +30,19 @@ class Incoming(
     /** Hears about each arrival: a title, a line of detail, and what tapping it should open. */
     var onArrival: (title: String, detail: String, open: Intent?) -> Unit = { _, _, _ -> }
 
-    suspend fun listen(context: Context) {
+    /**
+     * Takes what arrives while [active] says to. Otherwise it waits, so nothing is saved or
+     * copied to the clipboard until it is.
+     */
+    suspend fun listen(
+        context: Context,
+        active: () -> Boolean,
+    ) {
         while (true) {
+            if (!active()) {
+                delay(RECEIVE_WAIT_MS)
+                continue
+            }
             when (val item = withContext(Dispatchers.IO) { bridge.nextReceived(RECEIVE_WAIT_MS) }) {
                 is ReceivedFile -> {
                     val uri = withContext(Dispatchers.IO) { saveToDownloads(context, item) }

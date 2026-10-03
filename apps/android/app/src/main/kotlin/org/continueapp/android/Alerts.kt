@@ -35,7 +35,8 @@ private var nextArrivalId = FIRST_ARRIVAL_ID
 fun createNotificationChannels(context: Context) {
     val channels =
         listOf(
-            NotificationChannel(CHANNEL_BACKGROUND, "Receiving in the background", NotificationManager.IMPORTANCE_MIN)
+            // Low rather than min: Android adds its own "running in the background" notice for min.
+            NotificationChannel(CHANNEL_BACKGROUND, "Receiving in the background", NotificationManager.IMPORTANCE_LOW)
                 .apply { description = "Shown while Continue keeps receiving with the app closed." },
             NotificationChannel(CHANNEL_RECEIVED, "Files and text you receive", NotificationManager.IMPORTANCE_DEFAULT),
             NotificationChannel(CHANNEL_QUESTIONS, "Requests to send", NotificationManager.IMPORTANCE_HIGH),
@@ -65,7 +66,7 @@ fun backgroundNotification(context: Context): Notification {
         .setContentIntent(openApp(context))
         .addAction(0, "Send clipboard", sendClipboard)
         .setOngoing(true)
-        .setPriority(NotificationCompat.PRIORITY_MIN)
+        .setPriority(NotificationCompat.PRIORITY_LOW)
         .build()
 }
 
@@ -147,7 +148,9 @@ private fun answerIntent(
         Intent(context, QuestionAnswerReceiver::class.java)
             .putExtra(EXTRA_QUESTION, question)
             .putExtra(EXTRA_ANSWER, answer.name)
-    return PendingIntent.getBroadcast(context, answer.ordinal, intent, IMMUTABLE)
+    // Each question gets its own buttons, so an old notification can never answer a newer one.
+    val code = (question * PermissionAnswer.entries.size + answer.ordinal).toInt()
+    return PendingIntent.getBroadcast(context, code, intent, IMMUTABLE)
 }
 
 private fun openApp(context: Context): PendingIntent =

@@ -57,19 +57,19 @@ import org.continueapp.android.ui.theme.ContinueTheme
 class MainActivity : ComponentActivity() {
     private val askForNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
-    /** Something shared from another app, waiting for the user to pick a computer. */
-    private val shared = mutableStateOf<Shared?>(null)
-
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        // Rotating or reopening from recent apps shouldn't ask again about a share already answered.
-        val fromRecents = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
-        if (savedInstanceState == null && !fromRecents) shared.value = sharedFrom(intent)
         val app = application as ContinueApplication
+        // A share still waiting after the phone is turned is kept by the app; reopening from
+        // recent apps shouldn't ask again about one already answered.
+        val fromRecents = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        if (savedInstanceState == null && !fromRecents) sharedFrom(intent)?.let { app.pendingShare.value = it }
         val state = app.state
         app.applyBackground()
-        if (app.receiveInBackground && needsNotificationPermission(this)) {
+        // Asked once here; after that, only when background receiving is turned on in Settings.
+        if (app.receiveInBackground && !app.askedForNotifications && needsNotificationPermission(this)) {
+            app.askedForNotifications = true
             askForNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
@@ -99,7 +99,7 @@ class MainActivity : ComponentActivity() {
                         app.visible = it
                     },
                     appearance = appearance,
-                    shared = shared,
+                    shared = app.pendingShare,
                 )
             }
         }
@@ -107,7 +107,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        sharedFrom(intent)?.let { shared.value = it }
+        sharedFrom(intent)?.let { (application as ContinueApplication).pendingShare.value = it }
     }
 }
 

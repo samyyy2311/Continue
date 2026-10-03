@@ -4,7 +4,6 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
-import android.os.Build
 
 private const val CLIP_LABEL = "Continue"
 
@@ -22,52 +21,61 @@ fun copyToClipboard(
     clipboard.primaryClipDescription?.let { app.lastCopySeen = it.timestamp }
 }
 
-/** What's copied, read only while Continue is on screen, as Android requires. */
-fun readCopy(
-    context: Context,
-    app: ContinueApplication,
-): String? {
-    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return null
-    clipboard.primaryClipDescription?.let { app.lastCopySeen = it.timestamp }
-    return clipboard.primaryClip
-        ?.takeIf { it.itemCount > 0 }
-        ?.getItemAt(0)
-        ?.coerceToText(context)
-        ?.toString()
+/** Text that was copied, and when, so it can be marked as dealt with once it's sent. */
+class Copy(
+    val text: String,
+    val at: Long,
+)
+
+/**
+ * The copied text, read only while Continue is on screen, as Android requires. Images and
+ * other copies that aren't text count as nothing to send.
+ */
+fun readCopy(context: Context): Copy? {
+    val clipboard = context.getSystemService(ClipboardManager::class.java)
+    val at = clipboard?.primaryClipDescription?.timestamp ?: return null
+    val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
+    return text?.takeIf { it.isNotBlank() }?.let { Copy(it, at) }
 }
 
 /**
- * Something copied since the app last looked, or null. Skips copies marked sensitive, as
+ * Something copied since the app last sent a copy, or null. Skips copies marked sensitive, as
  * password managers do. Only the copy's time is checked until there's something new, so
  * Android's "pasted from your clipboard" notice only shows when there is.
  */
 fun newCopy(
     context: Context,
     app: ContinueApplication,
-): String? {
+): Copy? {
     val description = context.getSystemService(ClipboardManager::class.java)?.primaryClipDescription
     val seen = app.lastCopySeen
-    val fresh = description != null && description.timestamp > seen && !description.isSensitive()
+    if (description == null || description.isSensitive()) return null
     // The first time, whatever is already copied counts as old.
-    if (seen == 0L || !fresh) {
-        description?.let { app.lastCopySeen = it.timestamp }
-        return null
-    }
-    return readCopy(context, app)?.takeIf { it.isNotBlank() }
+    if (seen == 0L) app.lastCopySeen = description.timestamp
+    return if (seen != 0L && description.timestamp > seen) readCopy(context) else null
 }
 
-private fun ClipDescription.isSensitive(): Boolean =
-    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-        extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE) == true
+/** Marks a copy as dealt with, so it isn't sent again. */
+fun markSent(
+    app: ContinueApplication,
+    copy: Copy,
+) {
+    app.lastCopySeen = maxOf(app.lastCopySeen, copy.at)
+}
 
-/** Sends text to every connected computer, and says how that went. */
-suspend fun AppState.sendToConnected(text: String): String {
+/** The extra password managers set on what they copy. Read by name, as apps set it on every version. */
+private const val IS_SENSITIVE = "android.content.extra.IS_SENSITIVE"
+
+private fun ClipDescription.isSensitive(): Boolean = extras?.getBoolean(IS_SENSITIVE) == true
+
+/** Sends text to every connected computer. Says whether it all went, and how to put it. */
+suspend fun AppState.sendToConnected(text: String): Pair<Boolean, String> {
     refresh()
     val targets = peers.filter { it.fingerprint in connected }
     val failed = targets.map { sendText(it, text) }.firstOrNull { it != null }
     return when {
-        targets.isEmpty() -> "Your computer isn't connected."
-        failed != null -> failed
-        else -> "Sent to ${targets.joinToString { it.displayName }}"
+        targets.isEmpty() -> false to "Your computer isn't connected."
+        failed != null -> false to failed
+        else -> true to "Sent to ${targets.joinToString { it.displayName }}"
     }
 }

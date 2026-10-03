@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.net.wifi.WifiManager
+import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.MainScope
@@ -57,6 +58,17 @@ class ContinueApplication : Application() {
         get() = settings.getLong(KEY_COPY_SEEN, 0L)
         set(value) = settings.edit().putLong(KEY_COPY_SEEN, value).apply()
 
+    /**
+     * Something shared from another app, waiting for the user to pick a computer. Kept here
+     * so it survives the screen being rebuilt, as when the phone is turned.
+     */
+    val pendingShare = mutableStateOf<Shared?>(null)
+
+    /** Whether the app has asked to show notifications. Android stops asking after refusals. */
+    var askedForNotifications: Boolean
+        get() = settings.getBoolean(KEY_ASKED_NOTIFICATIONS, false)
+        set(value) = settings.edit().putBoolean(KEY_ASKED_NOTIFICATIONS, value).apply()
+
     /** Who's connected, as the background notification says it. */
     var connectionStatus = "Looking for your computer"
         private set
@@ -98,7 +110,8 @@ class ContinueApplication : Application() {
         }
         scope.launch {
             state.recent.load()
-            state.incoming.listen(this@ContinueApplication)
+            // With background receiving off, only while the app is on screen.
+            state.incoming.listen(this@ContinueApplication) { onScreen || receiveInBackground }
         }
         scope.launch { state.questions.listen() }
         scope.launch { watchConnections() }
@@ -151,6 +164,7 @@ class ContinueApplication : Application() {
         const val KEY_BACKGROUND = "receive_in_background"
         const val KEY_SEND_COPIES = "send_new_copies"
         const val KEY_COPY_SEEN = "last_copy_seen"
+        const val KEY_ASKED_NOTIFICATIONS = "asked_notifications"
         const val ON_SCREEN_REFRESH_MS = 2_000L
         const val BACKGROUND_REFRESH_MS = 10_000L
     }
