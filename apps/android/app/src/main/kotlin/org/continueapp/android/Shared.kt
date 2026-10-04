@@ -7,9 +7,13 @@ import androidx.core.content.IntentCompat
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import org.continueapp.bridge.TrustedPeer
 
 private const val SHARE_CATEGORY = "org.continueapp.android.SEND_TO_COMPUTER"
+private const val CONNECT_WAIT_MS = 15_000L
+private const val CONNECT_POLL_MS = 250L
 
 /** Files or text another app shared to Continue. When both come, the files are sent. */
 data class Shared(
@@ -65,6 +69,20 @@ fun publishShareTargets(
                 .build()
         }
     ShortcutManagerCompat.setDynamicShortcuts(context, shortcuts)
+}
+
+/** Connects to [peer] and waits until it is, as a share to a computer that isn't connected would fail. */
+private suspend fun AppState.connectNow(peer: String): String? {
+    reconnect(peer)?.let { return it }
+    val reached =
+        withTimeoutOrNull(CONNECT_WAIT_MS) {
+            refresh()
+            while (peer !in connected) {
+                delay(CONNECT_POLL_MS)
+                refresh()
+            }
+        }
+    return if (reached == null) "Couldn't reach your computer. Check that both are on the same Wi-Fi." else null
 }
 
 /** Sends what another app shared, connecting to [peer] first if it isn't already. */
