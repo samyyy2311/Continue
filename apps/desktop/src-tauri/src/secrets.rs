@@ -92,7 +92,10 @@ mod tests {
 
         let store = store_for(&service, &dir).unwrap();
         let moved = DeviceKeys::load_or_create(&store).unwrap();
-        assert!(store.uses_platform(), "the OS store took the keys");
+        assert!(
+            store.uses_platform("device_identity") && store.uses_platform("transport_cert"),
+            "the OS store took the keys"
+        );
         assert_eq!(fingerprint(&moved), fingerprint(&before));
         assert_eq!(
             moved.transport_cert.spki_hash,
