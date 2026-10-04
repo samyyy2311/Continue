@@ -68,6 +68,19 @@ impl Connected {
         } else {
             peers.remove(peer);
         }
+        Self::show(app, &peers);
+    }
+
+    /// Picks up a name a connected device sent after connecting.
+    pub fn rename(&self, app: &AppHandle, peer: &str, name: String) {
+        let mut peers = self.0.lock();
+        if let Some(shown) = peers.get_mut(peer) {
+            *shown = name;
+            Self::show(app, &peers);
+        }
+    }
+
+    fn show(app: &AppHandle, peers: &BTreeMap<String, String>) {
         let status = match peers.len() {
             0 => "Continue · No phone connected".to_string(),
             1 => format!(

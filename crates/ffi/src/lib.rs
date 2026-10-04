@@ -61,6 +61,8 @@ struct CoreState {
     listener: quinn::Endpoint,
     discovery_tasks: Vec<tokio::task::JoinHandle<()>>,
     incoming: sessions::IncomingFiles,
+    /// The name paired devices see for this phone.
+    this_device: sessions::ThisDevice,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -172,6 +174,12 @@ fn deliver_received(
     trust_store: TrustStore,
     history: HistoryStore,
 ) -> sessions::SessionCapabilityHandlers {
+    let names = trust_store.clone();
+    handlers.on_device_info = Some(Arc::new(move |peer, device| {
+        if let Err(error) = names.set_display_name(peer, &device.name) {
+            tracing::warn!("Couldn't save the name of {peer}: {error}");
+        }
+    }));
     let (peers, saved) = (trust_store.clone(), history.clone());
     handlers.on_file_received = Some(Arc::new(move |peer, file| {
         let peer_name = peer_name(&peers, peer);
@@ -409,11 +417,14 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
     let _ = std::fs::create_dir_all(&download_dir);
     let grants = permission_store.clone();
     let incoming = sessions::IncomingFiles::default();
+    // Named by `set_device_name` once the app has read the phone's name.
+    let this_device = sessions::ThisDevice::default();
     let sessions = SessionRegistry::new(
         local_fingerprint,
         transport_cert.clone(),
         deliver_received(
             sessions::SessionCapabilityHandlers::new(download_dir)
+                .with_this_device(this_device.clone())
                 .with_incoming(incoming.clone())
                 .with_permission_store(Arc::new(permission_store.clone()))
                 .with_permission_prompt(permission_prompt(trust_store.clone())),
@@ -463,6 +474,7 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
         listener,
         incoming,
         discovery_tasks: Vec::new(),
+        this_device,
     };
 
     let mut lock = CORE.lock().unwrap();
@@ -493,6 +505,14 @@ fn load_device_keys(db_path: &str) -> Result<DeviceKeys, ContinueFfiError> {
         .join("secrets");
     let store = FileSecretStore::new(secrets_dir).map_err(|e| internal(e.to_string()))?;
     DeviceKeys::load_or_create(&store).map_err(|e| internal(e.to_string()))
+}
+
+/// Sets the name paired devices see for this phone, from the next session on.
+pub fn set_device_name(name: String) -> Result<(), ContinueFfiError> {
+    let lock = CORE.lock().unwrap();
+    let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
+    state.this_device.set_name(&name);
+    Ok(())
 }
 
 pub fn get_device_fingerprint() -> Result<String, ContinueFfiError> {

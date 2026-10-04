@@ -35,6 +35,7 @@ import org.continueapp.bridge.ffi.revokePermission as coreRevokePermission
 import org.continueapp.bridge.ffi.sendClipboardText as coreSendClipboardText
 import org.continueapp.bridge.ffi.sendFile as coreSendFile
 import org.continueapp.bridge.ffi.sendNotification as coreSendNotification
+import org.continueapp.bridge.ffi.setDeviceName as coreSetDeviceName
 import org.continueapp.bridge.ffi.setHistoryLocation as coreSetHistoryLocation
 import org.continueapp.bridge.ffi.setPermission as coreSetPermission
 import org.continueapp.bridge.ffi.startDiscovery as coreStartDiscovery
@@ -47,6 +48,9 @@ private const val QR_SUFFIX_LENGTH = 4
 @Suppress("TooManyFunctions")
 interface ContinueCoreBridge {
     fun initCore(dbPath: String)
+
+    /** The name paired computers see for this phone, from the next connection on. */
+    fun setDeviceName(name: String)
 
     fun getDeviceFingerprint(): String
 
@@ -182,6 +186,14 @@ class MockContinueCoreBridge : ContinueCoreBridge {
 
     override fun initCore(dbPath: String) {
         initialized = true
+    }
+
+    var deviceName = ""
+        private set
+
+    override fun setDeviceName(name: String) {
+        checkInitialized()
+        deviceName = name
     }
 
     override fun getDeviceFingerprint(): String {
@@ -376,6 +388,8 @@ class MockContinueCoreBridge : ContinueCoreBridge {
 @Suppress("TooManyFunctions")
 class NativeContinueCoreBridge : ContinueCoreBridge {
     override fun initCore(dbPath: String) = native { coreInitCore(dbPath) }
+
+    override fun setDeviceName(name: String) = native { coreSetDeviceName(name) }
 
     override fun getDeviceFingerprint(): String = native { coreGetDeviceFingerprint() }
 

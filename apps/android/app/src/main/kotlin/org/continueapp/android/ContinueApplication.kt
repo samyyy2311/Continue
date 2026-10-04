@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.net.wifi.WifiManager
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -102,6 +104,7 @@ class ContinueApplication : Application() {
         val dbFile = getDatabasePath("continue_android.db")
         dbFile.parentFile?.mkdirs()
         coreBridge.initCore(dbFile.absolutePath)
+        coreBridge.setDeviceName(phoneName())
         applyVisibility(visible)
         createNotificationChannels(this)
         listen()
@@ -144,6 +147,15 @@ class ContinueApplication : Application() {
             names.size == 1 -> "Connected to ${names.single()}"
             else -> "Connected to ${names.size} computers"
         }
+    }
+
+    /** The name the owner gave the phone in Settings → About phone, or its model. */
+    private fun phoneName(): String {
+        val ownerSet = Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)
+        if (!ownerSet.isNullOrBlank()) return ownerSet
+        val model = Build.MODEL.orEmpty()
+        val maker = Build.MANUFACTURER.orEmpty().replaceFirstChar { it.uppercase() }
+        return if (model.startsWith(maker, ignoreCase = true)) model else "$maker $model".trim()
     }
 
     private fun applyVisibility(visible: Boolean) {

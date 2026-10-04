@@ -21,7 +21,7 @@ use permissions::{PermissionStore, PersistedGrant};
 use protocol::CapabilityId;
 use sessions::{
     accept_peers, connect_paired_peers, listen_for_peers, remember_peer_address, RegistryConfig,
-    SessionCapabilityHandlers, SessionRegistry, SessionState,
+    SessionCapabilityHandlers, SessionRegistry, SessionState, ThisDevice,
 };
 use tokio::runtime::Runtime;
 use transport::DialConfig;
@@ -53,8 +53,9 @@ struct Device {
 }
 
 impl Device {
-    /// Starts the app from what `dir` holds, creating it on first run.
-    fn start(dir: &Path) -> Self {
+    /// Starts the app from what `dir` holds, creating it on first run, as a device called
+    /// `name`.
+    fn start(dir: &Path, name: &str) -> Self {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -77,8 +78,13 @@ impl Device {
                 .collect(),
         ));
         let received = dir.join("received");
-        let handlers =
-            SessionCapabilityHandlers::new(&received).with_permission_store(permissions.clone());
+        let mut handlers = SessionCapabilityHandlers::new(&received)
+            .with_permission_store(permissions.clone())
+            .with_this_device(ThisDevice::new(name, protocol::v1::Platform::Linux));
+        let names = trust_store.clone();
+        handlers.on_device_info = Some(Arc::new(move |peer, device| {
+            names.set_display_name(peer, &device.name).unwrap();
+        }));
 
         // The registry spawns onto the runtime it's created in.
         let registry = runtime.block_on(async {
@@ -131,6 +137,15 @@ impl Device {
 
     fn connected_to(&self, other: &Device) -> bool {
         self.registry.state(&other.fingerprint) == SessionState::Connected
+    }
+
+    /// The name this device shows for `other`.
+    fn name_of(&self, other: &Device) -> String {
+        self.trust_store
+            .get_peer(&other.fingerprint)
+            .unwrap()
+            .map(|peer| peer.display_name)
+            .unwrap_or_default()
     }
 }
 
@@ -209,8 +224,8 @@ fn eventually(what: &str, mut condition: impl FnMut() -> bool) {
 fn paired_devices_reconnect_after_both_restart_and_the_phone_can_send_a_file() {
     let (computer_dir, phone_dir) = (data_dir("computer"), data_dir("phone"));
 
-    let computer = Device::start(&computer_dir);
-    let phone = Device::start(&phone_dir);
+    let computer = Device::start(&computer_dir, "Work laptop");
+    let phone = Device::start(&phone_dir, "Sam's Pixel");
     let (computer_fingerprint, phone_fingerprint) =
         (computer.fingerprint.clone(), phone.fingerprint.clone());
     pair(&computer, &phone);
@@ -227,12 +242,16 @@ fn paired_devices_reconnect_after_both_restart_and_the_phone_can_send_a_file() {
     eventually("the new pair connects", || {
         phone.connected_to(&computer) && computer.connected_to(&phone)
     });
+    eventually("each knows the other's name", || {
+        phone.name_of(&computer) == "Work laptop" && computer.name_of(&phone) == "Sam's Pixel"
+    });
 
     phone.quit();
     computer.quit();
 
-    let computer = Device::start(&computer_dir);
-    let phone = Device::start(&phone_dir);
+    // The computer was renamed while it was off.
+    let computer = Device::start(&computer_dir, "Studio desktop");
+    let phone = Device::start(&phone_dir, "Sam's Pixel");
     assert_eq!(
         computer.fingerprint, computer_fingerprint,
         "the computer kept its identity"
@@ -244,6 +263,14 @@ fn paired_devices_reconnect_after_both_restart_and_the_phone_can_send_a_file() {
     eventually("both restarted devices reconnect on their own", || {
         phone.connected_to(&computer) && computer.connected_to(&phone)
     });
+    eventually("the phone shows the computer's new name", || {
+        phone.name_of(&computer) == "Studio desktop"
+    });
+    assert_eq!(
+        computer.name_of(&phone),
+        "Sam's Pixel",
+        "kept across the restart"
+    );
 
     let photo = data_dir("photo").join("photo.jpg");
     std::fs::write(&photo, b"not really a photo").unwrap();

@@ -18,14 +18,14 @@ Continue ships as a desktop app (Windows, macOS, Linux) and an Android app, shar
 
 ## Where Continue is today
 
-Phase 1 is done apart from device names: paired devices stay paired across restarts, find and reconnect to each other on their own, and send files and text both ways. Keys are kept in a file in the app's data folder, not yet in the platform's secret store.
+Phase 1 is done: paired devices stay paired across restarts, find and reconnect to each other on their own, show each other's real names, and send files and text both ways. Keys are kept in a file in the app's data folder, not yet in the platform's secret store.
 
 | Area | Works today | Missing |
 | --- | --- | --- |
 | Pairing | QR code or pasted code; signed, pinned and replay-protected | Nothing blocking |
 | Identity | Device keys are saved and reused, so pairing survives restarts | Keys live in a file in the app's data folder, not the platform's secret store |
 | Connecting | Each device listens for paired devices, finds them over mDNS and reconnects after a restart or dropped network | Nothing blocking |
-| Device names | Pairing works without them | Names aren't exchanged, so each side shows a placeholder for the other |
+| Device names | Each side sends its name when it connects: the computer's name, and the phone's owner-set name or model | Nothing blocking |
 | Files | Both ways, with progress, cancel, a chosen save folder and open-when-done | Resuming after a dropped connection |
 | Text | Clipboard sync both ways, automatic or manual | Images and clipboard history |
 | Notifications | Protocol and permission exist | The phone doesn't forward its notifications yet |

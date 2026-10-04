@@ -307,6 +307,17 @@ impl SessionRegistry {
 
         mux.spawn_keepalive_sender();
         spawn_capabilities_dispatcher(mux.clone(), self.inner.handlers.clone(), STREAM_BUFFER);
+        let introduction = {
+            let (mux, info) = (
+                mux.clone(),
+                self.inner
+                    .handlers
+                    .this_device
+                    .info(&self.inner.local_fingerprint),
+            );
+            async move { mux.send_device_info(info).await }
+        };
+        tokio::spawn(introduction);
         self.watch(peer.to_string(), mux);
         self.notify(peer, SessionState::Connected);
         info!("Session established with {peer} ({direction:?})");

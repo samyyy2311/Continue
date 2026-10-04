@@ -14,8 +14,9 @@ use notifications::{NotificationAck, NotificationDispatcher, NotificationPost};
 use protocol::CapabilityId;
 use transfer::{receive_file, send_file, ReceivedFile};
 
+use crate::device::{PeerDevice, ThisDevice};
 use crate::incoming::{IncomingFiles, SaveFolder};
-use crate::multiplexer::SessionMultiplexer;
+use crate::multiplexer::{OnDeviceInfo, SessionMultiplexer};
 
 /// How long a question waits for the user before it counts as declined.
 pub const PROMPT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -57,6 +58,10 @@ pub struct SessionCapabilityHandlers {
     pub on_file_received: Option<OnReceived<ReceivedFile>>,
     pub on_clipboard_received: Option<OnReceived<ClipboardUpdate>>,
     pub on_notification_received: Option<OnReceived<NotificationPost>>,
+    /// How this device introduces itself to peers.
+    pub this_device: ThisDevice,
+    /// Called with what a peer says about itself each time a session starts.
+    pub on_device_info: Option<OnReceived<PeerDevice>>,
     pub permission_store: Option<Arc<permissions::PermissionStore>>,
     pub permission_prompt: Option<PermissionPrompt>,
     /// Keeps to one question at a time, so a batch of files asks once when the first answer is
@@ -73,6 +78,8 @@ impl SessionCapabilityHandlers {
             on_file_received: None,
             on_clipboard_received: None,
             on_notification_received: None,
+            this_device: ThisDevice::default(),
+            on_device_info: None,
             permission_store: None,
             permission_prompt: None,
             prompt_turn: Arc::default(),
@@ -92,6 +99,11 @@ impl SessionCapabilityHandlers {
 
     pub fn with_permission_prompt(mut self, prompt: PermissionPrompt) -> Self {
         self.permission_prompt = Some(prompt);
+        self
+    }
+
+    pub fn with_this_device(mut self, device: ThisDevice) -> Self {
+        self.this_device = device;
         self
     }
 }
@@ -165,8 +177,16 @@ pub fn spawn_capabilities_dispatcher(
     handlers: SessionCapabilityHandlers,
     buffer_size: usize,
 ) {
-    let mut stream_rx = mux.spawn_router(buffer_size);
     let peer_fingerprint = mux.peer_fingerprint().to_string();
+    let on_device_info = handlers.on_device_info.clone().map(|on_device_info| {
+        let peer = peer_fingerprint.clone();
+        Arc::new(move |info: protocol::v1::DeviceInfo| {
+            if let Some(device) = PeerDevice::from_info(&info) {
+                on_device_info(&peer, device);
+            }
+        }) as OnDeviceInfo
+    });
+    let mut stream_rx = mux.spawn_router_with(buffer_size, on_device_info);
     let clipboard = mux.clipboard().clone();
 
     tokio::spawn(async move {

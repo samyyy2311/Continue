@@ -6,6 +6,9 @@ namespace continue {
     void init_core(string db_path);
 
     [Throws=ContinueFfiError]
+    void set_device_name(string name);
+
+    [Throws=ContinueFfiError]
     string get_device_fingerprint();
 
     [Throws=ContinueFfiError]

@@ -4,6 +4,7 @@
 pub mod auto_connect;
 pub mod backoff;
 pub mod capabilities_router;
+pub mod device;
 pub mod error;
 pub mod incoming;
 pub mod keepalive;
@@ -19,6 +20,7 @@ pub use capabilities_router::{
     spawn_capabilities_dispatcher, OnReceived, PermissionDecision, PermissionPrompt,
     PermissionRequest, SessionCapabilityHandlers, PROMPT_TIMEOUT,
 };
+pub use device::{clean_name, this_platform, PeerDevice, ThisDevice, MAX_NAME_BYTES};
 pub use error::SessionError;
 pub use incoming::{IncomingEvent, IncomingFile, IncomingFiles, IncomingListener, SaveFolder};
 pub use keepalive::KeepaliveTracker;

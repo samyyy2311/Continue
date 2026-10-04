@@ -306,6 +306,9 @@ export default function App() {
 
         const unState = await listen("peer-state-changed", () => void refreshPeers());
         keep(unState);
+        // A device says its name just after connecting, and again after a rename.
+        const unRenamed = await listen("peer-renamed", () => void refreshPeers());
+        keep(unRenamed);
 
         const unFile = await listen<{
           peerId: string;

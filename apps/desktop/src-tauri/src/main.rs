@@ -285,6 +285,17 @@ fn save_pasted_file(app: AppHandle, request: tauri::ipc::Request) -> Result<Stri
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// The name people gave this computer: the "pretty" name where the OS has one (macOS's
+/// Computer Name, Linux's pretty hostname), otherwise the hostname.
+fn computer_name() -> String {
+    [whoami::devicename(), whoami::hostname()]
+        .into_iter()
+        .filter_map(Result::ok)
+        .map(|name| sessions::clean_name(&name))
+        .find(|name| !name.is_empty())
+        .unwrap_or_else(|| "Computer".to_string())
+}
+
 fn peer_name(trust_store: &TrustStore, fingerprint: &str) -> String {
     trust_store
         .get_peer(fingerprint)
@@ -328,6 +339,10 @@ fn session_handlers(
     app_handle: &AppHandle,
 ) -> sessions::SessionCapabilityHandlers {
     let mut handlers = sessions::SessionCapabilityHandlers::new(download_dir)
+        .with_this_device(sessions::ThisDevice::new(
+            computer_name(),
+            sessions::this_platform(),
+        ))
         .with_permission_store(permission_store)
         .with_permission_prompt(permission_prompt(
             app_handle.clone(),
@@ -406,6 +421,24 @@ fn session_handlers(
     }));
 
     handlers
+}
+
+/// Saves the name a device sends when it connects, and shows it in the window and tray.
+fn device_info_listener(
+    app: AppHandle,
+    trust_store: TrustStore,
+    connected: Arc<tray::Connected>,
+) -> sessions::OnReceived<sessions::PeerDevice> {
+    Arc::new(
+        move |peer, device| match trust_store.set_display_name(peer, &device.name) {
+            Ok(true) => {
+                connected.rename(&app, peer, device.name);
+                let _ = app.emit("peer-renamed", peer);
+            }
+            Ok(false) => {}
+            Err(error) => tracing::warn!("Couldn't save the name of {peer}: {error}"),
+        },
+    )
 }
 
 /// Asks in the window, which answers through `answer_permission`. The core stops waiting
@@ -498,14 +531,14 @@ fn pending_permission_questions(state: State<DesktopRuntimeState>) -> Vec<Permis
 fn session_state_listener(
     app_handle: AppHandle,
     trust_store: TrustStore,
+    connected: Arc<tray::Connected>,
 ) -> sessions::StateListener {
-    let connected = tray::Connected::default();
     Arc::new(move |peer, session_state| {
         let is_connected = session_state == SessionState::Connected;
         connected.update(
             &app_handle,
             peer,
-            peer_name(&trust_store, peer),
+            shown_name(peer_name(&trust_store, peer)),
             is_connected,
         );
         let _ = app_handle.emit(
@@ -520,7 +553,7 @@ fn session_state_listener(
                 "peer-connected",
                 serde_json::json!({
                     "fingerprint": peer,
-                    "displayName": peer_name(&trust_store, peer),
+                    "displayName": shown_name(peer_name(&trust_store, peer)),
                 }),
             );
         }
@@ -552,7 +585,7 @@ fn get_trusted_peers(state: State<DesktopRuntimeState>) -> Result<Vec<TrustedPee
                 .flatten();
             TrustedPeerDto {
                 fingerprint: p.fingerprint,
-                display_name: p.display_name,
+                display_name: shown_name(p.display_name),
                 paired_at: p.paired_at,
                 is_connected,
                 endpoint,
@@ -704,7 +737,7 @@ async fn start_pairing(
                 "pairing-completed",
                 TrustedPeerDto {
                     fingerprint: peer.fingerprint,
-                    display_name: peer.display_name,
+                    display_name: shown_name(peer.display_name),
                     paired_at: peer.paired_at,
                     is_connected: false,
                     endpoint: None,
@@ -769,7 +802,7 @@ async fn pair_from_qr(
     // The pairing connection is dropped here; the session is dialed at the saved address.
     Ok(TrustedPeerDto {
         fingerprint: trusted_peer.fingerprint,
-        display_name: trusted_peer.display_name,
+        display_name: shown_name(trusted_peer.display_name),
         paired_at: trusted_peer.paired_at,
         is_connected: false,
         endpoint: None,
@@ -1144,7 +1177,8 @@ fn initialize_desktop_runtime(
     let local_fingerprint =
         identity::Fingerprint::from_verifying_key(&identity_signer.verifying_key()?).to_string();
     let pending_answers = PendingAnswers::default();
-    let handlers = session_handlers(
+    let connected = Arc::new(tray::Connected::default());
+    let mut handlers = session_handlers(
         download_dir,
         permission_store.clone(),
         trust_store.clone(),
@@ -1153,6 +1187,11 @@ fn initialize_desktop_runtime(
         clipboard.clone(),
         app_handle,
     );
+    handlers.on_device_info = Some(device_info_listener(
+        app_handle.clone(),
+        trust_store.clone(),
+        connected.clone(),
+    ));
     let (save_folder, incoming) = (handlers.save_folder.clone(), handlers.incoming.clone());
     let sessions = SessionRegistry::new(
         local_fingerprint,
@@ -1162,12 +1201,11 @@ fn initialize_desktop_runtime(
         Some(session_state_listener(
             app_handle.clone(),
             trust_store.clone(),
+            connected,
         )),
     );
 
-    let device_name = std::env::var("COMPUTERNAME")
-        .or_else(|_| std::env::var("HOSTNAME"))
-        .unwrap_or_else(|_| "Desktop PC".to_string());
+    let device_name = computer_name();
 
     Ok(DesktopRuntimeState {
         device_name,
