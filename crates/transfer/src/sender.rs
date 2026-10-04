@@ -12,7 +12,6 @@ use protocol::v1::{
 use transport::{read_msg, write_msg};
 
 use crate::error::TransferError;
-use crate::hex::hex_encode;
 use crate::sanitizer::sanitize_filename;
 
 /// Compute the SHA-256 digest of a file on disk.
@@ -114,7 +113,7 @@ where
     }
     if !ack.verified || ack.bytes_received != file_size {
         return Err(TransferError::ChecksumMismatch {
-            expected: hex_encode(sha256_bytes),
+            expected: hex::encode(sha256_bytes),
             actual: format!(
                 "received {} of {} bytes (verified={})",
                 ack.bytes_received, file_size, ack.verified

@@ -29,14 +29,9 @@ impl EphemeralDiscoveryId {
         &self.bytes
     }
 
-    /// Convert to hex string for mDNS instance names and diagnostics.
+    /// The mDNS instance name.
     pub fn to_hex(&self) -> String {
-        let mut s = String::with_capacity(32);
-        for b in &self.bytes {
-            use std::fmt::Write;
-            let _ = write!(&mut s, "{:02x}", b);
-        }
-        s
+        hex::encode(self.bytes)
     }
 }
 

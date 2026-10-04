@@ -17,7 +17,6 @@ pub enum CryptoError {
     #[error("invalid key material: {0}")]
     InvalidKey(&'static str),
 
-
     #[error("pairing transcript mismatch")]
     TranscriptMismatch,
 }

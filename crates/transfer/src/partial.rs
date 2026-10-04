@@ -16,8 +16,6 @@ use tokio::io::AsyncReadExt;
 use limits::TRANSFER_CHUNK_BYTES;
 use protocol::v1::FileTransferRequest;
 
-use crate::hex::hex_encode;
-
 const PREFIX: &str = ".continue-";
 const SUFFIX: &str = ".part";
 
@@ -57,7 +55,7 @@ pub fn claim_for(dir: &Path, req: &FileTransferRequest) -> Partial {
     if req.resumable && req.sha256_checksum.len() == 32 {
         let shared = dir.join(format!(
             "{PREFIX}{}-{}{SUFFIX}",
-            hex_encode(&req.sha256_checksum),
+            hex::encode(&req.sha256_checksum),
             req.file_size
         ));
         if let Some(path) = claim(shared) {
@@ -69,7 +67,7 @@ pub fn claim_for(dir: &Path, req: &FileTransferRequest) -> Partial {
     }
     // Named from a hash, so nothing the peer sends ends up in the path.
     let own: [u8; 32] = Sha256::digest(format!("{}:{}", req.transfer_id, rand_suffix())).into();
-    let path = dir.join(format!("{PREFIX}{}{SUFFIX}", hex_encode(&own[..16])));
+    let path = dir.join(format!("{PREFIX}{}{SUFFIX}", hex::encode(&own[..16])));
     Partial {
         path: claim(path.clone()).unwrap_or(path),
         resumable: false,

@@ -10,18 +10,6 @@ use clipboard::{ClipboardFormat, ClipboardSynchronizer};
 use protocol::CapabilityId;
 use transport::{create_client_endpoint, create_server_endpoint, TransportCertificate};
 
-fn authorized_clipboard_query() -> CapabilityQuery {
-    let mut caps = HashSet::new();
-    caps.insert(CapabilityId::CLIPBOARD);
-    CapabilityQuery {
-        capability: CapabilityId::CLIPBOARD,
-        is_os_available: true,
-        is_app_permitted: true,
-        is_peer_authorized: true,
-        negotiated_session_capabilities: caps,
-    }
-}
-
 /// Both ends of a loopback QUIC connection whose peers pin each other's certificates.
 async fn loopback_connections() -> (quinn::Connection, quinn::Connection) {
     let server_cert = TransportCertificate::generate().unwrap();
@@ -58,7 +46,7 @@ async fn clipboard_e2e_sync_and_echo_suppression() {
     let recv_handle = tokio::spawn(async move {
         let (mut send, mut recv) = receiver_conn.accept_bi().await.expect("bi stream");
 
-        let query = authorized_clipboard_query();
+        let query = CapabilityQuery::negotiated(CapabilityId::CLIPBOARD, true);
         let received = recv_sync_clone
             .receive_update(&mut send, &mut recv, &query, |_fmt, payload| {
                 assert_eq!(payload, b"Hello from Continue clipboard sync!");
@@ -74,7 +62,7 @@ async fn clipboard_e2e_sync_and_echo_suppression() {
     let (mut client_send, mut client_recv) = client_conn.open_bi().await.unwrap();
 
     let sender_sync = ClipboardSynchronizer::new();
-    let query = authorized_clipboard_query();
+    let query = CapabilityQuery::negotiated(CapabilityId::CLIPBOARD, true);
     let ack = sender_sync
         .send_update(
             &mut client_send,

@@ -10,5 +10,6 @@ limits = { path = "../limits" }
 mdns-sd = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 rand = { workspace = true }
+hex = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

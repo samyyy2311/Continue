@@ -13,7 +13,6 @@ use protocol::v1::{
 use transport::{read_msg, write_msg};
 
 use crate::error::TransferError;
-use crate::hex::hex_encode;
 use crate::partial;
 use crate::sanitizer::sanitize_filename;
 
@@ -170,8 +169,8 @@ where
         };
         let _ = write_msg(send_stream, &ack, MAX_FRAME_TRANSFER_META_BYTES).await;
         return Err(TransferError::ChecksumMismatch {
-            expected: hex_encode(&req.sha256_checksum),
-            actual: hex_encode(actual_hash),
+            expected: hex::encode(&req.sha256_checksum),
+            actual: hex::encode(actual_hash),
         });
     }
 

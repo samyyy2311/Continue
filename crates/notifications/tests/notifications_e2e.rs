@@ -1,25 +1,12 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashSet;
 use std::net::SocketAddr;
 
 use capabilities::CapabilityQuery;
 use notifications::{NotificationAction, NotificationDispatcher, NotificationPost};
 use protocol::CapabilityId;
 use transport::{create_client_endpoint, create_server_endpoint, TransportCertificate};
-
-fn authorized_notification_query() -> CapabilityQuery {
-    let mut caps = HashSet::new();
-    caps.insert(CapabilityId::NOTIFICATIONS);
-    CapabilityQuery {
-        capability: CapabilityId::NOTIFICATIONS,
-        is_os_available: true,
-        is_app_permitted: true,
-        is_peer_authorized: true,
-        negotiated_session_capabilities: caps,
-    }
-}
 
 /// Both ends of a loopback QUIC connection whose peers pin each other's certificates.
 async fn loopback_connections() -> (quinn::Connection, quinn::Connection) {
@@ -56,7 +43,7 @@ async fn notifications_e2e_post_and_action() {
     let recv_handle = tokio::spawn(async move {
         let (mut send, mut recv) = receiver_conn.accept_bi().await.expect("bi stream");
 
-        let query = authorized_notification_query();
+        let query = CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, true);
         let post = dispatcher
             .receive_post(&mut send, &mut recv, &query, |p| {
                 assert_eq!(p.title, "Alice");
@@ -74,7 +61,7 @@ async fn notifications_e2e_post_and_action() {
     let (mut client_send, mut client_recv) = client_conn.open_bi().await.unwrap();
 
     let sender_dispatcher = NotificationDispatcher::new();
-    let query = authorized_notification_query();
+    let query = CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, true);
     let post = NotificationPost {
         notification_id: "notif-123".to_string(),
         package_name: "org.continue.chat".to_string(),
@@ -101,7 +88,7 @@ async fn notifications_e2e_post_and_action() {
 #[tokio::test]
 async fn notification_rejects_oversized_body() {
     let dispatcher = NotificationDispatcher::new();
-    let query = authorized_notification_query();
+    let query = CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, true);
 
     let oversized_post = NotificationPost {
         notification_id: "notif-huge".to_string(),

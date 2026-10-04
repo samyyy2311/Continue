@@ -39,6 +39,24 @@ pub enum PermissionState {
     AllowOnce,
 }
 
+impl PermissionState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Allow => "Allow",
+            Self::Deny => "Deny",
+            Self::Ask => "Ask",
+            Self::AllowOnce => "AllowOnce",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "AllowOnce" => Some(Self::AllowOnce),
+            _ => PersistedGrant::parse(s).map(Self::from),
+        }
+    }
+}
+
 impl From<PersistedGrant> for PermissionState {
     fn from(grant: PersistedGrant) -> Self {
         match grant {

@@ -158,8 +158,7 @@ async fn a_damaged_partial_file_is_dropped_and_the_next_attempt_starts_over() {
 
     // Half the file, but not the right half.
     let checksum = compute_file_sha256(&file).await.unwrap();
-    let hex: String = checksum.iter().map(|b| format!("{b:02x}")).collect();
-    let partial = into.join(format!(".continue-{hex}-{SIZE}.part"));
+    let partial = into.join(format!(".continue-{}-{SIZE}.part", hex::encode(checksum)));
     std::fs::write(&partial, vec![0u8; SIZE / 2]).unwrap();
 
     let failed = attempt(&pair, &file, &into, None).await;

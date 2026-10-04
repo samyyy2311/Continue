@@ -3,7 +3,6 @@
 
 mod common;
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -51,13 +50,7 @@ async fn send_file(link: &Link, name: &str) -> bool {
 }
 
 async fn send_text(link: &Link, text: &str) -> bool {
-    let query = CapabilityQuery {
-        capability: CapabilityId::CLIPBOARD,
-        is_os_available: true,
-        is_app_permitted: true,
-        is_peer_authorized: true,
-        negotiated_session_capabilities: HashSet::from([CapabilityId::CLIPBOARD]),
-    };
+    let query = CapabilityQuery::negotiated(CapabilityId::CLIPBOARD, true);
     link.phone
         .send_clipboard_to_peer(ClipboardFormat::TextPlain, text.as_bytes().to_vec(), &query)
         .await

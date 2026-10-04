@@ -4,7 +4,6 @@
 //! Streaming file transfer over dedicated QUIC streams (Phase 1B).
 
 pub mod error;
-mod hex;
 mod partial;
 pub mod receiver;
 pub mod sanitizer;

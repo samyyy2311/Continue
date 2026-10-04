@@ -187,13 +187,7 @@ async fn holds(what: &str, duration: Duration, mut condition: impl FnMut() -> bo
 
 async fn send_clip(from: &SessionRegistry, to: &str, text: &str) {
     let mux = from.get(to).expect("connected");
-    let query = CapabilityQuery {
-        capability: CapabilityId::CLIPBOARD,
-        is_os_available: true,
-        is_app_permitted: true,
-        is_peer_authorized: true,
-        negotiated_session_capabilities: HashSet::from([CapabilityId::CLIPBOARD]),
-    };
+    let query = CapabilityQuery::negotiated(CapabilityId::CLIPBOARD, true);
     mux.send_clipboard_to_peer(ClipboardFormat::TextPlain, text.as_bytes().to_vec(), &query)
         .await
         .expect("clipboard delivered");

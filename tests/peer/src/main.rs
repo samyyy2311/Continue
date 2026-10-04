@@ -269,18 +269,9 @@ async fn test_clipboard_capability_and_echo_suppression() -> Result<()> {
 async fn test_notification_body_size_enforcement() -> Result<()> {
     use capabilities::CapabilityQuery;
     use notifications::{NotificationDispatcher, NotificationPost};
-    use std::collections::HashSet;
 
     let dispatcher = NotificationDispatcher::new();
-    let mut caps = HashSet::new();
-    caps.insert(protocol::CapabilityId::NOTIFICATIONS);
-    let query = CapabilityQuery {
-        capability: protocol::CapabilityId::NOTIFICATIONS,
-        is_os_available: true,
-        is_app_permitted: true,
-        is_peer_authorized: true,
-        negotiated_session_capabilities: caps,
-    };
+    let query = CapabilityQuery::negotiated(protocol::CapabilityId::NOTIFICATIONS, true);
 
     let oversized_post = NotificationPost {
         notification_id: "oversized-1".to_string(),
@@ -428,15 +419,7 @@ async fn test_end_to_end_clipboard_sync() -> Result<()> {
 
     sessions::spawn_capabilities_dispatcher(server_mux, handlers, 16);
 
-    let mut caps = std::collections::HashSet::new();
-    caps.insert(protocol::CapabilityId::CLIPBOARD);
-    let query = capabilities::CapabilityQuery {
-        capability: protocol::CapabilityId::CLIPBOARD,
-        is_os_available: true,
-        is_app_permitted: true,
-        is_peer_authorized: true,
-        negotiated_session_capabilities: caps,
-    };
+    let query = capabilities::CapabilityQuery::negotiated(protocol::CapabilityId::CLIPBOARD, true);
 
     let sample_text = b"Pasted text across Continue mesh nodes";
     let ack = client_mux
@@ -473,15 +456,8 @@ async fn test_end_to_end_notification_relay() -> Result<()> {
     sessions::spawn_capabilities_dispatcher(server_mux, handlers, 16);
 
     let dispatcher = notifications::NotificationDispatcher::new();
-    let mut caps = std::collections::HashSet::new();
-    caps.insert(protocol::CapabilityId::NOTIFICATIONS);
-    let query = capabilities::CapabilityQuery {
-        capability: protocol::CapabilityId::NOTIFICATIONS,
-        is_os_available: true,
-        is_app_permitted: true,
-        is_peer_authorized: true,
-        negotiated_session_capabilities: caps,
-    };
+    let query =
+        capabilities::CapabilityQuery::negotiated(protocol::CapabilityId::NOTIFICATIONS, true);
 
     let post = notifications::NotificationPost {
         notification_id: "notif-sim-101".to_string(),

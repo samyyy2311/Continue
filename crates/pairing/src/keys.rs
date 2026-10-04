@@ -14,6 +14,7 @@ const TRANSPORT_CERT_LABEL: &str = "transport_cert";
 
 /// The two keys paired peers pin this device by. Both must stay the same across
 /// restarts or every pairing breaks.
+#[derive(Clone)]
 pub struct DeviceKeys {
     pub identity_signer: Arc<dyn IdentitySigner>,
     pub transport_cert: Arc<TransportCertificate>,

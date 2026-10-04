@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -258,15 +257,8 @@ pub fn spawn_capabilities_dispatcher(
                         let is_permitted =
                             permitted(&handlers, &peer_fp, CapabilityId::CLIPBOARD, None).await;
 
-                        let mut caps = HashSet::new();
-                        caps.insert(CapabilityId::CLIPBOARD);
-                        let query = CapabilityQuery {
-                            capability: CapabilityId::CLIPBOARD,
-                            is_os_available: true,
-                            is_app_permitted: true,
-                            is_peer_authorized: is_permitted,
-                            negotiated_session_capabilities: caps,
-                        };
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::CLIPBOARD, is_permitted);
 
                         let on_received = handlers.on_clipboard_received.clone();
                         let result = clipboard
@@ -303,15 +295,8 @@ pub fn spawn_capabilities_dispatcher(
                         let is_permitted =
                             permitted(&handlers, &peer_fp, CapabilityId::NOTIFICATIONS, None).await;
 
-                        let mut caps = HashSet::new();
-                        caps.insert(CapabilityId::NOTIFICATIONS);
-                        let query = CapabilityQuery {
-                            capability: CapabilityId::NOTIFICATIONS,
-                            is_os_available: true,
-                            is_app_permitted: true,
-                            is_peer_authorized: is_permitted,
-                            negotiated_session_capabilities: caps,
-                        };
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, is_permitted);
 
                         let on_received = handlers.on_notification_received.clone();
                         let result = handlers

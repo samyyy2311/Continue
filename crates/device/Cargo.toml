@@ -1,0 +1,27 @@
+[package]
+name = "device"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+capabilities = { path = "../capabilities" }
+clipboard = { path = "../clipboard" }
+discovery = { path = "../discovery" }
+history = { path = "../history" }
+identity = { path = "../identity" }
+notifications = { path = "../notifications" }
+pairing = { path = "../pairing" }
+permissions = { path = "../permissions" }
+protocol = { path = "../protocol" }
+sessions = { path = "../sessions" }
+transfer = { path = "../transfer" }
+transport = { path = "../transport" }
+quinn = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }

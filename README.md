@@ -43,7 +43,9 @@ The core logic is written in Rust and split into small, focused crates:
 | `crates/transfer` | Streaming file transfer implementation and path sanitizers |
 | `crates/clipboard` | Real-time clipboard synchronization and loop prevention |
 | `crates/notifications` | Notification event dispatching, dismissal, and action handling |
-| `crates/ffi` | UniFFI layer generating language bindings for desktop and mobile |
+| `crates/history` | What was sent and received, kept across restarts |
+| `crates/device` | A running device: startup, listening, pairing, and sending, shared by both apps |
+| `crates/ffi` | UniFFI layer the Android app calls into |
 | `tests/peer` | Headless test peer and automated fault injection suite |
 | `apps/desktop` | Tauri v2 desktop application (React, TypeScript, SQLite, QUIC) |
 | `apps/android` | Android application (Jetpack Compose `:app` and UniFFI `:core-bridge`) |

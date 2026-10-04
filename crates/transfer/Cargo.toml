@@ -12,6 +12,7 @@ transport = { path = "../transport" }
 quinn = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "sync", "rt", "macros"] }
 sha2 = { workspace = true }
+hex = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

@@ -14,6 +14,20 @@ pub struct CapabilityQuery {
     pub negotiated_session_capabilities: HashSet<CapabilityId>,
 }
 
+impl CapabilityQuery {
+    /// A query for `capability` on a session that negotiated it, on a device and app able to
+    /// use it, so the only open question is whether the peer is authorized.
+    pub fn negotiated(capability: CapabilityId, is_peer_authorized: bool) -> Self {
+        Self {
+            capability,
+            is_os_available: true,
+            is_app_permitted: true,
+            is_peer_authorized,
+            negotiated_session_capabilities: HashSet::from([capability]),
+        }
+    }
+}
+
 /// Evaluates capability permission across the four required independent security boundaries:
 ///
 /// 1. OS Availability: Is the platform hardware / OS API supported?

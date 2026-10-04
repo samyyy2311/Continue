@@ -1,0 +1,196 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+
+//! Phase 1's finish line: pair once, restart both devices, and the phone reconnects by
+//! itself and can send a file to the computer.
+//!
+//! Each device runs on its own runtime, started the way the apps start one: keys, paired
+//! devices and permissions come from its data folder, then it listens, advertises and dials.
+//! Dropping the runtime stands in for quitting the app, so nothing carries over a restart
+//! except what was saved to disk.
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use device::{Device, Stores};
+use identity::FileSecretStore;
+use pairing::DeviceKeys;
+use permissions::PermissionState;
+use protocol::CapabilityId;
+use sessions::{SessionCapabilityHandlers, SessionState, ThisDevice};
+use tokio::runtime::Runtime;
+
+/// Long enough for a dial and a QUIC handshake on loopback, with room for a slow CI machine.
+const WAIT: Duration = Duration::from_secs(20);
+
+fn data_dir(name: &str) -> PathBuf {
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "continue-restart-{name}-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// One running copy of the app.
+struct App {
+    runtime: Runtime,
+    device: Device,
+    received: PathBuf,
+}
+
+impl App {
+    /// Starts the app from what `dir` holds, creating it on first run, as a device called
+    /// `name`.
+    fn start(dir: &Path, name: &str) -> Self {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let keys = DeviceKeys::load_or_create(&FileSecretStore::new(dir.join("secrets")).unwrap())
+            .unwrap();
+        let stores = Stores::open(dir.join("continue.db")).unwrap();
+        let received = dir.join("received");
+        let mut handlers = SessionCapabilityHandlers::new(&received)
+            .with_this_device(ThisDevice::new(name, protocol::v1::Platform::Linux));
+        let names = stores.clone();
+        handlers.on_device_info = Some(Arc::new(move |peer, device| {
+            names.rename_peer(peer, &device.name);
+        }));
+
+        let device = runtime.block_on(async {
+            let device = Device::new(stores, keys, handlers, None).unwrap();
+            let port = device.listen().unwrap().local_addr().unwrap().port();
+            device.discover(port, 1);
+            device
+        });
+        Self {
+            runtime,
+            device,
+            received,
+        }
+    }
+
+    fn fingerprint(&self) -> &str {
+        &self.device.fingerprint
+    }
+
+    /// Quits the app: every task, socket and connection it had goes with its runtime.
+    fn quit(self) {
+        self.runtime.shutdown_background();
+    }
+
+    fn connected_to(&self, other: &App) -> bool {
+        self.device.sessions.state(other.fingerprint()) == SessionState::Connected
+    }
+
+    /// The name this device shows for `other`.
+    fn name_of(&self, other: &App) -> String {
+        self.device.stores.peer_name(other.fingerprint())
+    }
+}
+
+/// The computer shows a code and the phone scans it, as in the apps.
+fn pair(computer: &App, phone: &App) {
+    let server = computer.runtime.block_on(async {
+        computer
+            .device
+            .start_pairing(0, |port| format!("127.0.0.1:{port}"))
+            .unwrap()
+    });
+    let computer_peer = phone
+        .runtime
+        .block_on(phone.device.pair_with_code(&server.code))
+        .unwrap();
+    let phone_peer = computer.runtime.block_on(server.finish()).unwrap();
+
+    assert_eq!(phone_peer.fingerprint, phone.fingerprint());
+    assert_eq!(computer_peer.fingerprint, computer.fingerprint());
+}
+
+fn eventually(what: &str, mut condition: impl FnMut() -> bool) {
+    let deadline = Instant::now() + WAIT;
+    while !condition() {
+        assert!(Instant::now() < deadline, "timed out waiting until {what}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn paired_devices_reconnect_after_both_restart_and_the_phone_can_send_a_file() {
+    let (computer_dir, phone_dir) = (data_dir("computer"), data_dir("phone"));
+
+    let computer = App::start(&computer_dir, "Work laptop");
+    let phone = App::start(&phone_dir, "Sam's Pixel");
+    let (computer_fingerprint, phone_fingerprint) = (
+        computer.fingerprint().to_string(),
+        phone.fingerprint().to_string(),
+    );
+    pair(&computer, &phone);
+    // The person allows files from the phone, as they would in the computer's settings.
+    computer
+        .device
+        .stores
+        .permissions
+        .set_state(
+            phone.fingerprint(),
+            CapabilityId::FILE_TRANSFER,
+            PermissionState::Allow,
+        )
+        .unwrap();
+    eventually("the new pair connects", || {
+        phone.connected_to(&computer) && computer.connected_to(&phone)
+    });
+    eventually("each knows the other's name", || {
+        phone.name_of(&computer) == "Work laptop" && computer.name_of(&phone) == "Sam's Pixel"
+    });
+
+    phone.quit();
+    computer.quit();
+
+    // The computer was renamed while it was off.
+    let computer = App::start(&computer_dir, "Studio desktop");
+    let phone = App::start(&phone_dir, "Sam's Pixel");
+    assert_eq!(
+        computer.fingerprint(),
+        computer_fingerprint,
+        "the computer kept its identity"
+    );
+    assert_eq!(
+        phone.fingerprint(),
+        phone_fingerprint,
+        "the phone kept its identity"
+    );
+    eventually("both restarted devices reconnect on their own", || {
+        phone.connected_to(&computer) && computer.connected_to(&phone)
+    });
+    eventually("the phone shows the computer's new name", || {
+        phone.name_of(&computer) == "Studio desktop"
+    });
+    assert_eq!(
+        computer.name_of(&phone),
+        "Sam's Pixel",
+        "kept across the restart"
+    );
+
+    let photo = data_dir("photo").join("photo.jpg");
+    std::fs::write(&photo, b"not really a photo").unwrap();
+    let session = phone.device.sessions.get(computer.fingerprint()).unwrap();
+    let sent = phone.runtime.block_on(session.send_file_to_peer(
+        &photo,
+        "tx-photo".to_string(),
+        None::<fn(u64, u64)>,
+    ));
+    assert_eq!(sent.unwrap(), 18);
+    eventually("the computer saved the file", || {
+        std::fs::read(computer.received.join("photo.jpg")).is_ok_and(|b| b == b"not really a photo")
+    });
+
+    phone.quit();
+    computer.quit();
+}

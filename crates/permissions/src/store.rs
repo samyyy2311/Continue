@@ -18,7 +18,7 @@ fn current_timestamp() -> u64 {
         .unwrap_or(0)
 }
 
-/// Persistent SQLite permission storage combined with ephemeral in-memory AllowOnce grants.
+/// Saved per-peer grants, plus one-use grants that live only in memory.
 #[derive(Clone)]
 pub struct PermissionStore {
     conn: Arc<Mutex<Connection>>,
@@ -60,7 +60,26 @@ impl PermissionStore {
         Ok(())
     }
 
-    /// Set a persistent permission grant for a peer and capability.
+    /// Sets what `peer_fingerprint` may do with `capability`. `AllowOnce` lasts until it is
+    /// used or the session ends; the others are saved.
+    pub fn set_state(
+        &self,
+        peer_fingerprint: &str,
+        capability: CapabilityId,
+        state: PermissionState,
+    ) -> Result<(), PermissionError> {
+        let grant = match state {
+            PermissionState::AllowOnce => {
+                self.grant_allow_once(peer_fingerprint, capability);
+                return Ok(());
+            }
+            PermissionState::Allow => PersistedGrant::Allow,
+            PermissionState::Deny => PersistedGrant::Deny,
+            PermissionState::Ask => PersistedGrant::Ask,
+        };
+        self.set_persisted_grant(peer_fingerprint, capability, 1, grant)
+    }
+
     pub fn set_persisted_grant(
         &self,
         peer_fingerprint: &str,
@@ -87,7 +106,6 @@ impl PermissionStore {
         Ok(())
     }
 
-    /// Get the persistent grant for a peer and capability, if configured in the database.
     pub fn get_persisted_grant(
         &self,
         peer_fingerprint: &str,
@@ -112,45 +130,41 @@ impl PermissionStore {
         }
     }
 
-    /// Grant a single-use permission in-memory only.
-    ///
-    /// Never written to the SQLite database.
+    /// Allows one use, kept in memory only.
     pub fn grant_allow_once(&self, peer_fingerprint: &str, capability: CapabilityId) {
         let mut set = self.allow_once_grants.lock().unwrap();
         set.insert((peer_fingerprint.to_string(), capability.raw()));
     }
 
-    /// Clear all ephemeral AllowOnce grants for a peer (called on session termination).
+    /// Drops the peer's one-use grants, when its session ends.
     pub fn clear_allow_once_for_peer(&self, peer_fingerprint: &str) {
         let mut set = self.allow_once_grants.lock().unwrap();
         set.retain(|(peer, _)| peer != peer_fingerprint);
     }
 
-    /// Consume an AllowOnce grant if one is present, returning true if consumed.
+    /// Uses up a one-use grant, if there is one.
     pub fn consume_if_allow_once(&self, peer_fingerprint: &str, capability: CapabilityId) -> bool {
         let mut set = self.allow_once_grants.lock().unwrap();
         set.remove(&(peer_fingerprint.to_string(), capability.raw()))
     }
 
-    /// Query the effective runtime permission state.
+    /// What the peer may do now: a one-use grant first, then the saved grant, else `Ask`.
     pub fn query_state(
         &self,
         peer_fingerprint: &str,
         capability: CapabilityId,
     ) -> Result<PermissionState, PermissionError> {
-        // 1. Check in-memory AllowOnce grants first
-        {
-            let set = self.allow_once_grants.lock().unwrap();
-            if set.contains(&(peer_fingerprint.to_string(), capability.raw())) {
-                return Ok(PermissionState::AllowOnce);
-            }
+        let allowed_once = self
+            .allow_once_grants
+            .lock()
+            .unwrap()
+            .contains(&(peer_fingerprint.to_string(), capability.raw()));
+        if allowed_once {
+            return Ok(PermissionState::AllowOnce);
         }
-
-        // 2. Query persistent SQLite database
-        match self.get_persisted_grant(peer_fingerprint, capability)? {
-            Some(persisted) => Ok(persisted.into()),
-            None => Ok(PermissionState::Ask), // default when unconfigured
-        }
+        Ok(self
+            .get_persisted_grant(peer_fingerprint, capability)?
+            .map_or(PermissionState::Ask, PermissionState::from))
     }
 }
 
@@ -164,31 +178,25 @@ mod tests {
         let peer = "device-fingerprint-abc";
         let cap = CapabilityId::FILE_TRANSFER;
 
-        // Default is Ask
         assert_eq!(store.query_state(peer, cap).unwrap(), PermissionState::Ask);
 
-        // Grant AllowOnce
         store.grant_allow_once(peer, cap);
         assert_eq!(
             store.query_state(peer, cap).unwrap(),
             PermissionState::AllowOnce
         );
 
-        // Verify DB still has NO row
         assert_eq!(store.get_persisted_grant(peer, cap).unwrap(), None);
 
-        // Consume AllowOnce
         assert!(store.consume_if_allow_once(peer, cap));
         assert!(!store.consume_if_allow_once(peer, cap));
         assert_eq!(store.query_state(peer, cap).unwrap(), PermissionState::Ask);
 
         store.grant_allow_once(peer, cap);
 
-        // Session drops -> clear in-memory grants
         store.clear_allow_once_for_peer(peer);
         assert_eq!(store.query_state(peer, cap).unwrap(), PermissionState::Ask);
 
-        // Persist Allow
         store
             .set_persisted_grant(peer, cap, 1, PersistedGrant::Allow)
             .unwrap();
