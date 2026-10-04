@@ -18,7 +18,9 @@ fun copyToClipboard(
     val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
     clipboard.setPrimaryClip(ClipData.newPlainText(CLIP_LABEL, text))
     val app = context.applicationContext as ContinueApplication
-    clipboard.primaryClipDescription?.let { app.lastCopySeen = it.timestamp }
+    // In the background Android won't describe the clip, but it was copied just now.
+    val copiedAt = clipboard.primaryClipDescription?.timestamp ?: System.currentTimeMillis()
+    app.lastCopySeen = maxOf(app.lastCopySeen, copiedAt)
 }
 
 /** Text that was copied, and when, so it can be marked as dealt with once it's sent. */
