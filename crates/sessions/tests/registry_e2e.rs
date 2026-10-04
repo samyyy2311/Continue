@@ -12,8 +12,8 @@ use clipboard::ClipboardFormat;
 use pairing::{TrustStore, TrustedPeer};
 use protocol::CapabilityId;
 use sessions::{
-    accept_peers, connect_paired_peers, listen_for_peers, Direction, ReconnectPolicy,
-    RegistryConfig, SessionCapabilityHandlers, SessionRegistry, SessionState,
+    accept_peers, connect_paired_peers, listen_for_peers, Direction, IncomingEvent, IncomingFiles,
+    ReconnectPolicy, RegistryConfig, SessionCapabilityHandlers, SessionRegistry, SessionState,
 };
 use tokio::net::UdpSocket;
 use transport::{
@@ -47,6 +47,10 @@ struct Node {
     listen_addr: SocketAddr,
     endpoint: quinn::Endpoint,
     clips: Arc<Mutex<Vec<Vec<u8>>>>,
+    /// Files this device received.
+    files: Arc<Mutex<Vec<transfer::ReceivedFile>>>,
+    /// Bytes received so far, each time a file coming in reported progress.
+    progress: Arc<Mutex<Vec<u64>>>,
 }
 
 /// A device that accepts sessions from `trusted` peers and registers them as inbound.
@@ -57,10 +61,26 @@ fn node(
 ) -> Node {
     let cert = Arc::new(cert);
     let clips = Arc::new(Mutex::new(Vec::new()));
-    let mut handlers = SessionCapabilityHandlers::new(std::env::temp_dir());
+    let (files, progress) = (
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    let saved = std::env::temp_dir().join(format!("continue-registry-{}", rand::random::<u64>()));
+    let heard = progress.clone();
+    let mut handlers = SessionCapabilityHandlers::new(saved).with_incoming(
+        IncomingFiles::with_listener(Arc::new(move |event| {
+            if let IncomingEvent::Progress(file) = event {
+                heard.lock().unwrap().push(file.received);
+            }
+        })),
+    );
     let received = clips.clone();
     handlers.on_clipboard_received = Some(Arc::new(move |_peer, update| {
         received.lock().unwrap().push(update.payload);
+    }));
+    let arrived = files.clone();
+    handlers.on_file_received = Some(Arc::new(move |_peer, file| {
+        arrived.lock().unwrap().push(file);
     }));
     let registry = SessionRegistry::new(
         fingerprint.to_string(),
@@ -101,6 +121,8 @@ fn node(
         listen_addr,
         endpoint,
         clips,
+        files,
+        progress,
     }
 }
 
@@ -657,4 +679,69 @@ async fn a_closed_duplicate_is_reconnected_not_taken_as_a_disconnect() {
             && high.registry.state(LOW) == SessionState::Connected
     })
     .await;
+}
+
+#[tokio::test]
+async fn a_file_carries_on_where_it_stopped_after_the_connection_drops() {
+    let (low, high) = pair();
+    let path = relay(high.listen_addr).await;
+    low.registry
+        .connect(HIGH, high.cert.spki_hash, path.addr)
+        .await
+        .unwrap();
+    eventually("connected", || high.registry.get(LOW).is_some()).await;
+    let first = low.registry.get(HIGH).unwrap();
+
+    let size = 16 * 1024 * 1024;
+    let bytes: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+    let file = std::env::temp_dir().join(format!("continue-resend-{}.bin", rand::random::<u32>()));
+    std::fs::write(&file, &bytes).unwrap();
+
+    // The network goes quiet half way through.
+    let (registry, dropping, sending) = (low.registry.clone(), path.dropping.clone(), file.clone());
+    let dropped = AtomicBool::new(false);
+    let send = tokio::spawn(async move {
+        registry
+            .send_file(
+                HIGH,
+                &sending,
+                "tx-big".to_string(),
+                Some(move |done: u64, total: u64| {
+                    if done >= total / 2 && !dropped.swap(true, Ordering::Relaxed) {
+                        dropping.store(true, Ordering::Relaxed);
+                    }
+                }),
+            )
+            .await
+    });
+    eventually("the connection is lost", || {
+        path.dropping.load(Ordering::Relaxed) && low.registry.get(HIGH).is_none()
+    })
+    .await;
+    eventually("the receiver noticed too", || {
+        high.registry.get(LOW).is_none()
+    })
+    .await;
+    path.dropping.store(false, Ordering::Relaxed);
+
+    let sent = tokio::time::timeout(Duration::from_secs(20), send)
+        .await
+        .expect("the send finishes once reconnected")
+        .unwrap();
+    assert_eq!(sent.unwrap(), size as u64);
+    eventually("the file arrived", || high.files.lock().unwrap().len() == 1).await;
+    let arrived = high.files.lock().unwrap()[0].path.clone();
+    assert_eq!(std::fs::read(arrived).unwrap(), bytes);
+
+    // Started from nothing once; after the drop it carried on rather than going back to 0.
+    let progress = high.progress.lock().unwrap().clone();
+    assert!(
+        progress.windows(2).all(|pair| pair[1] >= pair[0]),
+        "never went backwards: {progress:?}"
+    );
+    assert_eq!(progress.iter().filter(|&&at| at == 0).count(), 1);
+    assert!(
+        !Arc::ptr_eq(&low.registry.get(HIGH).unwrap(), &first),
+        "the rest went over the new connection"
+    );
 }

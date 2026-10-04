@@ -26,7 +26,7 @@ Phase 1 is done: paired devices stay paired across restarts, find and reconnect 
 | Identity | Device keys live in the Keychain, Windows Credential Manager, the Secret Service or the Android Keystore, and survive restarts | Nothing blocking; Linux without a keyring falls back to a file only the user can read |
 | Connecting | Each device listens for paired devices, finds them over mDNS and reconnects after a restart or dropped network | Nothing blocking |
 | Device names | Each side sends its name when it connects: the computer's name, and the phone's owner-set name or model | Nothing blocking |
-| Files | Both ways, with progress, cancel, a chosen save folder and open-when-done | Resuming after a dropped connection |
+| Files | Both ways, with progress, cancel, a chosen save folder and open-when-done; a dropped connection picks up where it stopped | Nothing blocking |
 | Text | Clipboard sync both ways, automatic or manual | Images and clipboard history |
 | Notifications | Protocol and permission exist | The phone doesn't forward its notifications yet |
 | Permissions | Allow, Ask or Block per device, checked on every incoming file and text | Nothing blocking |

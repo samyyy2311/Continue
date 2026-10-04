@@ -29,6 +29,6 @@ pub use multiplexer::{
     close_code, open_capability_stream, read_capability_stream_header, IncomingCapabilityStream,
     SessionMultiplexer,
 };
-pub use registry::{Direction, RegistryConfig, SessionRegistry, StateListener};
+pub use registry::{Direction, RegistryConfig, SessionRegistry, StateListener, RESEND_WAIT};
 pub use session::Session;
 pub use state::SessionState;

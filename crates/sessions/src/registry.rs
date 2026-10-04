@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -19,6 +20,9 @@ use crate::session::Session;
 use crate::state::SessionState;
 
 const STREAM_BUFFER: usize = 16;
+
+/// How long a file being sent waits for a dropped connection to come back before giving up.
+pub const RESEND_WAIT: Duration = Duration::from_secs(120);
 
 /// Which side opened a connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -322,6 +326,71 @@ impl SessionRegistry {
         self.notify(peer, SessionState::Connected);
         info!("Session established with {peer} ({direction:?})");
         true
+    }
+
+    /// Sends a file to `peer`. If the connection drops part way, it waits up to `RESEND_WAIT`
+    /// for the peer to be connected again and sends the rest, carrying on where it stopped.
+    /// It doesn't try again after anything else: the receiver cancelling or refusing it, or
+    /// either side disconnecting on purpose.
+    pub async fn send_file<F>(
+        &self,
+        peer: &str,
+        file_path: &Path,
+        transfer_id: String,
+        on_progress: Option<F>,
+    ) -> Result<u64, transfer::TransferError>
+    where
+        F: Fn(u64, u64),
+    {
+        let mut mux = self
+            .get(peer)
+            .ok_or(transfer::TransferError::NotConnected)?;
+        loop {
+            let error = match mux
+                .send_file_to_peer(file_path, transfer_id.clone(), on_progress.as_ref())
+                .await
+            {
+                Ok(sent) => return Ok(sent),
+                Err(error) => error,
+            };
+            // A connection still up means the transfer itself failed, e.g. it was cancelled.
+            if mux.connection().close_reason().is_none() {
+                return Err(error);
+            }
+            debug!("Lost the connection to {peer} while sending; waiting for it to come back");
+            match self.next_connection(peer, &mux).await {
+                Some(next) => mux = next,
+                None => return Err(error),
+            }
+        }
+    }
+
+    /// The connection that replaces `lost`, once there is one, unless the peer was
+    /// disconnected on purpose or `RESEND_WAIT` runs out first.
+    async fn next_connection(
+        &self,
+        peer: &str,
+        lost: &Arc<SessionMultiplexer>,
+    ) -> Option<Arc<SessionMultiplexer>> {
+        let deadline = Instant::now() + RESEND_WAIT;
+        while Instant::now() < deadline {
+            let on_purpose = lost
+                .connection()
+                .close_reason()
+                .is_some_and(|reason| lost.ended_by_peer(&reason))
+                || self
+                    .peers()
+                    .get(peer)
+                    .is_none_or(|entry| entry.ended_on_purpose);
+            if on_purpose {
+                return None;
+            }
+            if let Some(next) = self.get(peer).filter(|next| !Arc::ptr_eq(next, lost)) {
+                return Some(next);
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        None
     }
 
     /// Disconnect at the user's request. No reconnect follows.

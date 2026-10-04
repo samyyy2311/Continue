@@ -1082,6 +1082,7 @@ pub fn disconnect(peer_fingerprint: String) -> Result<(), ContinueFfiError> {
 
 struct Connected {
     runtime: Arc<tokio::runtime::Runtime>,
+    sessions: SessionRegistry,
     mux: Arc<SessionMultiplexer>,
     history: HistoryStore,
     peer_name: String,
@@ -1096,19 +1097,22 @@ fn connected_session(peer_fingerprint: &str) -> Result<Connected, ContinueFfiErr
         .ok_or_else(|| ContinueFfiError::InternalError("Peer not connected".to_string()))?;
     Ok(Connected {
         runtime: state.runtime.clone(),
+        sessions: state.sessions.clone(),
         mux,
         history: state.history.clone(),
         peer_name: peer_name(&state.trust_store, peer_fingerprint),
     })
 }
 
-/// The file is the app's temporary copy, so history keeps its name but not its place.
+/// The file is the app's temporary copy, so history keeps its name but not its place. If the
+/// connection drops part way, this waits for it to come back and sends the rest.
 pub fn send_file(peer_fingerprint: String, file_path: String) -> Result<u64, ContinueFfiError> {
     let Connected {
         runtime,
-        mux,
+        sessions,
         history,
         peer_name,
+        ..
     } = connected_session(&peer_fingerprint)?;
     let path = std::path::Path::new(&file_path);
     let result = runtime.block_on(async {
@@ -1117,7 +1121,8 @@ pub fn send_file(peer_fingerprint: String, file_path: String) -> Result<u64, Con
             .map(|d| d.as_millis())
             .unwrap_or(0);
         let transfer_id = format!("tx-{now}");
-        mux.send_file_to_peer(path, transfer_id, None::<fn(u64, u64)>)
+        sessions
+            .send_file(&peer_fingerprint, path, transfer_id, None::<fn(u64, u64)>)
             .await
     });
     remember(
@@ -1145,6 +1150,7 @@ pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(),
         mux,
         history,
         peer_name,
+        ..
     } = connected_session(&peer_fingerprint)?;
     let sent = text.clone();
     let result = runtime.block_on(async move {

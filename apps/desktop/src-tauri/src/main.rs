@@ -941,10 +941,9 @@ async fn send_file_to_peer(
     file_path: String,
     on_progress: tauri::ipc::Channel<TransferProgressDto>,
 ) -> Result<u64, String> {
-    let mux = state
-        .sessions
-        .get(&peer_fingerprint)
-        .ok_or_else(|| NOT_CONNECTED.to_string())?;
+    if state.sessions.get(&peer_fingerprint).is_none() {
+        return Err(NOT_CONNECTED.to_string());
+    }
 
     let path = std::path::PathBuf::from(file_path);
     let now = std::time::SystemTime::now()
@@ -966,8 +965,10 @@ async fn send_file_to_peer(
         });
     };
 
-    let result = mux
-        .send_file_to_peer(&path, transfer_id, Some(report))
+    // Waits out a dropped connection and sends the rest once it's back.
+    let result = state
+        .sessions
+        .send_file(&peer_fingerprint, &path, transfer_id, Some(report))
         .await;
     remember(
         &state.history,
