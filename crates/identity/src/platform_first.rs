@@ -4,41 +4,34 @@
 //! Keeps secrets in the platform's secret store, moving them out of the older file store,
 //! and falls back to the file where the platform has no usable store.
 
-use std::path::PathBuf;
-
 use tracing::warn;
 use zeroize::Zeroizing;
 
 use crate::error::SecretStoreError;
 use crate::store::{FileSecretStore, SecretStore};
 
-/// Written next to the file store once a secret is safely in the platform store. From then
-/// on a platform error is reported instead of quietly falling back to the file, where the
-/// secrets no longer are: falling back would look like a first run and replace the keys,
-/// unpairing every device.
-const MOVED_MARKER: &str = "moved-to-platform-store";
+/// Written next to the file store, one per secret, once that secret is safely in the
+/// platform store. From then on a platform error for it is reported instead of quietly
+/// falling back to the file, where it no longer is: falling back would look like a first run
+/// and replace the key, unpairing every device. Secrets the platform store hasn't taken yet
+/// still fall back to the file.
+const MOVED_MARKER: &str = "moved";
 
 /// Prefers `platform`, with `file` as the store secrets are moved out of and the fallback
 /// while the platform store hasn't worked yet.
 pub struct PlatformFirstStore {
     platform: Box<dyn SecretStore>,
     file: FileSecretStore,
-    marker: PathBuf,
 }
 
 impl PlatformFirstStore {
     pub fn new(platform: Box<dyn SecretStore>, file: FileSecretStore) -> Self {
-        let marker = file.dir().join(MOVED_MARKER);
-        Self {
-            platform,
-            file,
-            marker,
-        }
+        Self { platform, file }
     }
 
-    /// Whether secrets have been moved to the platform store, so it must be used from now on.
-    pub fn uses_platform(&self) -> bool {
-        self.marker.exists()
+    /// Whether `label` has been moved to the platform store, so it must be used from now on.
+    pub fn uses_platform(&self, label: &str) -> bool {
+        self.file.file_for(label, MOVED_MARKER).exists()
     }
 
     /// Stores `secret` in the platform store and reads it back. Only a secret that reads back
@@ -54,7 +47,7 @@ impl PlatformFirstStore {
                 ))
             }
         }
-        std::fs::write(&self.marker, b"")
+        std::fs::write(self.file.file_for(label, MOVED_MARKER), b"")
             .map_err(|e| SecretStoreError::Io(format!("couldn't note the move: {e}")))
     }
 
@@ -78,7 +71,7 @@ impl SecretStore for PlatformFirstStore {
                 let _ = self.file.delete(label);
                 Ok(())
             }
-            Err(error) if !self.uses_platform() => {
+            Err(error) if !self.uses_platform(label) => {
                 warn!("Saving {label} to a file, as the platform store failed: {error}");
                 self.file.store(label, secret)
             }
@@ -97,7 +90,7 @@ impl SecretStore for PlatformFirstStore {
                 }
                 Ok(found)
             }
-            Err(error) if !self.uses_platform() => {
+            Err(error) if !self.uses_platform(label) => {
                 warn!("Reading {label} from a file, as the platform store failed: {error}");
                 self.file.load(label)
             }
@@ -109,7 +102,7 @@ impl SecretStore for PlatformFirstStore {
         let from_platform = self.platform.delete(label);
         self.file.delete(label)?;
         match from_platform {
-            Err(error) if self.uses_platform() => Err(error),
+            Err(error) if self.uses_platform(label) => Err(error),
             _ => Ok(()),
         }
     }
@@ -118,6 +111,7 @@ impl SecretStore for PlatformFirstStore {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -202,7 +196,7 @@ mod tests {
 
         assert_eq!(store.load("seed").unwrap().unwrap().as_slice(), b"old");
         assert!(platform.has("seed"));
-        assert!(store.uses_platform());
+        assert!(store.uses_platform("seed"));
         assert_eq!(
             FileSecretStore::new(&dir).unwrap().load("seed").unwrap(),
             None
@@ -220,12 +214,12 @@ mod tests {
         assert_eq!(store.load("seed").unwrap(), None);
         store.store("seed", secret(b"new")).unwrap();
         assert_eq!(store.load("seed").unwrap().unwrap().as_slice(), b"new");
-        assert!(!store.uses_platform());
+        assert!(!store.uses_platform("seed"));
 
         // Once the platform store works, the secret moves there.
         platform.broken.store(false, Ordering::Relaxed);
         assert_eq!(store.load("seed").unwrap().unwrap().as_slice(), b"new");
-        assert!(platform.has("seed") && store.uses_platform());
+        assert!(platform.has("seed") && store.uses_platform("seed"));
     }
 
     #[test]
@@ -266,7 +260,7 @@ mod tests {
             PlatformFirstStore::new(Box::new(Garbling), FileSecretStore::new(&dir).unwrap());
 
         store.store("seed", secret(b"key")).unwrap();
-        assert!(!store.uses_platform());
+        assert!(!store.uses_platform("seed"));
         assert_eq!(
             FileSecretStore::new(&dir)
                 .unwrap()
@@ -276,6 +270,41 @@ mod tests {
                 .as_slice(),
             b"key"
         );
+    }
+
+    #[test]
+    fn a_secret_the_platform_store_refuses_falls_back_even_after_another_moved() {
+        /// Takes the seed but refuses anything else, like a keyring with a size limit.
+        #[derive(Clone, Default)]
+        struct Picky(FakePlatform);
+        impl SecretStore for Picky {
+            fn store(
+                &self,
+                label: &str,
+                secret: Zeroizing<Vec<u8>>,
+            ) -> Result<(), SecretStoreError> {
+                if label != "seed" {
+                    return Err(SecretStoreError::Rejected("too long".to_string()));
+                }
+                self.0.store(label, secret)
+            }
+            fn load(&self, label: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretStoreError> {
+                self.0.load(label)
+            }
+            fn delete(&self, label: &str) -> Result<(), SecretStoreError> {
+                self.0.delete(label)
+            }
+        }
+        let dir = dir();
+        let store = PlatformFirstStore::new(
+            Box::new(Picky::default()),
+            FileSecretStore::new(&dir).unwrap(),
+        );
+
+        store.store("seed", secret(b"key")).unwrap();
+        store.store("cert", secret(b"pem")).unwrap();
+        assert!(store.uses_platform("seed") && !store.uses_platform("cert"));
+        assert_eq!(store.load("cert").unwrap().unwrap().as_slice(), b"pem");
     }
 
     #[test]

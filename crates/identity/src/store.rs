@@ -53,6 +53,11 @@ impl FileSecretStore {
     }
 
     fn path_for(&self, label: &str) -> PathBuf {
+        self.file_for(label, "secret")
+    }
+
+    /// A file in the store's folder named after `label`.
+    pub(crate) fn file_for(&self, label: &str, extension: &str) -> PathBuf {
         let safe_name: String = label
             .chars()
             .map(|c| {
@@ -63,7 +68,7 @@ impl FileSecretStore {
                 }
             })
             .collect();
-        self.base_dir.join(format!("{safe_name}.secret"))
+        self.base_dir.join(format!("{safe_name}.{extension}"))
     }
 }
 
