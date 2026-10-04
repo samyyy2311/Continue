@@ -152,6 +152,10 @@ fn get_history(state: State<DesktopRuntimeState>) -> Result<Vec<HistoryEntryDto>
         .collect())
 }
 
+/// Clears the saved history.
+///
+/// # Errors
+/// Returns an error message if the history cannot be cleared.
 #[tauri::command]
 fn clear_history(state: State<DesktopRuntimeState>) -> Result<(), String> {
     state
@@ -160,8 +164,17 @@ fn clear_history(state: State<DesktopRuntimeState>) -> Result<(), String> {
         .map_err(user_error("Couldn't clear your history."))
 }
 
-/// Opens a received file, or shows it in its folder. Only files in the
-/// received-files folder can be opened this way.
+/// Opens a received file or reveals it in its containing folder.
+///
+/// The file must resolve to a path within the configured download directory.
+///
+/// # Errors
+///
+/// Returns an error if the file or download directory cannot be resolved, the
+/// file is outside the download directory, or the requested open operation fails.
+/// The error is a user-facing message.
+///
+/// `reveal` selects whether to show the file in its folder instead of opening it.
 #[tauri::command]
 fn open_received(
     app: AppHandle,
@@ -184,7 +197,11 @@ fn open_received(
     result.map_err(user_error("Couldn't open that file."))
 }
 
-/// Opens a web link that was sent or received. Anything but http and https is refused.
+/// Opens a link beginning with `http://` or `https://` in the default browser.
+///
+/// # Errors
+///
+/// Returns an error if the URL does not begin with either lowercase scheme or if the link cannot be opened.
 #[tauri::command]
 fn open_link(app: AppHandle, url: String) -> Result<(), String> {
     const FAILED: &str = "Couldn't open that link.";
@@ -199,11 +216,24 @@ fn open_link(app: AppHandle, url: String) -> Result<(), String> {
 /// Started at login with this, Continue stays in the tray instead of opening its window.
 const BACKGROUND_ARG: &str = "--background";
 
+/// Reports whether the application is configured to launch at startup.
+///
+/// # Returns
+/// `true` if startup launch is enabled; `false` if it is disabled or the status query fails.
 #[tauri::command]
 fn get_autostart(app: AppHandle) -> bool {
     app.autolaunch().is_enabled().unwrap_or(false)
 }
 
+/// Enables or disables starting the application automatically at login.
+///
+/// # Arguments
+///
+/// * `enabled` - Whether autostart should be enabled.
+///
+/// # Errors
+///
+/// Returns an error if the autostart setting cannot be changed.
 #[tauri::command]
 fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     let launcher = app.autolaunch();
@@ -215,7 +245,7 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     result.map_err(user_error("Couldn't change that setting."))
 }
 
-/// Starts Continue at login the first time it runs. After that it's the user's choice.
+/// Enables launching at login on the first run, then leaves the setting unchanged on subsequent runs.
 fn start_at_login_by_default(app: &AppHandle, app_data: &Path) {
     let chosen = app_data.join("start-at-login-set");
     if chosen.exists() {
@@ -237,8 +267,21 @@ fn pasted_dir(app: &AppHandle) -> PathBuf {
         .join("pasted")
 }
 
-/// Saves a pasted file so it can be sent like one picked from disk. The
-/// bytes are the request body and the name is in the `x-file-name` header.
+/// Saves a pasted file in the application cache for sending.
+///
+/// The request body must contain raw bytes. The filename is read from the
+/// `x-file-name` header, reduced to its final path component, and defaults to
+/// `Pasted file` if unavailable or empty. Each paste is saved in a separate
+/// numbered directory.
+///
+/// # Errors
+///
+/// Returns a user-facing error if the request body is not raw bytes or the
+/// file cannot be saved.
+///
+/// # Returns
+///
+/// The path to the saved file.
 #[tauri::command]
 fn save_pasted_file(app: AppHandle, request: tauri::ipc::Request) -> Result<String, String> {
     const FAILED: &str = "Couldn't send what you pasted.";
@@ -269,6 +312,11 @@ fn save_pasted_file(app: AppHandle, request: tauri::ipc::Request) -> Result<Stri
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// Looks up a trusted peer's display name.
+///
+/// # Returns
+///
+/// The peer's display name, or an empty string if the peer is not found or the lookup fails.
 fn peer_name(trust_store: &TrustStore, fingerprint: &str) -> String {
     trust_store
         .get_peer(fingerprint)
@@ -278,8 +326,7 @@ fn peer_name(trust_store: &TrustStore, fingerprint: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Shows a system notification, but only while the window isn't in front, where the same
-/// news already shows.
+/// Shows a system notification when the main window is unfocused or its focus state cannot be determined.
 fn notify_if_away(app: &AppHandle, title: &str, body: &str) {
     let in_front = app
         .get_webview_window("main")
@@ -302,6 +349,7 @@ fn shown_name(name: String) -> String {
     }
 }
 
+/// Configures session capability handling and callbacks for received files and clipboard text.
 fn session_handlers(
     download_dir: PathBuf,
     permission_store: Arc<PermissionStore>,
@@ -388,8 +436,14 @@ fn session_handlers(
     handlers
 }
 
-/// Asks in the window, which answers through `answer_permission`. The core stops waiting
-/// after `PROMPT_TIMEOUT`, and so does the window.
+/// Creates a permission prompt that sends each request to the UI for a decision.
+///
+/// Unanswered prompts are removed and a `permission-request-closed` event is emitted
+/// when the request deadline is reached.
+///
+/// # Returns
+///
+/// A callback that emits permission requests and provides a receiver for each decision.
 fn permission_prompt(
     app_handle: AppHandle,
     trust_store: TrustStore,
@@ -475,6 +529,7 @@ fn pending_permission_questions(state: State<DesktopRuntimeState>) -> Vec<Permis
     questions
 }
 
+/// Creates a listener that updates the tray and emits peer state events, including a connection event when a peer connects.
 fn session_state_listener(
     app_handle: AppHandle,
     trust_store: TrustStore,
@@ -934,6 +989,10 @@ async fn send_file_to_peer(
     result.map_err(user_error("Couldn't send the file."))
 }
 
+/// Sends clipboard text to a peer.
+///
+/// # Errors
+/// Returns an error if the peer has no active session or the text cannot be sent.
 #[tauri::command]
 async fn send_clipboard_text(
     state: State<'_, DesktopRuntimeState>,
@@ -960,7 +1019,7 @@ struct SyncedTextDto {
     failed: bool,
 }
 
-/// Sends what was just copied here to every connected device.
+/// Sends newly copied text to each trusted peer with an active session.
 fn send_copied_text(app: &AppHandle, text: String) {
     let state = app.state::<DesktopRuntimeState>();
     let (sessions, trust_store, history) = (
@@ -1002,7 +1061,7 @@ fn send_copied_text(app: &AppHandle, text: String) {
     }
 }
 
-/// Turns sending what's copied here on or off. The window says on start and on each change.
+/// Enables or disables clipboard synchronization.
 #[tauri::command]
 fn set_clipboard_sync(state: State<DesktopRuntimeState>, enabled: bool) {
     state.clipboard.set_enabled(enabled);
@@ -1101,6 +1160,13 @@ async fn send_notification(
     Ok(())
 }
 
+/// Initializes the desktop runtime state, including its persistent stores, device identity, and peer sessions.
+///
+/// The device name is read from `COMPUTERNAME` or `HOSTNAME`, falling back to `Desktop PC`.
+///
+/// # Errors
+///
+/// Returns an error if opening the stores, loading or creating device keys, or computing the device fingerprint fails.
 fn initialize_desktop_runtime(
     app_handle: &AppHandle,
     db_path: &Path,
@@ -1164,6 +1230,11 @@ fn initialize_desktop_runtime(
     })
 }
 
+/// Starts the desktop application and initializes its runtime, integrations, and window behavior.
+///
+/// # Panics
+///
+/// Panics if the desktop runtime cannot be initialized or the Tauri application fails to run.
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(

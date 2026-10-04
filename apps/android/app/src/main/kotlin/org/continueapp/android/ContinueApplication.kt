@@ -82,14 +82,16 @@ class ContinueApplication : Application() {
         }
 
     /**
-     * Starts or stops the background service to match the setting. Android only allows
-     * starting it while the app is on screen, so screens call this, not [onCreate].
+     * Applies the background-receiving setting to the connection service.
      */
     fun applyBackground() {
         val service = Intent(this, ConnectionService::class.java)
         if (receiveInBackground) startForegroundService(service) else stopService(service)
     }
 
+    /**
+     * Initializes the application core, applies saved visibility, creates notification channels, and starts listeners.
+     */
     override fun onCreate() {
         super.onCreate()
         coreBridge = ContinueCoreBridge.create()
@@ -101,7 +103,12 @@ class ContinueApplication : Application() {
         listen()
     }
 
-    /** Takes in what paired computers send, for as long as the process runs. */
+    /**
+     * Starts listeners for incoming items, questions, and connection status.
+     *
+     * Incoming items are listened for while the app is on screen or background receiving is enabled.
+     * Incoming items and questions trigger notifications only when the app is not on screen.
+     */
     private fun listen() {
         // On screen, the app shows these itself; otherwise they become notifications.
         state.incoming.onArrival = { title, detail, open -> if (!onScreen) notifyArrival(this, title, detail, open) }
@@ -117,7 +124,9 @@ class ContinueApplication : Application() {
         scope.launch { watchConnections() }
     }
 
-    /** Keeps connection state fresh, often while on screen and now and then otherwise. */
+    /**
+     * Keeps the connection status current and refreshes the background notification when the status changes.
+     */
     private suspend fun watchConnections() {
         while (true) {
             state.refresh()
@@ -130,6 +139,11 @@ class ContinueApplication : Application() {
         }
     }
 
+    /**
+     * Describes the current computer connection status.
+     *
+     * @return A message indicating whether no computer is paired, a paired computer is being searched for, or one or more computers are connected.
+     */
     private fun describeConnections(): String {
         val names = state.peers.filter { it.fingerprint in state.connected }.map { it.displayName }
         return when {
@@ -140,6 +154,11 @@ class ContinueApplication : Application() {
         }
     }
 
+    /**
+     * Enables device discovery when the app is visible and stops it otherwise.
+     *
+     * @param visible Whether the app is visible.
+     */
     private fun applyVisibility(visible: Boolean) {
         if (visible) {
             multicastLock =

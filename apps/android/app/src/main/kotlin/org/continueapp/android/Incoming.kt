@@ -31,8 +31,12 @@ class Incoming(
     var onArrival: (title: String, detail: String, open: Intent?) -> Unit = { _, _, _ -> }
 
     /**
-     * Takes what arrives while [active] says to. Otherwise it waits, so nothing is saved or
-     * copied to the clipboard until it is.
+     * Receives and processes items while the app is active.
+     *
+     * While inactive, waits before checking again. When active, saves received files to Downloads or
+     * copies received text to the clipboard, records each item, and reports it through [onArrival].
+     *
+     * @param active Returns whether the app is currently active.
      */
     suspend fun listen(
         context: Context,
@@ -63,7 +67,9 @@ class Incoming(
         }
     }
 
-    /** Saves where the file went, so it can still be opened after a restart. */
+    /**
+     * Associates a transfer history entry with the URI of its saved file.
+     */
     private suspend fun remember(
         historyId: Long,
         uri: Uri,
@@ -75,7 +81,11 @@ class Incoming(
     }
 }
 
-/** Opens a received file in whatever app handles its type. */
+/**
+ * Creates an intent to view a received file.
+ *
+ * @return An `ACTION_VIEW` intent with the file's MIME type and read access to its URI.
+ */
 fun viewIntent(
     uri: Uri,
     name: String,
@@ -84,6 +94,12 @@ fun viewIntent(
         .setDataAndType(uri, mimeType(name))
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
+/**
+ * Determines the content type associated with a filename.
+ *
+ * @param name The filename to inspect.
+ * @return The guessed content type, or `application/octet-stream` if it cannot be determined.
+ */
 fun mimeType(name: String): String = URLConnection.guessContentTypeFromName(name) ?: "application/octet-stream"
 
 /**

@@ -12,6 +12,11 @@ import kotlinx.coroutines.launch
 class SendClipboardActivity : ComponentActivity() {
     private var read = false
 
+    /**
+     * Reads the clipboard once when the window gains focus, sends any copied text, and finishes the activity.
+     *
+     * @param hasFocus Whether the window currently has focus.
+     */
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus || read) return

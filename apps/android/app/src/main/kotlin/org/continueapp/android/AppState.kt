@@ -76,7 +76,13 @@ class RecentTransfers(private val bridge: ContinueCoreBridge) {
         }
     }
 
-    /** Lists the transfer as sending, runs [send], then marks it sent or failed by its result. */
+    /**
+     * Tracks a transfer while sending it and updates its status based on the send result.
+     *
+     * @param text Optional text content to store with the transfer.
+     * @param send Performs the send and returns an error message, or `null` on success.
+     * @return The error message from [send], or `null` if sending succeeds.
+     */
     suspend fun track(
         kind: TransferKind,
         label: String,
@@ -93,6 +99,14 @@ class RecentTransfers(private val bridge: ContinueCoreBridge) {
         return error
     }
 
+    /**
+     * Adds a received transfer to recent history.
+     *
+     * The transfer is added before existing entries, and the history is limited to 20 items.
+     *
+     * @param uri The received file's content URI, if applicable.
+     * @param text The received text content, if applicable.
+     */
     fun received(
         kind: TransferKind,
         label: String,
@@ -108,6 +122,13 @@ class RecentTransfers(private val bridge: ContinueCoreBridge) {
 /** Text shows as its first line, like it does while it's being sent. */
 fun firstLine(text: String): String = text.trim().lineSequence().first()
 
+/**
+ * Converts a saved history entry into a transfer.
+ *
+ * Text entries use their first line as the label and retain the full label as text. File entries include a URI only when the saved location starts with `content://`.
+ *
+ * @return The transfer with its saved timestamp and status.
+ */
 private fun HistoryEntry.toTransfer() =
     Transfer(
         id = "saved-$id",
@@ -136,8 +157,7 @@ class PermissionQuestions(private val bridge: ContinueCoreBridge) {
     var onChange: (PermissionQuestion?) -> Unit = {}
 
     /**
-     * Picks up questions from the core for as long as the caller keeps it running. Each one
-     * goes away when the core stops waiting for it.
+     * Listens for permission questions and displays each one until it expires.
      */
     suspend fun listen() =
         coroutineScope {
@@ -153,7 +173,11 @@ class PermissionQuestions(private val bridge: ContinueCoreBridge) {
             }
         }
 
-    /** Answers question [id]. An answer to a question that already went away is ignored. */
+    /**
+     * Submits an answer to a permission question.
+     *
+     * Clears the displayed question if its ID matches [id]. Answers are submitted even if the question is no longer displayed.
+     */
     suspend fun answer(
         id: Long,
         answer: PermissionAnswer,
@@ -162,6 +186,11 @@ class PermissionQuestions(private val bridge: ContinueCoreBridge) {
         withContext(Dispatchers.IO) { bridge.answerPermissionQuestion(id, answer) }
     }
 
+    /**
+     * Updates the displayed permission question and notifies the change listener.
+     *
+     * @param question The question to display, or `null` to clear it.
+     */
     private fun show(question: PermissionQuestion?) {
         shown = question
         onChange(question)
@@ -185,7 +214,12 @@ class AppState(private val bridge: ContinueCoreBridge) {
     val questions = PermissionQuestions(bridge)
     val incoming = Incoming(bridge, recent)
 
-    /** Keeps what's on screen if the core can't be read this time; the next refresh tries again. */
+    /**
+     * Refreshes the peer and connection state from the core.
+     *
+     * If reading the core fails, the current state is retained and `loaded` is unchanged.
+     * On success, the refreshed state is stored and `loaded` is set to `true`.
+     */
     suspend fun refresh() {
         val (latestPeers, latestConnected) =
             withContext(Dispatchers.IO) {
@@ -201,22 +235,48 @@ class AppState(private val bridge: ContinueCoreBridge) {
         loaded = true
     }
 
-    /** Returns what to tell the user if pairing failed, or null once paired. */
+    /**
+     * Pairs with a peer using a QR code.
+     *
+     * @return An error message if pairing fails, or `null` if it succeeds.
+     */
     suspend fun pair(code: String): String? =
         run("Pairing didn't work. Try again.") {
             bridge.pairFromQr(code)
         }
 
+    /**
+     * Disconnects from a peer.
+     *
+     * @return An error message if disconnection fails, or `null` if it succeeds.
+     */
     suspend fun disconnect(peer: String): String? = run("Couldn't disconnect.") { bridge.disconnect(peer) }
 
+    /**
+     * Reconnects to a peer.
+     *
+     * @param peer The peer identifier.
+     * @return An error message if reconnection fails, or `null` if it succeeds.
+     */
     suspend fun reconnect(peer: String): String? =
         run("Couldn't connect. Check that both are on the same Wi-Fi.") { bridge.reconnect(peer) }
 
+    /**
+     * Removes a trusted peer.
+     *
+     * @param peer The peer to forget.
+     * @return An error message if the peer could not be forgotten, or `null` on success.
+     */
     suspend fun forget(peer: String): String? {
         val failed = "Couldn't forget this computer. Try again."
         return run(failed) { bridge.removeTrustedPeer(peer) }
     }
 
+    /**
+     * Sends text to a peer and records the transfer in recent history.
+     *
+     * @return An error message if sending fails, or `null` if it succeeds.
+     */
     suspend fun sendText(
         peer: TrustedPeer,
         text: String,
@@ -260,12 +320,27 @@ class AppState(private val bridge: ContinueCoreBridge) {
             PermissionGrant.fromRaw(bridge.queryPermission(peer, capability))
         }
 
+    /**
+     * Updates a peer's permission for a capability.
+     *
+     * @param peer The peer whose permission to update.
+     * @param capability The capability whose permission to update.
+     * @param grant The permission decision to apply.
+     * @return An error message if the update fails, or `null` if it succeeds.
+     */
     suspend fun setPermission(
         peer: String,
         capability: Int,
         grant: PermissionGrant,
     ): String? = run("Couldn't save that change. Try again.") { bridge.setPermission(peer, capability, grant.rawValue) }
 
+    /**
+     * Runs an action and refreshes the application state, converting handled failures to an error message.
+     *
+     * @param fallback The error message used for I/O, security, and unrecognized core failures.
+     * @param action The operation to run.
+     * @return An error message if the action fails with a handled exception, or `null` if it succeeds.
+     */
     private suspend fun run(
         fallback: String,
         action: () -> Unit,

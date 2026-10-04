@@ -64,6 +64,14 @@ export function PermissionDialog() {
   );
 }
 
+/**
+ * Displays a dialog for answering a permission request.
+ *
+ * Canceling the dialog submits a decline. Failed answers display an error message.
+ *
+ * @param question - The permission request to display
+ * @param onAnswered - Called after the answer is submitted successfully
+ */
 function QuestionDialog({ question, onAnswered }: { question: PermissionQuestion; onAnswered: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [failed, setFailed] = useState(false);

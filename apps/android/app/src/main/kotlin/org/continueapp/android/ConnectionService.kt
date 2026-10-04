@@ -12,8 +12,18 @@ import androidx.core.app.ServiceCompat
  * receiving itself happens in [ContinueApplication]; this only holds the process open.
  */
 class ConnectionService : Service() {
+    /**
+     * Indicates that this service does not support binding.
+     *
+     * @return `null` because the service is unbound.
+     */
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Starts the service in the foreground with the background notification.
+     *
+     * @return The start mode requesting that the system recreate the service after its process is killed.
+     */
     override fun onStartCommand(
         intent: Intent?,
         flags: Int,

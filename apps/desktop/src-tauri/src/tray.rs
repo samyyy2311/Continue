@@ -13,6 +13,13 @@ use tauri::{AppHandle, Manager};
 
 const TRAY_ID: &str = "main";
 
+/// Creates the system-tray menu and icon for the application.
+///
+/// The Open action and a left-button release on the tray icon show the main window; the Quit action exits the application. Uses the default window icon when available.
+///
+/// # Errors
+///
+/// Returns an error if creating the menu items, menu, or tray icon fails.
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Continue", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -43,11 +50,16 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Whether the tray icon is there to bring the window back.
+/// Determines whether the application has a tray icon with the configured ID.
+///
+/// # Returns
+///
+/// `true` if the tray icon exists, `false` otherwise.
 pub fn exists(app: &AppHandle) -> bool {
     app.tray_by_id(TRAY_ID).is_some()
 }
 
+/// Shows, unminimizes, and focuses the main window when it exists.】【。
 pub fn show_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -61,6 +73,16 @@ pub fn show_window(app: &AppHandle) {
 pub struct Connected(Mutex<BTreeMap<String, String>>);
 
 impl Connected {
+    /// Updates a peer's connection state and the tray tooltip.
+    ///
+    /// When `connected` is `true`, stores `name` for `peer`; otherwise, removes `peer`.
+    /// The tooltip reflects the resulting set of connected peers. Tooltip update errors
+    /// are ignored.
+    ///
+    /// # Parameters
+    /// - `peer`: The peer's fingerprint, used as its map key.
+    /// - `name`: The name to display when the peer is connected.
+    /// - `connected`: Whether to add or remove the peer.
     pub fn update(&self, app: &AppHandle, peer: &str, name: String, connected: bool) {
         let mut peers = self.0.lock();
         if connected {

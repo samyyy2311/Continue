@@ -4,6 +4,9 @@
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 
+/**
+ * Renders a decorative icon with an optional active state and size.
+ */
 export function DeviceGlyph(props: { icon: ReactNode; active?: boolean; size?: "md" | "lg" }) {
   const { icon, active = false, size = "md" } = props;
   return (
@@ -57,7 +60,12 @@ export function ButtonGroup<T extends string>(props: {
   );
 }
 
-/** An on/off switch. */
+/**
+ * Renders an accessible on/off switch.
+ *
+ * @param onChange - Called with the inverse of the current `checked` value when clicked
+ * @param labelledBy - ID of the element that labels the switch
+ */
 export function Switch(props: { checked: boolean; onChange: (checked: boolean) => void; labelledBy: string }) {
   const { checked, onChange, labelledBy } = props;
   return (

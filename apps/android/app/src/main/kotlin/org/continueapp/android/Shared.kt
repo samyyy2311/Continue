@@ -28,7 +28,11 @@ data class Shared(
             }
 }
 
-/** Reads a share from another app, or null if [intent] isn't one. */
+/**
+ * Extracts shared files, nonblank text, and an optional peer fingerprint from a send intent.
+ *
+ * @return The extracted share, or `null` if the intent has an unsupported action or contains no files or nonblank text.
+ */
 fun sharedFrom(intent: Intent?): Shared? {
     val uris =
         when (intent?.action) {
@@ -44,8 +48,9 @@ fun sharedFrom(intent: Intent?): Shared? {
 }
 
 /**
- * Lists each paired computer in the system share sheet, so sharing to it takes one tap.
- * Replaces the whole set, which also drops computers that were forgotten.
+ * Publishes trusted computers as dynamic share-sheet targets, replacing the existing shortcuts.
+ *
+ * @param peers Trusted computers to publish; entries beyond the system's per-activity limit are omitted.
  */
 fun publishShareTargets(
     context: Context,
@@ -67,7 +72,13 @@ fun publishShareTargets(
     ShortcutManagerCompat.setDynamicShortcuts(context, shortcuts)
 }
 
-/** Sends what another app shared, connecting to [peer] first if it isn't already. */
+/**
+ * Sends shared files or text to a trusted peer, reconnecting first if needed.
+ *
+ * Reports the peer's share-sheet shortcut as used. If reconnection fails, returns that error without sending the content.
+ *
+ * @return The result of sending the shared content, or the reconnection error.
+ */
 suspend fun AppState.sendShared(
     context: Context,
     peer: TrustedPeer,

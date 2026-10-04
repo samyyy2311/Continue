@@ -46,7 +46,9 @@ class AppearanceSettings(
     val onWallpaperColorsChange: (Boolean) -> Unit,
 )
 
-/** Sends anything newly copied when the app opens. */
+/**
+ * Displays a switch for controlling whether newly copied content is sent when the app opens.
+ */
 @Composable
 private fun SendCopiesRow() {
     val app = LocalContext.current.applicationContext as ContinueApplication
@@ -97,6 +99,14 @@ private fun BackgroundRow() {
     )
 }
 
+/**
+ * Displays connectivity, appearance, and app information settings.
+ *
+ * @param visible Whether the device is visible to paired computers on the network.
+ * @param onVisibleChange Called when the network visibility setting changes.
+ * @param appearance The current appearance settings and their change callbacks.
+ * @param modifier Modifier applied to the settings column.
+ */
 @Composable
 fun SettingsScreen(
     visible: Boolean,

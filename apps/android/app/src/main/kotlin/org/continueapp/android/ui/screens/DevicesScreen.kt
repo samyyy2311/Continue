@@ -46,6 +46,11 @@ import org.continueapp.bridge.CAPABILITY_NOTIFICATIONS_ID
 import org.continueapp.bridge.PermissionGrant
 import org.continueapp.bridge.TrustedPeer
 
+/**
+ * Displays paired devices and opens a device when its row is selected.
+ *
+ * @param onOpenDevice Called with the selected device's fingerprint.
+ */
 @Composable
 fun DevicesScreen(
     state: AppState,
@@ -75,6 +80,12 @@ fun DevicesScreen(
     }
 }
 
+/**
+ * Displays connection controls, permissions, and forget options for a trusted peer.
+ *
+ * @param onBack Navigates away from this screen; called after the peer is successfully forgotten.
+ * @param onMessage Receives errors from connection, permission, and forget operations.
+ */
 @Composable
 fun DeviceScreen(
     state: AppState,

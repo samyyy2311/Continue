@@ -14,6 +14,11 @@ import org.continueapp.android.sendToConnected
  * Sends anything copied since the app was last open to the connected computer, each time
  * Continue comes to the front. Android only lets the app on screen read the clipboard.
  */
+/**
+ * Sends newly copied content when the window is focused, the app is loaded, and a computer is connected.
+ *
+ * @param onMessage Receives the message for a copy that was found, whether or not sending succeeded.
+ */
 @Composable
 fun SendNewCopies(
     state: AppState,

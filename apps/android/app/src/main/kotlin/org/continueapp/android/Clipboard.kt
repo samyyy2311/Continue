@@ -8,8 +8,7 @@ import android.content.Context
 private const val CLIP_LABEL = "Continue"
 
 /**
- * Puts text from a computer on the clipboard, and notes the copy as seen so it isn't sent
- * straight back the next time the app opens.
+ * Copies text to the clipboard and records its timestamp as already seen.
  */
 fun copyToClipboard(
     context: Context,
@@ -28,8 +27,10 @@ class Copy(
 )
 
 /**
- * The copied text, read only while Continue is on screen, as Android requires. Images and
- * other copies that aren't text count as nothing to send.
+ * Reads the first nonblank text item from the clipboard.
+ *
+ * @return The copied text and clipboard timestamp, or `null` if the clipboard has no timestamp or its
+ * first item contains no nonblank text.
  */
 fun readCopy(context: Context): Copy? {
     val clipboard = context.getSystemService(ClipboardManager::class.java)
@@ -39,9 +40,14 @@ fun readCopy(context: Context): Copy? {
 }
 
 /**
- * Something copied since the app last sent a copy, or null. Skips copies marked sensitive, as
- * password managers do. Only the copy's time is checked until there's something new, so
- * Android's "pasted from your clipboard" notice only shows when there is.
+ * Detects a new, non-sensitive clipboard copy.
+ *
+ * The first observed clipboard timestamp is recorded as already seen, so it is not returned.
+ * Subsequent copies are considered new only when their timestamp is later than the recorded
+ * timestamp. Android's clipboard notice is triggered only when a new copy is found.
+ *
+ * @return The new copy, or `null` if the clipboard has no description, the copy is sensitive, or
+ * its timestamp is not newer than the last seen timestamp.
  */
 fun newCopy(
     context: Context,
@@ -66,9 +72,18 @@ fun markSent(
 /** The extra password managers set on what they copy. Read by name, as apps set it on every version. */
 private const val IS_SENSITIVE = "android.content.extra.IS_SENSITIVE"
 
+/**
+ * Checks whether the clipboard description is marked as sensitive.
+ *
+ * @return `true` if the sensitive flag is set, `false` otherwise.
+ */
 private fun ClipDescription.isSensitive(): Boolean = extras?.getBoolean(IS_SENSITIVE) == true
 
-/** Sends text to every connected computer. Says whether it all went, and how to put it. */
+/**
+ * Sends text to connected computers.
+ *
+ * @return A pair containing whether the send succeeded and a message. The send succeeds only when at least one computer is connected and all sends succeed; otherwise, the message describes the lack of connections or the first send failure.
+ */
 suspend fun AppState.sendToConnected(text: String): Pair<Boolean, String> {
     refresh()
     val targets = peers.filter { it.fingerprint in connected }

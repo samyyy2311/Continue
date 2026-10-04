@@ -14,6 +14,14 @@ import org.continueapp.bridge.PermissionAnswer
 import org.continueapp.bridge.PermissionQuestion
 
 /** How a question reads, in the app and in its notification: a headline and the choice. */
+/**
+ * Creates the title and message for a permission prompt.
+ *
+ * A blank peer name is displayed as "Your computer". File-transfer prompts use the question detail or "a file"; clipboard prompts use "some text"; other capabilities use "notifications".
+ *
+ * @param question The permission question to describe.
+ * @return A pair containing the prompt title and message, in that order.
+ */
 fun describe(question: PermissionQuestion): Pair<String, String> {
     val name = question.peerName.ifBlank { "Your computer" }
     val (what, kind) =
@@ -25,7 +33,9 @@ fun describe(question: PermissionQuestion): Pair<String, String> {
     return "$name wants to send $what" to "Allow it this once, or always allow $kind from $name."
 }
 
-/** Shows questions from devices set to Ask while the app is open. */
+/**
+ * Displays the current permission question, if one exists.
+ */
 @Composable
 fun PermissionPrompts(questions: PermissionQuestions) {
     val scope = rememberCoroutineScope()
@@ -33,7 +43,11 @@ fun PermissionPrompts(questions: PermissionQuestions) {
     PermissionDialog(question, onAnswer = { answer -> scope.launch { questions.answer(question.id, answer) } })
 }
 
-/** Asks whether a device set to Ask may send something. Leaving it unanswered declines. */
+/**
+ * Displays a permission prompt with options to allow, decline, or always allow.
+ *
+ * @param onAnswer Called with the selected permission response.
+ */
 @Composable
 private fun PermissionDialog(
     question: PermissionQuestion,

@@ -6,6 +6,11 @@ import android.content.Intent
 
 /** Starts receiving in the background again after the phone restarts or the app updates. */
 class StartReceiver : BroadcastReceiver() {
+    /**
+     * Starts background receiving after device boot or app replacement when it is enabled.
+     *
+     * An [IllegalStateException] from the start request is ignored.
+     */
     override fun onReceive(
         context: Context,
         intent: Intent,

@@ -13,6 +13,13 @@ export function fileNameFromPath(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
 
+/**
+ * Formats a timestamp as relative time or a localized calendar date.
+ *
+ * @param timestamp - The time to format, in milliseconds since the Unix epoch
+ * @param now - The reference time, in milliseconds since the Unix epoch
+ * @returns “just now” for times under 45 seconds ago, rounded minutes or hours for times under 24 hours ago, “Yesterday” for the previous calendar day, or a localized date
+ */
 export function formatRelativeTime(timestamp: number, now = Date.now()): string {
   const seconds = Math.round((now - timestamp) / 1000);
   if (seconds < 45) return "just now";
@@ -28,7 +35,11 @@ export function formatRelativeTime(timestamp: number, now = Date.now()): string 
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: sameYear ? undefined : "numeric" });
 }
 
-/** A heading for the day something happened: Today, Yesterday, or the date. */
+/**
+ * Labels a timestamp as today, yesterday, or its localized weekday and date.
+ *
+ * @returns “Today,” “Yesterday,” or the localized weekday and date for the timestamp
+ */
 export function dayLabel(timestamp: number, now = Date.now()): string {
   const day = new Date(timestamp).toDateString();
   if (day === new Date(now).toDateString()) return "Today";
@@ -38,7 +49,12 @@ export function dayLabel(timestamp: number, now = Date.now()): string {
   return new Date(timestamp).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
 
-/** The web link, if the text is nothing but one. */
+/**
+ * Parses text containing only an HTTP or HTTPS URL.
+ *
+ * @param text - Text to parse; surrounding whitespace is ignored
+ * @returns The normalized URL, or `null` if the text contains whitespace or is not a valid HTTP or HTTPS URL
+ */
 export function linkIn(text: string): string | null {
   const trimmed = text.trim();
   if (/\s/.test(trimmed)) return null;

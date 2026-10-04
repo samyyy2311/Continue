@@ -37,6 +37,14 @@ import org.continueapp.android.viewIntent
 
 private const val RECENT_ON_HOME = 5
 
+/**
+ * Displays recent transfers with an action to clear them.
+ *
+ * Shows at most the configured number of recent transfers and calls [onMessage] with any message
+ * produced when clearing them.
+ *
+ * @param onMessage Receives a message produced by the clear operation.
+ */
 @Composable
 fun RecentSection(
     recent: RecentTransfers,
@@ -51,6 +59,15 @@ fun RecentSection(
     recent.items.take(RECENT_ON_HOME).forEach { RecentRow(it, onMessage) }
 }
 
+/**
+ * Displays a transfer with its label, status, and available actions.
+ *
+ * Clicking the row opens an associated file or copies its text. A standalone web link in the text
+ * is shown with an Open button.
+ *
+ * @param transfer The transfer to display.
+ * @param onMessage Receives messages from copy and open actions.
+ */
 @Composable
 private fun RecentRow(
     transfer: Transfer,
@@ -90,6 +107,9 @@ private fun RecentRow(
     )
 }
 
+/**
+ * Displays an icon indicating the transfer status.
+ */
 @Composable
 private fun StatusIcon(status: TransferStatus) {
     val colors = MaterialTheme.colorScheme
@@ -101,7 +121,9 @@ private fun StatusIcon(status: TransferStatus) {
     }
 }
 
-/** "Just now", "5 minutes ago", "Yesterday" or a short date. */
+/**
+ * Formats a timestamp as "Just now" if it is less than a minute old, or as a relative time otherwise.
+ */
 private fun whenText(at: Long): String {
     val now = System.currentTimeMillis()
     return if (now - at < DateUtils.MINUTE_IN_MILLIS) {
@@ -111,7 +133,11 @@ private fun whenText(at: Long): String {
     }
 }
 
-/** Android 13 and newer confirm a copy themselves, so only older versions get a message. */
+/**
+ * Copies text to the clipboard and reports copy feedback on Android versions older than Android 13.
+ *
+ * @param onMessage Receives the copy confirmation message on older Android versions.
+ */
 private fun copyAgain(
     context: Context,
     text: String,
@@ -121,7 +147,11 @@ private fun copyAgain(
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) onMessage("Copied")
 }
 
-/** Opens a received file in whatever app handles it, if there is one. */
+/**
+ * Opens a received file in an app that can handle it.
+ *
+ * If no app can open the file, reports a message through [onMessage].
+ */
 private fun openFile(
     context: Context,
     uri: Uri,
@@ -135,6 +165,11 @@ private fun openFile(
     }
 }
 
+/**
+ * Opens a link and reports a message if no app can handle it.
+ *
+ * @param onMessage Receives the message when no app can open the link.
+ */
 private fun openLink(
     context: Context,
     link: Uri,
@@ -147,7 +182,9 @@ private fun openLink(
     }
 }
 
-/** The web link, if the text is nothing but one. */
+/**
+ * Finds an HTTP or HTTPS link in text that contains no other non-whitespace content.
+ */
 private fun linkIn(text: String?): Uri? {
     val trimmed = text?.trim().orEmpty()
     val uri = Uri.parse(trimmed)

@@ -8,7 +8,9 @@ import android.service.quicksettings.TileService
 
 /** A Quick Settings tile that sends what's copied to the computer. */
 class SendClipboardTile : TileService() {
-    // The Intent version is the only one before Android 14, and it's only used there.
+    /**
+     * Opens the clipboard-sending activity when the tile is clicked.
+     */
     @SuppressLint("StartActivityAndCollapseDeprecated")
     override fun onClick() {
         super.onClick()

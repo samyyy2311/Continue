@@ -94,7 +94,12 @@ const THEME_KEY = "continue.theme";
 const PEER_KEY = "continue.peer";
 const CLIPBOARD_SYNC_KEY = "continue.clipboardSync";
 
-/** Storage can be unavailable in restrictive environments, so reads fall back to nothing. */
+/**
+ * Reads a value from local storage.
+ *
+ * @param key - The storage key to read
+ * @returns The stored value, or `null` if the key is absent or storage access fails
+ */
 function readStored(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -103,11 +108,23 @@ function readStored(key: string): string | null {
   }
 }
 
+/**
+ * Reads a stored string choice, using a fallback when it is not allowed.
+ *
+ * @param allowed - Values accepted from storage
+ * @param fallback - Value used when the stored value is unavailable or not allowed
+ * @returns The stored value if it is in `allowed`; otherwise, `fallback`
+ */
 function readChoice<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   const stored = readStored(key);
   return allowed.includes(stored as T) ? (stored as T) : fallback;
 }
 
+/**
+ * Stores a value in local storage or removes it when the value is `null`.
+ *
+ * Storage errors are ignored.
+ */
 function writeStored(key: string, value: string | null) {
   try {
     if (value === null) localStorage.removeItem(key);
@@ -117,6 +134,13 @@ function writeStored(key: string, value: string | null) {
   }
 }
 
+/**
+ * Converts a history entry into an activity item.
+ *
+ * The activity status is `received` when the entry was received, `failed` when it failed, and `sent` otherwise.
+ *
+ * @returns An activity item populated with the history entry's details
+ */
 function fromHistory(entry: HistoryEntry): Activity {
   return {
     id: `h-${entry.id}`,
@@ -132,7 +156,11 @@ function fromHistory(entry: HistoryEntry): Activity {
   };
 }
 
-/** Screenshots paste as a bare "image.png"; give them a name worth keeping. */
+/**
+ * Preserves a specific filename or generates a timestamped name for a pasted image.
+ *
+ * @returns The file's existing name, or a name containing the current local date and time
+ */
 function pastedName(file: File) {
   if (file.name && file.name !== "image.png") return file.name;
   const d = new Date();
@@ -141,6 +169,12 @@ function pastedName(file: File) {
   return `Pasted image ${stamp}.png`;
 }
 
+/**
+ * Selects an icon based on the file name's category.
+ *
+ * @param name - The file name used to determine its category
+ * @returns The icon element for the file category
+ */
 function getFileIcon(name: string) {
   const category = getFileCategory(name);
   switch (category) {
@@ -161,6 +195,11 @@ function getFileIcon(name: string) {
   }
 }
 
+/**
+ * Manages the app's views, device connections, transfers, activity, and preferences.
+ *
+ * @returns The application interface, or `null` while peers are loading.
+ */
 export default function App() {
   const [view, setView] = useState<View>("transfer");
   const [accent, setAccent] = useState<AccentName>(() =>
@@ -778,7 +817,13 @@ interface RowActions {
   openLink: (url: string) => void;
 }
 
-/** Under a day heading (`underDay`), older rows show the time rather than repeat the day. */
+/**
+ * Renders an activity item with status details and applicable actions.
+ *
+ * When `underDay` is true, displays the time instead of the relative day for items not from today.
+ *
+ * @param props - The activity item, its action callbacks, and optional day-grouping context
+ */
 function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: boolean }) {
   const { item, actions, underDay = false } = props;
   const when =
@@ -873,6 +918,11 @@ interface HomeViewProps {
   onNavigateHistory: () => void;
 }
 
+/**
+ * Displays the selected peer’s connection controls, transfer composer, and recent activity.
+ *
+ * @returns The home view, or a pairing prompt when no peer is selected
+ */
 function HomeView(props: HomeViewProps) {
   const { peer, peers, onSelectPeer, onOpenPair, onChooseFiles, onSendClipboard, textInput } = props;
   const { onTextInputChange, onSendText, onConnect, onReconnect, onDisconnect, isConnecting } = props;
@@ -1183,6 +1233,9 @@ function byDay(items: Activity[]): [string, Activity[]][] {
   return days;
 }
 
+/**
+ * Displays filtered, searchable activity grouped by day.
+ */
 function HistoryView(props: HistoryViewProps) {
   const { activity, rowActions, onClear } = props;
   const [filter, setFilter] = useState<HistoryFilter>("all");
@@ -1280,6 +1333,11 @@ const THEME_OPTIONS = [
   { value: "dark", label: "Dark" },
 ] as const;
 
+/**
+ * Displays appearance, startup, clipboard, device, and app information settings.
+ *
+ * @returns The settings interface
+ */
 function SettingsView(props: SettingsViewProps) {
   const { identity, theme, accent, onThemeChange, onAccentChange, clipboardSync, onClipboardSyncChange, onError } = props;
   const [appVersion, setAppVersion] = useState("");

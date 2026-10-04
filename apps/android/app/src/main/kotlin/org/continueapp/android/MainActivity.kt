@@ -57,6 +57,9 @@ import org.continueapp.android.ui.theme.ContinueTheme
 class MainActivity : ComponentActivity() {
     private val askForNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
+    /**
+     * Initializes the activity, restores eligible incoming share data, and sets up the app UI.
+     */
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -105,6 +108,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Updates the pending share when the incoming intent contains shared content.
+     */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         sharedFrom(intent)?.let { (application as ContinueApplication).pendingShare.value = it }
@@ -124,6 +130,11 @@ private sealed interface Overlay {
     data class Device(val fingerprint: String) : Overlay
 }
 
+/**
+ * Displays the app's selected tab or active overlay and handles navigation between them.
+ *
+ * @param shared State containing a pending incoming share, if any.
+ */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ContinueApp(

@@ -34,6 +34,10 @@ pub struct ClipboardWatcher {
     enabled: Arc<AtomicBool>,
 }
 
+/// Creates a clipboard synchronization handle and its watcher.
+///
+/// Clipboard synchronization is disabled initially. The returned handle and
+/// watcher share the same enabled state and communicate through a channel.
 pub fn new() -> (ClipboardSync, ClipboardWatcher) {
     let (writes, requests) = mpsc::channel();
     // Off until the window says what the user chose.
@@ -51,19 +55,27 @@ pub fn new() -> (ClipboardSync, ClipboardWatcher) {
 }
 
 impl ClipboardSync {
-    /// Puts text a phone sent on this computer's clipboard. It isn't sent back.
+    /// Queues text received from a phone for writing to this computer's clipboard.
+    ///
+    /// The text is not sent back to the phone. Queueing failures are ignored.
     pub fn write(&self, text: String) {
         let _ = self.writes.send(text);
     }
 
-    /// Turns sending what's copied here on or off.
+    /// Enables or disables sending locally copied text.
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Relaxed);
     }
 }
 
 impl ClipboardWatcher {
-    /// Starts watching. `on_copy` gets text copied here while sending is on.
+    /// Starts watching the system clipboard and passes eligible copied text to `on_copy`.
+    
+    ///
+    
+    /// The callback is invoked for changed, nonblank clipboard text when syncing is enabled
+    
+    /// and the clipboard content is not marked as concealed.
     pub fn start(self, on_copy: impl Fn(String) + Send + 'static) {
         let started = std::thread::Builder::new()
             .name("clipboard".into())
@@ -73,8 +85,11 @@ impl ClipboardWatcher {
         }
     }
 
-    /// One thread owns the clipboard, because on Linux what this app copies only stays on
-    /// the clipboard while the context that copied it is alive.
+    /// Watches for new clipboard text and forwards eligible copies to `on_copy`.
+    ///
+    /// Forwards text only when syncing is enabled, the text is nonblank, and the
+    /// clipboard does not contain a concealed format. Ignores the clipboard text
+    /// present at startup and text written through the incoming channel.դրբեջ
     fn run(self, on_copy: impl Fn(String)) {
         let clipboard = match ClipboardContext::new() {
             Ok(clipboard) => clipboard,
@@ -110,6 +125,11 @@ impl ClipboardWatcher {
     }
 }
 
+/// Determines whether the clipboard contains a format marked as concealed.
+///
+/// # Returns
+///
+/// `true` if any available clipboard format is concealed, `false` otherwise. Returns `false` if the available formats cannot be queried.
 fn is_concealed(clipboard: &ClipboardContext) -> bool {
     clipboard
         .available_formats()

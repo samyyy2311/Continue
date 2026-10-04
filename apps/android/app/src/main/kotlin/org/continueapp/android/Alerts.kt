@@ -44,15 +44,21 @@ fun createNotificationChannels(context: Context) {
     context.getSystemService(NotificationManager::class.java)?.createNotificationChannels(channels)
 }
 
-/** Whether Android 13 or newer still needs to be asked before notifications can show. */
+/**
+ * Determines whether notification permission has not been granted on Android 13 or newer.
+ *
+ * @return `true` if the device runs Android 13 or newer and notification permission is not granted, `false` otherwise.
+ */
 fun needsNotificationPermission(context: Context): Boolean =
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
         PackageManager.PERMISSION_GRANTED
 
 /**
- * The quiet notification that keeps receiving going. It says who's connected and has a button
- * to send the clipboard.
+ * Builds an ongoing, low-priority notification showing the connection status and a clipboard-send action.
+ * Tapping the notification opens the app.
+ *
+ * @return The background notification.
  */
 fun backgroundNotification(context: Context): Notification {
     val app = context.applicationContext as ContinueApplication
@@ -75,7 +81,11 @@ fun updateBackgroundNotification(context: Context) {
     post(context, BACKGROUND_NOTIFICATION_ID, backgroundNotification(context))
 }
 
-/** Says something arrived. Tapping it opens [open], or the app when there's nothing to open. */
+/**
+ * Shows an auto-canceling notification for an arrival.
+ *
+ * @param open The intent to open when the notification is tapped, or `null` to open the app.
+ */
 fun notifyArrival(
     context: Context,
     title: String,
@@ -96,7 +106,11 @@ fun notifyArrival(
     post(context, id, notification)
 }
 
-/** Asks from the notification shade, with the same three answers as the dialog. */
+/**
+ * Presents a permission question as a notification with Decline, Always allow, and Allow actions.
+ *
+ * @param question The permission question to display; its expiry time determines how long the notification remains visible.
+ */
 fun notifyQuestion(
     context: Context,
     question: PermissionQuestion,
@@ -118,10 +132,20 @@ fun notifyQuestion(
     post(context, QUESTION_NOTIFICATION_ID, notification)
 }
 
+/**
+ * Cancels the permission-question notification.
+ */
 fun cancelQuestion(context: Context) = NotificationManagerCompat.from(context).cancel(QUESTION_NOTIFICATION_ID)
 
 /** Answers a question from its notification's buttons. */
 class QuestionAnswerReceiver : BroadcastReceiver() {
+    /**
+     * Submits a valid permission-question answer from a broadcast.
+     *
+     * Broadcasts with an answer that does not match a [PermissionAnswer] are ignored.
+     *
+     * @param intent The broadcast containing the permission-question ID and answer.
+     */
     override fun onReceive(
         context: Context,
         intent: Intent,
@@ -139,6 +163,11 @@ class QuestionAnswerReceiver : BroadcastReceiver() {
     }
 }
 
+/**
+ * Creates a broadcast pending intent for a permission question answer.
+ *
+ * @return A pending intent carrying the question ID and selected answer.
+ */
 private fun answerIntent(
     context: Context,
     question: Long,
@@ -153,9 +182,17 @@ private fun answerIntent(
     return PendingIntent.getBroadcast(context, code, intent, IMMUTABLE)
 }
 
+/**
+ * Creates a pending intent that opens the app's main activity.
+ *
+ * @return A pending intent for opening `MainActivity`.
+ */
 private fun openApp(context: Context): PendingIntent =
     PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), IMMUTABLE)
 
+/**
+ * Posts a notification when notification permission is not required or has been granted.
+ */
 @SuppressLint("MissingPermission") // Checked first.
 private fun post(
     context: Context,

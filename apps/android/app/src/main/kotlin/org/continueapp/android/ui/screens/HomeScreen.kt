@@ -118,6 +118,11 @@ private fun VisibilityLine(
     }
 }
 
+/**
+ * Shows pairing instructions and a button to start pairing with a computer.
+ *
+ * @param onPair Invoked when the user taps the pairing button.
+ */
 @Composable
 private fun NoDevices(onPair: () -> Unit) {
     Column(

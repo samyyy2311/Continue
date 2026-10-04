@@ -24,6 +24,13 @@ import org.continueapp.bridge.TrustedPeer
  * the computer picked there, or else to one picked here. [onSending] runs once one is chosen,
  * so the caller can show Home, where the transfer appears.
  */
+/**
+ * Sends a pending share to its identified peer or prompts the user to choose a peer.
+ *
+ * @param shared The pending share; cleared after sending or cancellation.
+ * @param onMessage Receives the send result or a success message when no result is provided.
+ * @param onSending Called when sending begins.
+ */
 @Composable
 fun SharePrompt(
     shared: MutableState<Shared?>,
@@ -56,6 +63,11 @@ fun SharePrompt(
     }
 }
 
+/**
+ * Displays a dialog for choosing a paired computer to receive the shared content.
+ *
+ * If no computers are paired, prompts the user to pair one. Dismissing or canceling the dialog invokes [onCancel].
+ */
 @Composable
 private fun ShareDialog(
     shared: Shared,
