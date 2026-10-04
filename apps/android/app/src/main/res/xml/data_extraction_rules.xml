@@ -6,11 +6,11 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <exclude domain="database" path="secrets/" />
-        <exclude domain="database" path="sealed-keys/" />
+        <exclude domain="root" path="databases/secrets/" />
+        <exclude domain="root" path="databases/sealed-keys/" />
     </cloud-backup>
     <device-transfer>
-        <exclude domain="database" path="secrets/" />
-        <exclude domain="database" path="sealed-keys/" />
+        <exclude domain="root" path="databases/secrets/" />
+        <exclude domain="root" path="databases/sealed-keys/" />
     </device-transfer>
 </data-extraction-rules>
