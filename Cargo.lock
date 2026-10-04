@@ -678,6 +678,7 @@ dependencies = [
  "transfer",
  "transport",
  "uniffi",
+ "zeroize",
 ]
 
 [[package]]

@@ -41,6 +41,69 @@ pub enum ContinueFfiError {
     NotInitialized,
 }
 
+/// What the app's secret store reports when it can't do what was asked.
+#[derive(Debug, Error)]
+pub enum SecretStoreFfiError {
+    #[error("{reason}")]
+    Unavailable { reason: String },
+}
+
+impl From<uniffi::UnexpectedUniFFICallbackError> for SecretStoreFfiError {
+    fn from(error: uniffi::UnexpectedUniFFICallbackError) -> Self {
+        Self::Unavailable {
+            reason: error.reason,
+        }
+    }
+}
+
+/// The platform's secret store, implemented by the app.
+pub trait SecretStoreFfi: Send + Sync {
+    fn store(&self, label: String, secret: Vec<u8>) -> Result<(), SecretStoreFfiError>;
+    fn load(&self, label: String) -> Result<Option<Vec<u8>>, SecretStoreFfiError>;
+    fn delete(&self, label: String) -> Result<(), SecretStoreFfiError>;
+}
+
+/// Set by the app before `init_core`; the keys stay in files until it is.
+static KEY_STORE: Mutex<Option<Arc<dyn SecretStoreFfi>>> = Mutex::new(None);
+
+pub fn set_key_store(store: Box<dyn SecretStoreFfi>) {
+    *KEY_STORE.lock().unwrap() = Some(Arc::from(store));
+}
+
+/// The app's store, seen as the core's `SecretStore`.
+struct AppSecretStore(Arc<dyn SecretStoreFfi>);
+
+fn from_app(error: SecretStoreFfiError) -> identity::SecretStoreError {
+    identity::SecretStoreError::Unavailable(error.to_string())
+}
+
+impl identity::SecretStore for AppSecretStore {
+    fn store(
+        &self,
+        label: &str,
+        secret: zeroize::Zeroizing<Vec<u8>>,
+    ) -> Result<(), identity::SecretStoreError> {
+        self.0
+            .store(label.to_string(), secret.to_vec())
+            .map_err(from_app)
+    }
+
+    fn load(
+        &self,
+        label: &str,
+    ) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>, identity::SecretStoreError> {
+        Ok(self
+            .0
+            .load(label.to_string())
+            .map_err(from_app)?
+            .map(zeroize::Zeroizing::new))
+    }
+
+    fn delete(&self, label: &str) -> Result<(), identity::SecretStoreError> {
+        self.0.delete(label.to_string()).map_err(from_app)
+    }
+}
+
 struct ActivePairing {
     server_endpoint: quinn::Endpoint,
     result_rx: tokio::sync::oneshot::Receiver<Result<TrustedPeer, pairing::PairingError>>,
@@ -482,9 +545,9 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
     Ok(())
 }
 
-/// Keys live in a `secrets` folder beside the database so pairings survive a
-/// restart. An in-memory database (used by tests) gets throwaway keys.
-// The files sit in app-private storage. Wrapping them with the Android Keystore comes later.
+/// Keys live in the app's secret store (the Android Keystore) so pairings survive a restart.
+/// Keys from earlier versions, in a `secrets` folder beside the database, move there; without
+/// a store they stay in that folder. An in-memory database (used by tests) gets throwaway keys.
 fn load_device_keys(db_path: &str) -> Result<DeviceKeys, ContinueFfiError> {
     let internal = |e: String| ContinueFfiError::InternalError(e);
 
@@ -503,8 +566,16 @@ fn load_device_keys(db_path: &str) -> Result<DeviceKeys, ContinueFfiError> {
         .parent()
         .ok_or_else(|| internal(format!("Database path has no folder: {db_path}")))?
         .join("secrets");
-    let store = FileSecretStore::new(secrets_dir).map_err(|e| internal(e.to_string()))?;
-    DeviceKeys::load_or_create(&store).map_err(|e| internal(e.to_string()))
+    let files = FileSecretStore::new(secrets_dir).map_err(|e| internal(e.to_string()))?;
+    let app_store = KEY_STORE.lock().unwrap().clone();
+    match app_store {
+        Some(app_store) => DeviceKeys::load_or_create(&identity::PlatformFirstStore::new(
+            Box::new(AppSecretStore(app_store)),
+            files,
+        )),
+        None => DeviceKeys::load_or_create(&files),
+    }
+    .map_err(|e| internal(e.to_string()))
 }
 
 /// Sets the name paired devices see for this phone, from the next session on.
@@ -1167,6 +1238,60 @@ fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Stands in for the Android Keystore.
+    #[derive(Default)]
+    struct MemoryStore(Mutex<std::collections::HashMap<String, Vec<u8>>>);
+
+    impl SecretStoreFfi for Arc<MemoryStore> {
+        fn store(&self, label: String, secret: Vec<u8>) -> Result<(), SecretStoreFfiError> {
+            self.0.lock().unwrap().insert(label, secret);
+            Ok(())
+        }
+        fn load(&self, label: String) -> Result<Option<Vec<u8>>, SecretStoreFfiError> {
+            Ok(self.0.lock().unwrap().get(&label).cloned())
+        }
+        fn delete(&self, label: String) -> Result<(), SecretStoreFfiError> {
+            self.0.lock().unwrap().remove(&label);
+            Ok(())
+        }
+    }
+
+    // One test, since the key store is shared by the whole process.
+    #[test]
+    fn keys_move_from_files_into_the_apps_store() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("continue-ffi-keys-{nanos}"));
+        let db = dir.join("continue.db").to_string_lossy().into_owned();
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // An earlier version, with no store set.
+        let before = load_device_keys(&db).unwrap();
+        let key = |keys: &DeviceKeys| keys.identity_signer.verifying_key().unwrap();
+
+        let app_store = Arc::new(MemoryStore::default());
+        set_key_store(Box::new(app_store.clone()));
+        let after = load_device_keys(&db).unwrap();
+        *KEY_STORE.lock().unwrap() = None;
+
+        assert_eq!(key(&after), key(&before));
+        assert_eq!(
+            after.transport_cert.spki_hash,
+            before.transport_cert.spki_hash
+        );
+        let saved = app_store.0.lock().unwrap();
+        assert!(saved.contains_key("device_identity") && saved.contains_key("transport_cert"));
+        let files = std::fs::read_dir(dir.join("secrets"))
+            .unwrap()
+            .filter(|entry| entry.as_ref().unwrap().path().extension() == Some("secret".as_ref()))
+            .count();
+        assert_eq!(files, 0, "no key left in files");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     // One test, since the question queue is shared by the whole process.
     #[tokio::test(flavor = "multi_thread")]

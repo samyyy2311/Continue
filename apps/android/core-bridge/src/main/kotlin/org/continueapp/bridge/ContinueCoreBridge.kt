@@ -6,6 +6,7 @@ import org.continueapp.bridge.ffi.PermissionDecisionFfi
 import org.continueapp.bridge.ffi.PermissionRequestFfi
 import org.continueapp.bridge.ffi.ReceivedFfi
 import org.continueapp.bridge.ffi.TrustedPeerFfi
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit.MILLISECONDS
@@ -37,6 +38,7 @@ import org.continueapp.bridge.ffi.sendFile as coreSendFile
 import org.continueapp.bridge.ffi.sendNotification as coreSendNotification
 import org.continueapp.bridge.ffi.setDeviceName as coreSetDeviceName
 import org.continueapp.bridge.ffi.setHistoryLocation as coreSetHistoryLocation
+import org.continueapp.bridge.ffi.setKeyStore as coreSetKeyStore
 import org.continueapp.bridge.ffi.setPermission as coreSetPermission
 import org.continueapp.bridge.ffi.startDiscovery as coreStartDiscovery
 import org.continueapp.bridge.ffi.startPairingServer as coreStartPairingServer
@@ -387,7 +389,13 @@ class MockContinueCoreBridge : ContinueCoreBridge {
 /** Calls the Rust core through the UniFFI bindings generated at build time. */
 @Suppress("TooManyFunctions")
 class NativeContinueCoreBridge : ContinueCoreBridge {
-    override fun initCore(dbPath: String) = native { coreInitCore(dbPath) }
+    override fun initCore(dbPath: String) =
+        native {
+            // Beside the database, like the files the keys move out of.
+            val sealedKeys = File(dbPath).absoluteFile.parentFile?.resolve("sealed-keys")
+            if (sealedKeys != null) coreSetKeyStore(KeystoreSecretStore(sealedKeys))
+            coreInitCore(dbPath)
+        }
 
     override fun setDeviceName(name: String) = native { coreSetDeviceName(name) }
 

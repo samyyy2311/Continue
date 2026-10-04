@@ -20,6 +20,7 @@ bindgen = ["uniffi/cli"]
 [dependencies]
 crypto = { path = "../crypto" }
 identity = { path = "../identity" }
+zeroize = { workspace = true }
 discovery = { path = "../discovery" }
 pairing = { path = "../pairing" }
 transport = { path = "../transport" }
