@@ -43,6 +43,24 @@ struct Entry {
     reconnect_episode: u64,
     /// Set when either user ended the session, so discovery doesn't reconnect it.
     ended_on_purpose: bool,
+    /// Set while this device is dialing the peer, so the discovery, saved-address and
+    /// reconnect loops never have two dials to it in flight.
+    dialing: bool,
+}
+
+/// This device's one dial to a peer; ends the claim when dropped, even if the dial is
+/// cancelled midway.
+struct DialClaim {
+    registry: SessionRegistry,
+    peer: String,
+}
+
+impl Drop for DialClaim {
+    fn drop(&mut self) {
+        if let Some(entry) = self.registry.peers().get_mut(&self.peer) {
+            entry.dialing = false;
+        }
+    }
 }
 
 struct Inner {
@@ -188,6 +206,10 @@ impl SessionRegistry {
         addresses: &[SocketAddr],
         still_trusted: impl Fn() -> bool,
     ) -> Option<SocketAddr> {
+        if !self.wants_discovered(peer) || !still_trusted() {
+            return None;
+        }
+        let _claim = self.claim_dial(peer, spki_hash)?;
         for &addr in addresses {
             if !self.wants_discovered(peer) || !still_trusted() {
                 return None;
@@ -201,8 +223,10 @@ impl SessionRegistry {
             .await
             {
                 Ok(connection) => {
-                    if !self.wants_discovered(peer) || !still_trusted() {
-                        connection.close(close_code(DisconnectReason::Normal), b"not needed");
+                    // If the peer dialed in meanwhile, `attach` picks the same connection on
+                    // both sides; closing this one here could close the one the peer kept.
+                    if !self.still_wanted(peer) || !still_trusted() {
+                        connection.close(close_code(DisconnectReason::Redundant), b"not needed");
                         return None;
                     }
                     self.entry(&mut self.peers(), peer, spki_hash)
@@ -221,6 +245,28 @@ impl SessionRegistry {
             && self.peers().get(peer).is_none_or(|entry| {
                 !entry.ended_on_purpose && entry.session.state != SessionState::Connecting
             })
+    }
+
+    /// Whether a connection to `peer` that just succeeded should be kept: it is still paired
+    /// and wasn't disconnected on purpose meanwhile.
+    fn still_wanted(&self, peer: &str) -> bool {
+        self.peers()
+            .get(peer)
+            .is_some_and(|entry| !entry.ended_on_purpose)
+    }
+
+    /// Claims the right to dial `peer`, or `None` if this device is already dialing it.
+    fn claim_dial(&self, peer: &str, spki_hash: [u8; 32]) -> Option<DialClaim> {
+        let mut peers = self.peers();
+        let entry = self.entry(&mut peers, peer, spki_hash);
+        if entry.dialing {
+            return None;
+        }
+        entry.dialing = true;
+        Some(DialClaim {
+            registry: self.clone(),
+            peer: peer.to_string(),
+        })
     }
 
     /// Adopt an authenticated connection as the peer's session. Returns false if an existing
@@ -245,12 +291,12 @@ impl SessionRegistry {
                 if !self.replaces(peer, direction, entry) {
                     debug!("Keeping the existing connection to {peer}; closing the new one");
                     mux.connection()
-                        .close(close_code(DisconnectReason::Normal), b"duplicate");
+                        .close(close_code(DisconnectReason::Redundant), b"duplicate");
                     return false;
                 }
                 existing
                     .connection()
-                    .close(close_code(DisconnectReason::Normal), b"duplicate");
+                    .close(close_code(DisconnectReason::Redundant), b"duplicate");
             }
             entry.session.peer_transport_spki_hash = spki_hash;
             entry.session.attach_connection(mux.clone());
@@ -312,6 +358,7 @@ impl SessionRegistry {
                 established: Instant::now(),
                 reconnect_episode: 0,
                 ended_on_purpose: false,
+                dialing: false,
             }
         })
     }
@@ -390,24 +437,28 @@ impl SessionRegistry {
             let Some((spki_hash, addresses)) = self.reconnect_targets(&peer, episode) else {
                 return;
             };
-            for addr in addresses {
-                match connect_pinned(
-                    &self.inner.transport_cert,
-                    spki_hash,
-                    addr,
-                    &self.inner.config.dial,
-                )
-                .await
-                {
-                    Ok(connection) => {
-                        if self.reconnect_targets(&peer, episode).is_some() {
-                            self.attach(&peer, spki_hash, connection, Direction::Outbound);
-                        } else {
-                            connection.close(close_code(DisconnectReason::Normal), b"not needed");
+            // Skips this round if discovery is already dialing the peer.
+            if let Some(_claim) = self.claim_dial(&peer, spki_hash) {
+                for addr in addresses {
+                    match connect_pinned(
+                        &self.inner.transport_cert,
+                        spki_hash,
+                        addr,
+                        &self.inner.config.dial,
+                    )
+                    .await
+                    {
+                        Ok(connection) => {
+                            if self.still_wanted(&peer) {
+                                self.attach(&peer, spki_hash, connection, Direction::Outbound);
+                            } else {
+                                connection
+                                    .close(close_code(DisconnectReason::Redundant), b"not needed");
+                            }
+                            return;
                         }
-                        return;
+                        Err(error) => debug!("Reconnect to {peer} at {addr} failed: {error}"),
                     }
-                    Err(error) => debug!("Reconnect to {peer} at {addr} failed: {error}"),
                 }
             }
 

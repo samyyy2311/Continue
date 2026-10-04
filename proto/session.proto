@@ -34,4 +34,7 @@ enum DisconnectReason {
   DISCONNECT_REASON_ERROR          = 2;
   DISCONNECT_REASON_PROTOCOL       = 3;
   DISCONNECT_REASON_UNAUTHORIZED   = 4;
+  // One of two connections to the same peer, closed because the other is kept. Unlike
+  // NORMAL it doesn't mean the peer was disconnected on purpose.
+  DISCONNECT_REASON_REDUNDANT      = 5;
 }

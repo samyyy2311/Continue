@@ -634,3 +634,27 @@ async fn closing_a_replaced_connection_keeps_its_replacement() {
     .await;
     drop(second);
 }
+
+#[tokio::test]
+async fn a_closed_duplicate_is_reconnected_not_taken_as_a_disconnect() {
+    let (low, high) = pair();
+    low.registry
+        .connect(HIGH, high.cert.spki_hash, high.listen_addr)
+        .await
+        .unwrap();
+    eventually("accepted", || high.registry.get(LOW).is_some()).await;
+    let before = low.registry.get(HIGH).unwrap();
+
+    // As when the two sides kept different duplicates and this one was the dialer's.
+    high.registry.get(LOW).unwrap().connection().close(
+        sessions::close_code(protocol::v1::DisconnectReason::Redundant),
+        b"duplicate",
+    );
+    eventually("the dialer reconnects", || {
+        low.registry
+            .get(HIGH)
+            .is_some_and(|now| !Arc::ptr_eq(&now, &before))
+            && high.registry.state(LOW) == SessionState::Connected
+    })
+    .await;
+}
