@@ -114,23 +114,25 @@ impl QrPayload {
         })
     }
 
-    /// Verify the initiator's Ed25519 signature over the canonical initiator pairing transcript.
-    pub fn verify_signature(&self, protocol_version: u32) -> Result<(), PairingError> {
-        let verifying_key = VerifyingKey::from_bytes(&self.identity_pubkey)
-            .map_err(|_| PairingError::InvalidQr("Invalid Ed25519 public key in QR".to_string()))?;
-
-        let transcript = build_initiator_transcript(&InitiatorTranscriptInputs {
+    /// What the initiator signs: everything in the code but the endpoint.
+    pub(crate) fn transcript(&self, protocol_version: u32) -> Vec<u8> {
+        build_initiator_transcript(&InitiatorTranscriptInputs {
             qr_format_version: self.format_version,
             protocol_version,
             identity_pubkey: &self.identity_pubkey,
             x25519_ephemeral: &self.x25519_ephemeral,
             session_token: &self.session_token,
             transport_spki_hash: &self.transport_spki_hash,
-        });
+        })
+    }
 
+    /// Verify the initiator's Ed25519 signature over the canonical initiator pairing transcript.
+    pub fn verify_signature(&self, protocol_version: u32) -> Result<(), PairingError> {
+        let verifying_key = VerifyingKey::from_bytes(&self.identity_pubkey)
+            .map_err(|_| PairingError::InvalidQr("Invalid Ed25519 public key in QR".to_string()))?;
         let sig = Signature::from_bytes(&self.signature);
         verifying_key
-            .verify_strict(&transcript, &sig)
+            .verify_strict(&self.transcript(protocol_version), &sig)
             .map_err(|_| PairingError::SignatureInvalid)?;
 
         Ok(())

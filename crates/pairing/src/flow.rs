@@ -25,11 +25,23 @@ use crate::qr::{QrPayload, QR_FORMAT_VERSION, QR_ROLE_INITIATOR};
 use crate::replay::ReplayCache;
 use crate::trust_store::{TrustStore, TrustedPeer};
 
-fn current_unix_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+/// Saved only once both sides have proved they derived the same key.
+fn save_peer(
+    trust_store: &TrustStore,
+    identity_pubkey: [u8; 32],
+    transport_spki_hash: [u8; 32],
+) -> Result<TrustedPeer, PairingError> {
+    let peer = TrustedPeer {
+        fingerprint: Fingerprint::from_pubkey_bytes(&identity_pubkey).to_string(),
+        identity_pubkey,
+        transport_spki_hash,
+        display_name: String::new(),
+        paired_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs()),
+    };
+    trust_store.add_peer(&peer)?;
+    Ok(peer)
 }
 
 /// Initiator (QR displayer) pairing state.
@@ -119,17 +131,16 @@ impl InitiatorPairing {
             .as_ref()
             .ok_or_else(|| PairingError::InvalidQr("QR payload missing".to_string()))?;
 
-        // 1. Receive KeyExchangeResponse from responder
         let resp: KeyExchangeResponse = read_msg(recv_stream, MAX_FRAME_PAIRING_BYTES).await?;
 
-        // 2. Validate token and consume atomically from replay cache
+        // Consumed here, so the same code can't pair twice.
         let received: Option<[u8; 16]> = resp.session_token.as_slice().try_into().ok();
         if !received.is_some_and(|token| crypto::token::tokens_equal(&token, &expected_token)) {
             return Err(PairingError::SessionTokenMismatch);
         }
         self.replay_cache.consume(&expected_token)?;
 
-        // 3. Verify recorded TLS transport cert SPKI matches claimed SPKI hash in response
+        // The responder must claim the key its TLS handshake presented.
         let resp_claimed_spki: [u8; 32] = resp
             .resp_transport_spki_hash
             .as_slice()
@@ -150,7 +161,6 @@ impl InitiatorPairing {
             .try_into()
             .map_err(|_| PairingError::InvalidQr("Invalid responder X25519 key".to_string()))?;
 
-        // 4. Verify responder signature over responder transcript
         let resp_transcript = build_responder_transcript(&ResponderTranscriptInputs {
             qr_format_version: resp.qr_format_version as u8,
             protocol_version: resp.protocol_version,
@@ -168,23 +178,11 @@ impl InitiatorPairing {
             .verify_strict(&resp_transcript, &resp_sig)
             .map_err(|_| PairingError::SignatureInvalid)?;
 
-        // 5. Diffie-Hellman & Confirmation Key derivation
         let remote_eph_pub = X25519PublicKey::from(resp_x25519_bytes);
         let dh_output = local_eph.diffie_hellman(&remote_eph_pub);
         let (confirmation_key, _) = derive_pairing_keys(&dh_output, &expected_token)?;
 
-        // 6. Build full transcript
-        let init_transcript = build_initiator_transcript(&InitiatorTranscriptInputs {
-            qr_format_version: qr.format_version,
-            protocol_version: 1,
-            identity_pubkey: &qr.identity_pubkey,
-            x25519_ephemeral: &qr.x25519_ephemeral,
-            session_token: &expected_token,
-            transport_spki_hash: &qr.transport_spki_hash,
-        });
-        let full_transcript = build_full_transcript(&init_transcript, &resp_transcript);
-
-        // 7. Send PairConfirm (initiator MAC)
+        let full_transcript = build_full_transcript(&qr.transcript(1), &resp_transcript);
         let confirm_init_mac = confirm_mac_initiator(&confirmation_key, &full_transcript)?;
         write_msg(
             send_stream,
@@ -195,7 +193,6 @@ impl InitiatorPairing {
         )
         .await?;
 
-        // 8. Receive PairConfirm from responder
         let confirm_resp_msg: PairConfirm = read_msg(recv_stream, MAX_FRAME_PAIRING_BYTES).await?;
         let confirm_resp_mac: [u8; 32] = confirm_resp_msg
             .mac
@@ -206,18 +203,7 @@ impl InitiatorPairing {
         let expected_resp_mac = confirm_mac_responder(&confirmation_key, &full_transcript)?;
         verify_confirm_mac(&confirm_resp_mac, &expected_resp_mac)?;
 
-        // 9. ATOMIC persistence to trust store only after both MACs verify
-        let fingerprint = Fingerprint::from_pubkey_bytes(&resp_pubkey_bytes).to_string();
-        let peer = TrustedPeer {
-            fingerprint,
-            identity_pubkey: resp_pubkey_bytes,
-            transport_spki_hash: resp_claimed_spki,
-            display_name: String::new(),
-            paired_at: current_unix_timestamp(),
-        };
-
-        self.trust_store.add_peer(&peer)?;
-        Ok(peer)
+        save_peer(&self.trust_store, resp_pubkey_bytes, resp_claimed_spki)
     }
 }
 
@@ -248,15 +234,12 @@ impl ResponderPairing {
         send_stream: &mut quinn::SendStream,
         recv_stream: &mut quinn::RecvStream,
     ) -> Result<TrustedPeer, PairingError> {
-        // 1. Verify initiator signature from QR payload
         qr.verify_signature(1)?;
 
-        // 2. Generate responder ephemeral X25519 keypair
         let local_eph = EphemeralX25519::generate();
         let eph_pub = local_eph.public_key();
         let own_pubkey = self.identity_signer.verifying_key()?.to_bytes();
 
-        // 3. Build responder transcript and sign it
         let resp_transcript = build_responder_transcript(&ResponderTranscriptInputs {
             qr_format_version: qr.format_version,
             protocol_version: 1,
@@ -268,7 +251,6 @@ impl ResponderPairing {
 
         let sig = self.identity_signer.sign(&resp_transcript)?;
 
-        // 4. Send KeyExchangeResponse
         let resp_msg = KeyExchangeResponse {
             qr_format_version: qr.format_version as u32,
             protocol_version: 1,
@@ -280,23 +262,12 @@ impl ResponderPairing {
         };
         write_msg(send_stream, &resp_msg, MAX_FRAME_PAIRING_BYTES).await?;
 
-        // 5. Diffie-Hellman & Confirmation Key derivation
         let remote_eph_pub = X25519PublicKey::from(qr.x25519_ephemeral);
         let dh_output = local_eph.diffie_hellman(&remote_eph_pub);
         let (confirmation_key, _) = derive_pairing_keys(&dh_output, &qr.session_token)?;
 
-        // 6. Build full transcript
-        let init_transcript = build_initiator_transcript(&InitiatorTranscriptInputs {
-            qr_format_version: qr.format_version,
-            protocol_version: 1,
-            identity_pubkey: &qr.identity_pubkey,
-            x25519_ephemeral: &qr.x25519_ephemeral,
-            session_token: &qr.session_token,
-            transport_spki_hash: &qr.transport_spki_hash,
-        });
-        let full_transcript = build_full_transcript(&init_transcript, &resp_transcript);
+        let full_transcript = build_full_transcript(&qr.transcript(1), &resp_transcript);
 
-        // 7. Receive PairConfirm from initiator
         let confirm_init_msg: PairConfirm = read_msg(recv_stream, MAX_FRAME_PAIRING_BYTES).await?;
         let confirm_init_mac: [u8; 32] = confirm_init_msg
             .mac
@@ -307,7 +278,6 @@ impl ResponderPairing {
         let expected_init_mac = confirm_mac_initiator(&confirmation_key, &full_transcript)?;
         verify_confirm_mac(&confirm_init_mac, &expected_init_mac)?;
 
-        // 8. Send PairConfirm (responder MAC)
         let confirm_resp_mac = confirm_mac_responder(&confirmation_key, &full_transcript)?;
         write_msg(
             send_stream,
@@ -318,17 +288,10 @@ impl ResponderPairing {
         )
         .await?;
 
-        // 9. ATOMIC persistence to trust store only after both MACs verify
-        let fingerprint = Fingerprint::from_pubkey_bytes(&qr.identity_pubkey).to_string();
-        let peer = TrustedPeer {
-            fingerprint,
-            identity_pubkey: qr.identity_pubkey,
-            transport_spki_hash: qr.transport_spki_hash,
-            display_name: String::new(),
-            paired_at: current_unix_timestamp(),
-        };
-
-        self.trust_store.add_peer(&peer)?;
-        Ok(peer)
+        save_peer(
+            &self.trust_store,
+            qr.identity_pubkey,
+            qr.transport_spki_hash,
+        )
     }
 }

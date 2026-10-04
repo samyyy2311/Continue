@@ -24,8 +24,6 @@ pub fn generate_ed25519_seed() -> Ed25519Seed {
     Ed25519Seed(bytes)
 }
 
-/// Construct an `Ed25519SigningKey` from a 32-byte seed.
-///
 /// The seed is consumed and zeroized on drop. Callers must zeroize any
 /// intermediate buffer that held the seed bytes before calling this function.
 pub fn signing_key_from_seed(seed: &Zeroizing<[u8; 32]>) -> SigningKey {

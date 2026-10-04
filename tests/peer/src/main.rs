@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
 
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--test-suite") {
-        info!("Running Phase 1A automated fault injection and pairing verification suite...");
+        info!("Running the fault injection and pairing verification suite...");
         run_fault_injection_suite().await?;
         info!("All security and fault-injection checks passed successfully!");
         return Ok(());
@@ -92,7 +92,6 @@ fn test_session_token_replay_rejection() -> Result<()> {
     cache.register(token)?;
     cache.consume(&token)?;
 
-    // Second consumption must fail
     match cache.consume(&token) {
         Err(pairing::PairingError::SessionTokenReplayed) => {
             info!("Check passed: Session token replay rejected atomically");

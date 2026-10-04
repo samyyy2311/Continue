@@ -6,7 +6,7 @@
 //! No magic numbers elsewhere in the codebase. Every protocol-level bound,
 //! timeout, or size constraint is defined here and referenced by name.
 
-// â”€â”€ Identity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Identity
 
 /// Raw SHA-256 output length in bytes.
 ///
@@ -17,13 +17,13 @@ pub const SHA256_DIGEST_LEN: usize = 32;
 /// Length of the Base64Url-no-padding device fingerprint string.
 ///
 /// Computed as `Base64Url_NoPad(SHA-256(ed25519_public_key))`.
-/// 32 raw bytes â†’ 43 base64url characters.
+/// 32 raw bytes encode to 43 base64url characters.
 pub const DEVICE_FINGERPRINT_STR_LEN: usize = 43;
 
 /// Maximum UTF-8 byte length of a device display name.
 pub const MAX_DEVICE_NAME_BYTES: usize = 64;
 
-// â”€â”€ Pairing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Pairing
 
 /// Byte length of the pairing session token.
 ///
@@ -38,12 +38,12 @@ pub const MAX_PAIRING_SESSION_SECS: u64 = 60;
 /// Caps memory use from concurrent pairing attempts; excess requests are rejected.
 pub const MAX_PAIRING_CACHE_ENTRIES: usize = 64;
 
-// â”€â”€ Capabilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Capabilities
 
 /// Maximum number of capability entries in a single advertisement message.
 pub const MAX_CAPABILITY_ENTRIES: usize = 128;
 
-// â”€â”€ Frame sizes (Protobuf control messages only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Frame sizes (Protobuf control messages only)
 
 /// Pairing protocol messages.
 pub const MAX_FRAME_PAIRING_BYTES: usize = 64 * 1024;
@@ -60,7 +60,7 @@ pub const MAX_FRAME_CLIPBOARD_BYTES: usize = 1024 * 1024;
 /// Notification messages.
 pub const MAX_FRAME_NOTIFICATION_BYTES: usize = 64 * 1024;
 
-// â”€â”€ File transfer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// File transfer
 
 /// Maximum UTF-8 byte length of a transfer filename.
 pub const MAX_TRANSFER_FILENAME_BYTES: usize = 512;
@@ -71,9 +71,7 @@ pub const MAX_TRANSFER_FILENAME_BYTES: usize = 512;
 /// not a Protobuf message size limit.
 pub const TRANSFER_CHUNK_BYTES: usize = 64 * 1024;
 
-// â”€â”€ Session â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-// â”€â”€ Timeouts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Timeouts
 
 /// QUIC connection establishment timeout in seconds.
 pub const CONNECTION_TIMEOUT_SECS: u64 = 10;
@@ -88,7 +86,7 @@ pub const KEEPALIVE_TIMEOUT_SECS: u64 = 90;
 /// Idle stream timeout in seconds. Incomplete frames are dropped after this.
 pub const STREAM_IDLE_TIMEOUT_SECS: u64 = 60;
 
-// â”€â”€ Reconnect backoff â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Reconnect backoff
 
 /// Initial reconnect delay in milliseconds.
 pub const RETRY_INITIAL_DELAY_MS: u64 = 1_000;
@@ -102,7 +100,7 @@ pub const RETRY_MAX_ATTEMPTS: u32 = 8;
 /// Jitter fraction applied to each backoff interval (±25%).
 pub const RETRY_JITTER_FACTOR: f64 = 0.25;
 
-// â”€â”€ Notification content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Notification content
 
 /// Maximum UTF-8 byte length of a notification body.
 pub const MAX_NOTIFICATION_BODY_BYTES: usize = 4_096;

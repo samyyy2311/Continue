@@ -17,8 +17,8 @@ pub trait IdentitySigner: Send + Sync {
 
 /// In-memory Ed25519 signer backed by `ed25519-dalek`.
 ///
-/// Used on all platforms in Phase 1. The signing key is loaded from the platform
-/// secret store at startup and held in memory for the lifetime of the process.
+/// The signing key is loaded from the platform secret store at startup and held in
+/// memory for the lifetime of the process.
 /// The memory is zeroized on drop via `ed25519-dalek`'s `ZeroizeOnDrop` implementation.
 pub struct InMemorySigner {
     key: SigningKey,

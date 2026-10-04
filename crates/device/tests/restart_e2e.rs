@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 1's finish line: pair once, restart both devices, and the phone reconnects by
-//! itself and can send a file to the computer.
+//! Pair once, restart both devices, and the phone reconnects by itself and can send a
+//! file to the computer.
 //!
 //! Each device runs on its own runtime, started the way the apps start one: keys, paired
 //! devices and permissions come from its data folder, then it listens, advertises and dials.

@@ -37,7 +37,7 @@ async fn notifications_e2e_post_and_action() {
 
     let dispatcher = NotificationDispatcher::new();
 
-    // Receiver task. It gets a clone so `server_conn` keeps the connection open
+    // The receiver gets a clone so `server_conn` keeps the connection open
     // until the sender has read the reply.
     let receiver_conn = server_conn.clone();
     let recv_handle = tokio::spawn(async move {
@@ -57,7 +57,6 @@ async fn notifications_e2e_post_and_action() {
         assert_eq!(post.notification_id, "notif-123");
     });
 
-    // Sender
     let (mut client_send, mut client_recv) = client_conn.open_bi().await.unwrap();
 
     let sender_dispatcher = NotificationDispatcher::new();

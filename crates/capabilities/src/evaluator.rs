@@ -82,7 +82,6 @@ mod tests {
         let mut caps = HashSet::new();
         caps.insert(CapabilityId::FILE_TRANSFER);
 
-        // OS unavailable
         let q1 = CapabilityQuery {
             capability: CapabilityId::FILE_TRANSFER,
             is_os_available: false,
@@ -95,7 +94,6 @@ mod tests {
             Err(CapabilityError::OsUnavailable(_))
         ));
 
-        // App permission denied
         let q2 = CapabilityQuery {
             capability: CapabilityId::FILE_TRANSFER,
             is_os_available: true,
@@ -108,7 +106,6 @@ mod tests {
             Err(CapabilityError::AppPermissionDenied(_))
         ));
 
-        // Peer denied
         let q3 = CapabilityQuery {
             capability: CapabilityId::FILE_TRANSFER,
             is_os_available: true,
@@ -121,7 +118,6 @@ mod tests {
             Err(CapabilityError::PeerDenied(_))
         ));
 
-        // Not in negotiated session set
         let q4 = CapabilityQuery {
             capability: CapabilityId::FILE_TRANSFER,
             is_os_available: true,

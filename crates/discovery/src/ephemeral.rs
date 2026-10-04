@@ -24,7 +24,6 @@ impl EphemeralDiscoveryId {
         Self { bytes }
     }
 
-    /// Access raw 16 bytes.
     pub fn as_bytes(&self) -> &[u8; 16] {
         &self.bytes
     }

@@ -40,7 +40,7 @@ async fn clipboard_e2e_sync_and_echo_suppression() {
     let receiver_sync = Arc::new(ClipboardSynchronizer::new());
     let recv_sync_clone = receiver_sync.clone();
 
-    // Receiver loop. It gets a clone so `server_conn` keeps the connection open
+    // The receiver gets a clone so `server_conn` keeps the connection open
     // until the sender has read the reply.
     let receiver_conn = server_conn.clone();
     let recv_handle = tokio::spawn(async move {
@@ -58,7 +58,6 @@ async fn clipboard_e2e_sync_and_echo_suppression() {
         assert_eq!(received.sequence_number, 1);
     });
 
-    // Sender
     let (mut client_send, mut client_recv) = client_conn.open_bi().await.unwrap();
 
     let sender_sync = ClipboardSynchronizer::new();
