@@ -56,6 +56,10 @@ namespace continue {
 
     ReceivedFfi? next_received(u32 timeout_ms);
 
+    sequence<IncomingFileFfi> list_incoming();
+
+    boolean cancel_incoming(string transfer_id);
+
     [Throws=ContinueFfiError]
     sequence<HistoryEntryFfi> list_history(u32 limit);
 
@@ -100,6 +104,14 @@ enum PermissionDecisionFfi {
     "Allow",
     "AlwaysAllow",
     "Decline",
+};
+
+dictionary IncomingFileFfi {
+    string transfer_id;
+    string peer_name;
+    string file_name;
+    u64 received;
+    u64 total;
 };
 
 dictionary ReceivedFfi {

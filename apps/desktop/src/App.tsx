@@ -40,6 +40,7 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import { ButtonGroup, DeviceGlyph, ProgressBar, Switch } from "./components.tsx";
 import {
+  cancelIncoming,
   clearHistory,
   connectToPeer,
   disconnectPeer,
@@ -48,12 +49,17 @@ import {
   getAutostart,
   getDeviceIdentity,
   getHistory,
+  getSaveFolder,
   getPermissions,
   getTrustedPeers,
+  listIncoming,
+  onIncomingEnded,
+  onIncomingProgress,
   openLink,
   openReceived,
   savePastedFile,
   setAutostart,
+  setSaveFolder,
   setClipboardSyncEnabled,
   removeTrustedPeer,
   sendClipboardText,
@@ -78,6 +84,7 @@ import {
   GRANT_OPTIONS,
   type Grant,
   type HistoryFilter,
+  type IncomingTransfer,
   isMac,
   MOD_KEY,
   MOD_SHIFT_KEY,
@@ -115,6 +122,34 @@ function writeStored(key: string, value: string | null) {
   } catch {
     // Storage can be unavailable in restrictive environments.
   }
+}
+
+/** Still going: being sent or coming in. */
+function isMoving(item: Activity) {
+  return item.status === "sending" || item.status === "receiving";
+}
+
+function fromIncoming(file: IncomingTransfer): Activity {
+  return {
+    id: `in-${file.transferId}`,
+    kind: "file",
+    label: file.fileName,
+    peerId: file.peerId,
+    peerName: file.peerName,
+    status: "receiving",
+    timestamp: Date.now(),
+    bytesSent: file.received,
+    totalBytes: file.total,
+    transferId: file.transferId,
+  };
+}
+
+/** Puts a file that's coming in at the top, or moves its row along. */
+function showIncoming(list: Activity[], file: IncomingTransfer): Activity[] {
+  const row = fromIncoming(file);
+  const existing = list.find((item) => item.id === row.id);
+  if (!existing) return [row, ...list];
+  return list.map((item) => (item.id === row.id ? { ...row, timestamp: existing.timestamp } : item));
 }
 
 function fromHistory(entry: HistoryEntry): Activity {
@@ -239,7 +274,7 @@ export default function App() {
         if (!active) return;
         setIdentity(loadedIdentity);
         setPeers(loadedPeers);
-        // Anything sent since the window opened stays on top.
+        // Anything sent or coming in since the window opened stays on top.
         setActivity((live) => [...live, ...history.map(fromHistory)]);
       })
       .catch((error) => active && setLoadError(errorMessage(error)));
@@ -251,6 +286,12 @@ export default function App() {
   useEffect(() => {
     if (!isTauri()) return;
     const cleanups: (() => void)[] = [];
+    let disposed = false;
+    // A listener can finish registering after cleanup has run; drop it straight away then.
+    const keep = (unlisten: () => void) => {
+      if (disposed) unlisten();
+      else cleanups.push(unlisten);
+    };
 
     const setupListeners = async () => {
       try {
@@ -261,10 +302,10 @@ export default function App() {
             showToast(`${event.payload.displayName} connected`);
           },
         );
-        cleanups.push(unPeer);
+        keep(unPeer);
 
         const unState = await listen("peer-state-changed", () => void refreshPeers());
-        cleanups.push(unState);
+        keep(unState);
 
         const unFile = await listen<{
           peerId: string;
@@ -293,7 +334,7 @@ export default function App() {
             ]);
           },
         );
-        cleanups.push(unFile);
+        keep(unFile);
 
         const unClip = await listen<{ peerId: string; peerName: string; content: string }>(
           "clipboard-received",
@@ -314,7 +355,32 @@ export default function App() {
             ]);
           },
         );
-        cleanups.push(unClip);
+        keep(unClip);
+
+        const ended = new Set<string>();
+        // An arrival also comes through file-received, which adds the finished row. Listened
+        // for before progress, so a file can't get a row whose end goes unheard.
+        const unEnded = await onIncomingEnded((transferId) => {
+          ended.add(transferId);
+          setActivity((prev) => prev.filter((item) => item.id !== `in-${transferId}`));
+        });
+        keep(unEnded);
+        const unProgress = await onIncomingProgress((file) => setActivity((prev) => showIncoming(prev, file)));
+        keep(unProgress);
+        // Only now, so nothing that starts meanwhile is missed. Events that arrived
+        // while this loaded are newer, so they win over the snapshot.
+        const incoming = await listIncoming();
+        if (!disposed) {
+          setActivity((prev) =>
+            incoming
+              .filter((file) => !ended.has(file.transferId))
+              .reduce(
+                (list, file) =>
+                  list.some((item) => item.id === `in-${file.transferId}`) ? list : showIncoming(list, file),
+                prev,
+              ),
+          );
+        }
 
         const unSynced = await listen<{ peerId: string; peerName: string; text: string; failed: boolean }>(
           "clipboard-synced",
@@ -332,7 +398,7 @@ export default function App() {
               ...prev,
             ]),
         );
-        cleanups.push(unSynced);
+        keep(unSynced);
       } catch {
         // Tauri events unsupported in current environment.
       }
@@ -340,6 +406,7 @@ export default function App() {
 
     void setupListeners();
     return () => {
+      disposed = true;
       for (const cleanup of cleanups) cleanup();
     };
   }, [refreshPeers, showToast]);
@@ -363,7 +430,7 @@ export default function App() {
   };
 
   const handleClearHistory = () => {
-    setActivity((prev) => prev.filter((item) => item.status === "sending"));
+    setActivity((prev) => prev.filter(isMoving));
     clearHistory().catch((error) => showError(errorMessage(error)));
   };
 
@@ -560,6 +627,7 @@ export default function App() {
     copy: copyToClipboard,
     open: (path, reveal) => openReceived(path, reveal).catch((error) => showError(errorMessage(error))),
     openLink: (url) => openLink(url).catch((error) => showError(errorMessage(error))),
+    cancelIncoming: (transferId) => cancelIncoming(transferId).catch((error) => showError(errorMessage(error))),
   };
 
   const chooseFilesRef = useRef(chooseFiles);
@@ -651,8 +719,8 @@ export default function App() {
   }
   if (peers === null) return null;
 
-  const activeTransfers = activity.filter((a) => a.status === "sending");
-  const recentActivity = activity.filter((a) => a.status !== "sending").slice(0, 5);
+  const activeTransfers = activity.filter(isMoving);
+  const recentActivity = activity.filter((a) => !isMoving(a)).slice(0, 5);
   const destinations = [
     { id: "transfer", label: "Home", icon: <Home size={22} />, badge: activeTransfers.length || null },
     { id: "devices", label: "Devices", icon: <Smartphone size={22} />, badge: null },
@@ -739,6 +807,7 @@ export default function App() {
               clipboardSync={clipboardSync}
               onClipboardSyncChange={setClipboardSync}
               onError={showError}
+              onOpenFolder={(folder) => rowActions.open(folder, false)}
             />
           )}
         </div>
@@ -776,6 +845,7 @@ interface RowActions {
   copy: (text: string) => void;
   open: (path: string, reveal: boolean) => void;
   openLink: (url: string) => void;
+  cancelIncoming: (transferId: string) => void;
 }
 
 /** Under a day heading (`underDay`), older rows show the time rather than repeat the day. */
@@ -787,9 +857,10 @@ function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: bo
       : formatRelativeTime(item.timestamp);
   const openable = item.status === "received" && item.kind === "file" ? item.path : undefined;
   const link = item.kind === "text" && item.status !== "sending" ? linkIn(item.label) : null;
-  const progress =
-    item.status === "sending" && item.totalBytes ? (item.bytesSent ?? 0) / item.totalBytes : null;
-  const who = item.status === "received" ? `From ${item.peerName}` : `To ${item.peerName}`;
+  const moving = isMoving(item);
+  const progress = moving && item.totalBytes ? (item.bytesSent ?? 0) / item.totalBytes : null;
+  const incoming = item.status === "received" || item.status === "receiving";
+  const who = incoming ? `From ${item.peerName}` : `To ${item.peerName}`;
   return (
     <li className={`list-item ${item.status}`}>
       <span className="list-leading">{item.kind === "file" ? getFileIcon(item.label) : <Type size={18} />}</span>
@@ -797,9 +868,9 @@ function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: bo
         <span className="list-title" title={item.label}>
           {item.label}
         </span>
-        {item.status === "sending" ? (
+        {moving ? (
           <>
-            <ProgressBar value={progress} label={`Sending ${item.label}`} />
+            <ProgressBar value={progress} label={`${incoming ? "Receiving" : "Sending"} ${item.label}`} />
             <span className="list-sub">
               {item.totalBytes
                 ? `${formatBytes(item.bytesSent ?? 0)} of ${formatBytes(item.totalBytes)}`
@@ -817,6 +888,15 @@ function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: bo
       </div>
       <div className="list-trailing">
         {progress !== null && <span className="status-text">{Math.round(progress * 100)}%</span>}
+        {item.status === "receiving" && item.transferId && (
+          <button
+            type="button"
+            className="btn btn-text btn-small"
+            onClick={() => item.transferId && actions.cancelIncoming(item.transferId)}
+          >
+            Cancel
+          </button>
+        )}
         {item.status === "failed" && (
           <>
             <span className="status-text error" title={item.error}>
@@ -1268,6 +1348,7 @@ interface SettingsViewProps {
   clipboardSync: boolean;
   onClipboardSyncChange: (on: boolean) => void;
   onError: (message: string) => void;
+  onOpenFolder: (folder: string) => void;
   theme: Theme;
   accent: AccentName;
   onThemeChange: (theme: Theme) => void;
@@ -1282,13 +1363,24 @@ const THEME_OPTIONS = [
 
 function SettingsView(props: SettingsViewProps) {
   const { identity, theme, accent, onThemeChange, onAccentChange, clipboardSync, onClipboardSyncChange, onError } = props;
+  const { onOpenFolder } = props;
   const [appVersion, setAppVersion] = useState("");
   const [startAtLogin, setStartAtLogin] = useState(false);
+  const [saveFolder, setSaveFolderShown] = useState("");
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => setAppVersion(""));
     getAutostart().then(setStartAtLogin).catch(() => {});
+    getSaveFolder().then(setSaveFolderShown).catch(() => {});
   }, []);
+
+  const chooseSaveFolder = async () => {
+    const picked = await openFileDialog({ directory: true, multiple: false, defaultPath: saveFolder || undefined });
+    if (typeof picked !== "string") return;
+    setSaveFolder(picked)
+      .then(setSaveFolderShown)
+      .catch((error) => onError(errorMessage(error)));
+  };
 
   const changeStartAtLogin = (on: boolean) => {
     setStartAtLogin(on);
@@ -1349,6 +1441,32 @@ function SettingsView(props: SettingsViewProps) {
             </span>
           </div>
           <Switch labelledBy="start-at-login-label" checked={startAtLogin} onChange={changeStartAtLogin} />
+        </li>
+      </ul>
+
+      <h2 className="label">Received files</h2>
+      <ul className="list">
+        <li className="list-item">
+          <div className="list-text">
+            <span className="list-title">Save to</span>
+            <span className="list-sub" title={saveFolder}>
+              {saveFolder}
+            </span>
+          </div>
+          <div className="list-trailing">
+            <button
+              type="button"
+              className="icon-btn"
+              title="Open folder"
+              disabled={!saveFolder}
+              onClick={() => onOpenFolder(saveFolder)}
+            >
+              <FolderOpen size={18} />
+            </button>
+            <button type="button" className="btn btn-tonal btn-small" onClick={chooseSaveFolder}>
+              Change
+            </button>
+          </div>
         </li>
       </ul>
 
