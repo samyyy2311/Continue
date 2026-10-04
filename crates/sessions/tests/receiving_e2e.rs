@@ -25,6 +25,22 @@ fn recording() -> (
     (handlers, incoming, heard)
 }
 
+/// Waits for the receiver to finish with the file, which can be just after the sender hears back.
+async fn until_ended(heard: &Mutex<Vec<IncomingEvent>>) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event, IncomingEvent::Ended { .. }))
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the receiver never finished with the file");
+}
+
 #[tokio::test]
 async fn progress_is_reported_from_start_to_finish() {
     let (handlers, incoming, heard) = recording();
@@ -32,6 +48,7 @@ async fn progress_is_reported_from_start_to_finish() {
     let link = link(handlers).await;
 
     assert!(send_sized(&link, "video.mp4", BIG).await);
+    until_ended(&heard).await;
 
     let heard = heard.lock().unwrap();
     let progress: Vec<_> = heard
@@ -52,7 +69,7 @@ async fn progress_is_reported_from_start_to_finish() {
 
 #[tokio::test]
 async fn cancelling_stops_the_file_and_tells_the_sender() {
-    let (handlers, incoming, _) = recording();
+    let (handlers, incoming, heard) = recording();
     let folder = handlers.save_folder.get();
     let link = link(handlers).await;
 
@@ -70,6 +87,7 @@ async fn cancelling_stops_the_file_and_tells_the_sender() {
 
     assert!(!send_sized(&link, "huge.iso", 4 * BIG).await);
     cancel.await.unwrap();
+    until_ended(&heard).await;
     assert!(incoming.list().is_empty());
     assert_eq!(std::fs::read_dir(folder).unwrap().count(), 0);
     assert!(!incoming.cancel("tx-huge.iso"), "nothing left to cancel");
