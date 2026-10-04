@@ -18,18 +18,19 @@ Continue ships as a desktop app (Windows, macOS, Linux) and an Android app, shar
 
 ## Where Continue is today
 
-Pairing and one-way sending work end to end. The pieces that make it usable every day do not exist yet.
+Phase 1 is done apart from device names: paired devices stay paired across restarts, find and reconnect to each other on their own, and send files and text both ways. Keys are kept in a file in the app's data folder, not yet in the platform's secret store.
 
 | Area | Works today | Missing |
 | --- | --- | --- |
 | Pairing | QR code or pasted code; signed, pinned and replay-protected | Nothing blocking |
-| Identity | Device keys are created at launch | Keys are not saved, so pairing breaks after a restart |
-| Connecting | Connect by typing the phone's IP address | Automatic discovery; the computer does not accept incoming connections |
-| Files | Send from computer to phone | Receiving, progress, a chosen save folder |
-| Text | Send text to the phone's clipboard | Receiving, automatic sync, saved history |
-| Notifications | Protocol and permission exist | Nothing shows them on the computer |
-| Permissions | Allow, Ask or Block per device for files, clipboard, notifications | Incoming streams do not check them yet |
-| History | List of what was sent this session | Saved across restarts |
+| Identity | Device keys are saved and reused, so pairing survives restarts | Keys live in a file in the app's data folder, not the platform's secret store |
+| Connecting | Each device listens for paired devices, finds them over mDNS and reconnects after a restart or dropped network | Nothing blocking |
+| Device names | Pairing works without them | Names aren't exchanged, so each side shows a placeholder for the other |
+| Files | Both ways, with progress, cancel, a chosen save folder and open-when-done | Resuming after a dropped connection |
+| Text | Clipboard sync both ways, automatic or manual | Images and clipboard history |
+| Notifications | Protocol and permission exist | The phone doesn't forward its notifications yet |
+| Permissions | Allow, Ask or Block per device, checked on every incoming file and text | Nothing blocking |
+| History | Everything sent and received, saved across restarts, with a clear button | Nothing blocking |
 
 The protocol runs over QUIC with TLS 1.3. Each device has an Ed25519 identity key and a separate transport key, and peers pin each other's transport key after pairing.
 
