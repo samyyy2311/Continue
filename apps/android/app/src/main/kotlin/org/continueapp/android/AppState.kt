@@ -11,6 +11,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.continueapp.bridge.ContinueCoreBridge
 import org.continueapp.bridge.ContinueException
 import org.continueapp.bridge.HistoryEntry
@@ -24,6 +25,8 @@ import java.util.UUID
 
 private const val RECENT_LIMIT = 20
 private const val QUESTION_WAIT_MS = 1_000L
+private const val CONNECT_WAIT_MS = 15_000L
+private const val CONNECT_POLL_MS = 250L
 
 enum class TransferKind { File, Text }
 
@@ -211,6 +214,22 @@ class AppState(private val bridge: ContinueCoreBridge) {
 
     suspend fun reconnect(peer: String): String? =
         run("Couldn't connect. Check that both are on the same Wi-Fi.") { bridge.reconnect(peer) }
+
+    /** Connects to [peer] and waits for the connection, for something about to be sent to it. */
+    suspend fun connectNow(peer: String): String? {
+        reconnect(peer)?.let { return it }
+        val connected = withTimeoutOrNull(CONNECT_WAIT_MS) { while (!isConnected(peer)) delay(CONNECT_POLL_MS) }
+        return if (connected == null) "Couldn't reach your computer. Check that both are on the same Wi-Fi." else null
+    }
+
+    private suspend fun isConnected(peer: String): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                bridge.isPeerConnected(peer)
+            } catch (_: ContinueException) {
+                false
+            }
+        }
 
     suspend fun forget(peer: String): String? {
         val failed = "Couldn't forget this computer. Try again."
