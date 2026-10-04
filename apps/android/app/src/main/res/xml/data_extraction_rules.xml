@@ -2,15 +2,25 @@
 <!--
     Android 12 and later. The device keys stay on this phone: copied to another, they would
     let it pose as this one, and the sealed copies can't be opened without this phone's
-    Keystore anyway. A restored or new phone gets new keys and pairs again.
+    Keystore anyway. A restored or new phone gets new keys and pairs again, so the database of
+    paired computers stays behind too: restored without the keys, it would list computers
+    that no longer accept this phone.
 -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="root" path="databases/secrets/" />
         <exclude domain="root" path="databases/sealed-keys/" />
+        <exclude domain="database" path="continue_android.db" />
+        <exclude domain="database" path="continue_android.db-journal" />
+        <exclude domain="database" path="continue_android.db-wal" />
+        <exclude domain="database" path="continue_android.db-shm" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="root" path="databases/secrets/" />
         <exclude domain="root" path="databases/sealed-keys/" />
+        <exclude domain="database" path="continue_android.db" />
+        <exclude domain="database" path="continue_android.db-journal" />
+        <exclude domain="database" path="continue_android.db-wal" />
+        <exclude domain="database" path="continue_android.db-shm" />
     </device-transfer>
 </data-extraction-rules>

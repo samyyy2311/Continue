@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 11 and earlier; see data_extraction_rules.xml for why the keys are left out. -->
+<!-- Android 11 and earlier; see data_extraction_rules.xml for what is left out and why. -->
 <full-backup-content>
     <exclude domain="root" path="databases/secrets/" />
     <exclude domain="root" path="databases/sealed-keys/" />
+    <exclude domain="database" path="continue_android.db" />
+    <exclude domain="database" path="continue_android.db-journal" />
+    <exclude domain="database" path="continue_android.db-wal" />
+    <exclude domain="database" path="continue_android.db-shm" />
 </full-backup-content>
