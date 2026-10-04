@@ -3,7 +3,7 @@
 
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use limits::{MAX_FRAME_TRANSFER_META_BYTES, TRANSFER_CHUNK_BYTES};
 use protocol::v1::{
@@ -59,6 +59,7 @@ where
         file_size,
         sha256_checksum: sha256_bytes.to_vec(),
         mime_type: String::new(),
+        resumable: true,
     };
     write_msg(send_stream, &req, MAX_FRAME_TRANSFER_META_BYTES).await?;
 
@@ -79,8 +80,20 @@ where
         }
     }
 
+    // Picks up after what the receiver kept from an earlier, interrupted attempt.
+    let resume_offset = resp.resume_offset;
+    if resume_offset > file_size {
+        return Err(TransferError::UnexpectedResponse);
+    }
+    if resume_offset > 0 {
+        file.seek(std::io::SeekFrom::Start(resume_offset)).await?;
+        if let Some(ref progress) = on_progress {
+            progress(resume_offset, file_size);
+        }
+    }
+
     let mut chunk = vec![0u8; TRANSFER_CHUNK_BYTES];
-    let mut bytes_sent = 0u64;
+    let mut bytes_sent = resume_offset;
     loop {
         let n = file.read(&mut chunk).await?;
         if n == 0 {

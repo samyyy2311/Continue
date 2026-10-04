@@ -11,6 +11,8 @@ message FileTransferRequest {
   uint64 file_size       = 3;
   bytes  sha256_checksum = 4;
   string mime_type       = 5;
+  // The sender can start part way through, at the response's resume_offset.
+  bool   resumable       = 6;
 }
 
 // Receiver response to a file transfer request.
@@ -18,6 +20,9 @@ message FileTransferResponse {
   string                 transfer_id = 1;
   TransferResponseStatus status      = 2;
   string                 reason      = 3;
+  // Bytes of this file the receiver already has from an earlier, interrupted attempt; the
+  // sender starts there. Only set when the request was resumable.
+  uint64                 resume_offset = 4;
 }
 
 enum TransferResponseStatus {

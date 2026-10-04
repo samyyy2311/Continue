@@ -5,6 +5,7 @@
 
 pub mod error;
 mod hex;
+mod partial;
 pub mod receiver;
 pub mod sanitizer;
 pub mod sender;
