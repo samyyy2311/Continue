@@ -269,13 +269,13 @@ export default function App() {
       return;
     }
     let active = true;
-    Promise.all([getDeviceIdentity(), getTrustedPeers(), getHistory(), listIncoming()])
-      .then(([loadedIdentity, loadedPeers, history, incoming]) => {
+    Promise.all([getDeviceIdentity(), getTrustedPeers(), getHistory()])
+      .then(([loadedIdentity, loadedPeers, history]) => {
         if (!active) return;
         setIdentity(loadedIdentity);
         setPeers(loadedPeers);
-        // Anything sent since the window opened stays on top, below files still coming in.
-        setActivity((live) => [...incoming.reduce(showIncoming, live), ...history.map(fromHistory)]);
+        // Anything sent or coming in since the window opened stays on top.
+        setActivity((live) => [...live, ...history.map(fromHistory)]);
       })
       .catch((error) => active && setLoadError(errorMessage(error)));
     return () => {
@@ -286,6 +286,7 @@ export default function App() {
   useEffect(() => {
     if (!isTauri()) return;
     const cleanups: (() => void)[] = [];
+    let disposed = false;
 
     const setupListeners = async () => {
       try {
@@ -351,13 +352,29 @@ export default function App() {
         );
         cleanups.push(unClip);
 
+        const ended = new Set<string>();
         const unProgress = await onIncomingProgress((file) => setActivity((prev) => showIncoming(prev, file)));
         cleanups.push(unProgress);
         // An arrival also comes through file-received, which adds the finished row.
-        const unEnded = await onIncomingEnded((transferId) =>
-          setActivity((prev) => prev.filter((item) => item.id !== `in-${transferId}`)),
-        );
+        const unEnded = await onIncomingEnded((transferId) => {
+          ended.add(transferId);
+          setActivity((prev) => prev.filter((item) => item.id !== `in-${transferId}`));
+        });
         cleanups.push(unEnded);
+        // Only now, so nothing that starts meanwhile is missed. Events that arrived
+        // while this loaded are newer, so they win over the snapshot.
+        const incoming = await listIncoming();
+        if (!disposed) {
+          setActivity((prev) =>
+            incoming
+              .filter((file) => !ended.has(file.transferId))
+              .reduce(
+                (list, file) =>
+                  list.some((item) => item.id === `in-${file.transferId}`) ? list : showIncoming(list, file),
+                prev,
+              ),
+          );
+        }
 
         const unSynced = await listen<{ peerId: string; peerName: string; text: string; failed: boolean }>(
           "clipboard-synced",
@@ -383,6 +400,7 @@ export default function App() {
 
     void setupListeners();
     return () => {
+      disposed = true;
       for (const cleanup of cleanups) cleanup();
     };
   }, [refreshPeers, showToast]);

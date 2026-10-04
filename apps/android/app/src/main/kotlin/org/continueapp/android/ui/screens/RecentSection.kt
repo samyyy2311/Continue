@@ -66,7 +66,7 @@ private fun ArrivingRow(
     file: IncomingFile,
     onCancel: () -> Unit,
 ) {
-    val fraction = if (file.total > 0) file.received.toFloat() / file.total else 0f
+    val fraction = if (file.total > 0) (file.received.toFloat() / file.total).coerceIn(0f, 1f) else 0f
     SettingsRow(
         title = file.fileName,
         icon = Icons.Outlined.Description,
