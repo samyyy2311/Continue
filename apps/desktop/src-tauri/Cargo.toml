@@ -20,6 +20,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 percent-encoding = "2"
 whoami = { version = "2", default-features = false, features = ["std"] }
+# The OS store for device keys: Keychain, Windows Credential Manager, Secret Service.
+keyring = { version = "3.6", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 tokio = { version = "1", features = ["sync", "time", "rt-multi-thread"] }
 crypto = { path = "../../../crates/crypto" }
 discovery = { path = "../../../crates/discovery" }

@@ -5,6 +5,7 @@
 
 mod clipboard_sync;
 mod receiving;
+mod secrets;
 mod tray;
 
 use clipboard_sync::ClipboardSync;
@@ -20,7 +21,7 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
 use history::{Direction, HistoryStore, Kind};
-use identity::{FileSecretStore, IdentitySigner};
+use identity::IdentitySigner;
 use pairing::{DeviceKeys, InitiatorPairing, ReplayCache, TrustStore};
 use permissions::PermissionStore;
 use protocol::CapabilityId;
@@ -1168,7 +1169,7 @@ fn initialize_desktop_runtime(
     let DeviceKeys {
         identity_signer,
         transport_cert,
-    } = DeviceKeys::load_or_create(&FileSecretStore::new(secrets_dir)?)?;
+    } = DeviceKeys::load_or_create(&secrets::device_key_store(secrets_dir)?)?;
 
     let peers = trust_store.list_peers()?;
     let initial_hashes: HashSet<[u8; 32]> = peers.iter().map(|p| p.transport_spki_hash).collect();

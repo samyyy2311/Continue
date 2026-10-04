@@ -3,11 +3,13 @@
 
 mod error;
 mod fingerprint;
+mod platform_first;
 mod signer;
 mod store;
 
 pub use error::{IdentityError, SecretStoreError, SignerError};
 pub use fingerprint::Fingerprint;
+pub use platform_first::PlatformFirstStore;
 pub use signer::{IdentitySigner, InMemorySigner};
 pub use store::{FileSecretStore, SecretStore};
 
