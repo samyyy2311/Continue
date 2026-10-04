@@ -658,3 +658,30 @@ async fn a_closed_duplicate_is_reconnected_not_taken_as_a_disconnect() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn connecting_twice_at_once_makes_one_connection() {
+    let (low, high) = pair();
+    let (first, second) = tokio::join!(
+        low.registry
+            .connect(HIGH, high.cert.spki_hash, high.listen_addr),
+        low.registry
+            .connect(HIGH, high.cert.spki_hash, high.listen_addr),
+    );
+    first.unwrap();
+    second.unwrap();
+
+    let session = low.registry.get(HIGH).expect("connected");
+    eventually("accepted", || high.registry.get(LOW).is_some()).await;
+    holds(
+        "the one connection stays",
+        Duration::from_millis(1000),
+        || {
+            low.registry
+                .get(HIGH)
+                .is_some_and(|now| Arc::ptr_eq(&now, &session))
+                && session.connection().close_reason().is_none()
+        },
+    )
+    .await;
+}

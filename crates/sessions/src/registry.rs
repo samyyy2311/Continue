@@ -149,9 +149,17 @@ impl SessionRegistry {
         spki_hash: [u8; 32],
         addr: SocketAddr,
     ) -> Result<(), TransportError> {
-        if self.get(peer).is_some() {
-            return Ok(());
-        }
+        // Another dial to the peer may be in flight; this one waits for it rather than racing
+        // it, and only dials if that one didn't connect.
+        let _claim = loop {
+            if self.get(peer).is_some() {
+                return Ok(());
+            }
+            if let Some(claim) = self.claim_dial(peer, spki_hash) {
+                break claim;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
         {
             let mut peers = self.peers();
             let entry = self.entry(&mut peers, peer, spki_hash);
