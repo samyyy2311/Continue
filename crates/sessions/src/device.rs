@@ -7,8 +7,7 @@ use std::sync::{Arc, RwLock};
 
 use protocol::v1::{DeviceInfo, Platform};
 
-/// Longest name kept, in UTF-8 bytes, as `DeviceInfo` allows.
-pub const MAX_NAME_BYTES: usize = 64;
+use limits::MAX_DEVICE_NAME_BYTES as MAX_NAME_BYTES;
 
 /// How this device introduces itself. Shared, so a rename reaches the next session.
 #[derive(Clone)]

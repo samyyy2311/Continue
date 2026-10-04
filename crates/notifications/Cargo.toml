@@ -11,10 +11,7 @@ protocol = { path = "../protocol" }
 capabilities = { path = "../capabilities" }
 transport = { path = "../transport" }
 quinn = { workspace = true }
-bytes = { workspace = true }
-prost = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 tokio = { workspace = true, features = ["net", "sync", "time"] }
 
 [dev-dependencies]

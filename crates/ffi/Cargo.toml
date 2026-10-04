@@ -31,7 +31,6 @@ protocol = { path = "../protocol" }
 transfer = { path = "../transfer" }
 clipboard = { path = "../clipboard" }
 notifications = { path = "../notifications" }
-limits = { path = "../limits" }
 history = { path = "../history" }
 uniffi = { workspace = true }
 quinn = { workspace = true }

@@ -485,9 +485,7 @@ version = "0.1.0"
 dependencies = [
  "limits",
  "protocol",
- "serde",
  "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
@@ -646,16 +644,13 @@ dependencies = [
 name = "clipboard"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "capabilities",
  "limits",
- "prost",
  "protocol",
  "quinn",
  "sha2",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
  "transport",
 ]
 
@@ -725,7 +720,6 @@ dependencies = [
  "capabilities",
  "clipboard",
  "clipboard-rs",
- "crypto",
  "discovery",
  "history",
  "identity",
@@ -747,11 +741,9 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "transfer",
  "transport",
  "whoami",
  "zeroize",
@@ -1122,10 +1114,8 @@ dependencies = [
 name = "discovery"
 version = "0.1.0"
 dependencies = [
- "flume",
  "limits",
  "mdns-sd",
- "protocol",
  "rand 0.8.8",
  "thiserror 1.0.69",
  "tokio",
@@ -2846,15 +2836,12 @@ dependencies = [
 name = "notifications"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "capabilities",
  "limits",
- "prost",
  "protocol",
  "quinn",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
  "transport",
 ]
 
@@ -3305,8 +3292,6 @@ dependencies = [
  "quinn",
  "rusqlite",
  "thiserror 1.0.69",
- "tokio",
- "tracing",
  "transport",
  "x25519-dalek",
  "zeroize",
@@ -3390,7 +3375,6 @@ dependencies = [
  "rusqlite",
  "serde",
  "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
@@ -3743,7 +3727,6 @@ name = "protocol"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "limits",
  "prost",
  "prost-build",
  "thiserror 1.0.69",
@@ -4536,7 +4519,6 @@ dependencies = [
  "notifications",
  "pairing",
  "permissions",
- "prost",
  "protocol",
  "quinn",
  "rand 0.8.8",
@@ -5639,14 +5621,12 @@ dependencies = [
 name = "transfer"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "limits",
  "protocol",
  "quinn",
  "sha2",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
  "transport",
 ]
 
@@ -5664,7 +5644,6 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
 ]
 
 [[package]]

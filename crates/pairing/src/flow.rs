@@ -123,7 +123,8 @@ impl InitiatorPairing {
         let resp: KeyExchangeResponse = read_msg(recv_stream, MAX_FRAME_PAIRING_BYTES).await?;
 
         // 2. Validate token and consume atomically from replay cache
-        if resp.session_token != expected_token {
+        let received: Option<[u8; 16]> = resp.session_token.as_slice().try_into().ok();
+        if !received.is_some_and(|token| crypto::token::tokens_equal(&token, &expected_token)) {
             return Err(PairingError::SessionTokenMismatch);
         }
         self.replay_cache.consume(&expected_token)?;

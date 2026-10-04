@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 //! Protocol constants, resource limits, and policy values.
@@ -45,20 +45,11 @@ pub const MAX_CAPABILITY_ENTRIES: usize = 128;
 
 // â”€â”€ Frame sizes (Protobuf control messages only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/// Discovery and pre-session control messages.
-pub const MAX_FRAME_DISCOVERY_BYTES: usize = 4 * 1024;
-
 /// Pairing protocol messages.
 pub const MAX_FRAME_PAIRING_BYTES: usize = 64 * 1024;
 
 /// Session control messages (Ping, Pong, Disconnect, SessionEnvelope).
 pub const MAX_FRAME_SESSION_BYTES: usize = 256 * 1024;
-
-/// Capability advertisement messages.
-pub const MAX_FRAME_CAPABILITY_BYTES: usize = 64 * 1024;
-
-/// Permission negotiation messages.
-pub const MAX_FRAME_PERMISSION_BYTES: usize = 64 * 1024;
 
 /// Transfer metadata messages (not file payload bytes).
 pub const MAX_FRAME_TRANSFER_META_BYTES: usize = 64 * 1024;
@@ -80,13 +71,7 @@ pub const MAX_TRANSFER_FILENAME_BYTES: usize = 512;
 /// not a Protobuf message size limit.
 pub const TRANSFER_CHUNK_BYTES: usize = 64 * 1024;
 
-/// Maximum number of concurrent file transfers.
-pub const MAX_CONCURRENT_TRANSFERS: usize = 8;
-
 // â”€â”€ Session â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-/// Maximum queued requests before backpressure is applied.
-pub const MAX_PENDING_REQUESTS: usize = 32;
 
 // â”€â”€ Timeouts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 

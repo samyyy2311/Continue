@@ -9,5 +9,3 @@ publish = false
 limits = { path = "../limits" }
 protocol = { path = "../protocol" }
 thiserror = { workspace = true }
-tracing = { workspace = true }
-serde = { workspace = true }

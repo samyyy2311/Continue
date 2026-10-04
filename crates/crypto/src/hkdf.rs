@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 //! HKDF-based key derivation for pairing, session, and confirmation keys.
@@ -15,8 +15,6 @@ type Key32 = Zeroizing<[u8; 32]>;
 /// Using a distinct constant for each key purpose prevents key confusion.
 pub const INFO_CONFIRMATION_KEY: &[u8] = b"CONFIRM_KEY_V1";
 pub const INFO_SESSION_KEY: &[u8] = b"SESSION_KEY_V1";
-pub const INFO_RELAY_A_TO_B: &[u8] = b"RELAY_A_TO_B_V1";
-pub const INFO_RELAY_B_TO_A: &[u8] = b"RELAY_B_TO_A_V1";
 
 /// Derive a 32-byte key from an ECDH output and a salt.
 ///

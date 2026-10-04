@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 use thiserror::Error;
@@ -17,8 +17,6 @@ pub enum CryptoError {
     #[error("invalid key material: {0}")]
     InvalidKey(&'static str),
 
-    #[error("signature verification failed")]
-    SignatureInvalid,
 
     #[error("pairing transcript mismatch")]
     TranscriptMismatch,

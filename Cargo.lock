@@ -237,9 +237,7 @@ version = "0.1.0"
 dependencies = [
  "limits",
  "protocol",
- "serde",
  "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
@@ -379,12 +377,10 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 name = "clipboard"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "capabilities",
  "crypto",
  "identity",
  "limits",
- "prost",
  "protocol",
  "quinn",
  "rcgen",
@@ -392,7 +388,6 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
  "transport",
 ]
 
@@ -562,10 +557,8 @@ dependencies = [
 name = "discovery"
 version = "0.1.0"
 dependencies = [
- "flume",
  "limits",
  "mdns-sd",
- "protocol",
  "rand 0.8.8",
  "thiserror 1.0.69",
  "tokio",
@@ -665,7 +658,6 @@ dependencies = [
  "discovery",
  "history",
  "identity",
- "limits",
  "notifications",
  "pairing",
  "permissions",
@@ -1146,19 +1138,16 @@ dependencies = [
 name = "notifications"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "capabilities",
  "crypto",
  "identity",
  "limits",
- "prost",
  "protocol",
  "quinn",
  "rcgen",
  "rustls",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
  "transport",
 ]
 
@@ -1215,8 +1204,6 @@ dependencies = [
  "rand 0.8.8",
  "rusqlite",
  "thiserror 1.0.69",
- "tokio",
- "tracing",
  "transport",
  "x25519-dalek",
  "zeroize",
@@ -1264,10 +1251,7 @@ dependencies = [
  "limits",
  "notifications",
  "pairing",
- "permissions",
- "prost",
  "protocol",
- "quinn",
  "sessions",
  "tokio",
  "tracing",
@@ -1295,7 +1279,6 @@ dependencies = [
  "rusqlite",
  "serde",
  "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
@@ -1460,7 +1443,6 @@ name = "protocol"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "limits",
  "prost",
  "prost-build",
  "thiserror 1.0.69",
@@ -1918,7 +1900,6 @@ dependencies = [
  "notifications",
  "pairing",
  "permissions",
- "prost",
  "protocol",
  "quinn",
  "rand 0.8.8",
@@ -2301,7 +2282,6 @@ dependencies = [
 name = "transfer"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "limits",
  "protocol",
  "quinn",
@@ -2311,7 +2291,6 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
  "transport",
 ]
 
@@ -2329,7 +2308,6 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
 ]
 
 [[package]]

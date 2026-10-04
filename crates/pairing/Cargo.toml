@@ -17,9 +17,7 @@ quinn = { workspace = true }
 ed25519-dalek = { workspace = true }
 x25519-dalek = { workspace = true }
 zeroize = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time"] }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }

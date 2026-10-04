@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 use serde::{Deserialize, Serialize};
@@ -46,11 +46,5 @@ impl From<PersistedGrant> for PermissionState {
             PersistedGrant::Deny => Self::Deny,
             PersistedGrant::Ask => Self::Ask,
         }
-    }
-}
-
-impl PermissionState {
-    pub fn is_allowed(&self) -> bool {
-        matches!(self, Self::Allow | Self::AllowOnce)
     }
 }
