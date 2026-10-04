@@ -287,6 +287,11 @@ export default function App() {
     if (!isTauri()) return;
     const cleanups: (() => void)[] = [];
     let disposed = false;
+    // A listener can finish registering after cleanup has run; drop it straight away then.
+    const keep = (unlisten: () => void) => {
+      if (disposed) unlisten();
+      else cleanups.push(unlisten);
+    };
 
     const setupListeners = async () => {
       try {
@@ -297,10 +302,10 @@ export default function App() {
             showToast(`${event.payload.displayName} connected`);
           },
         );
-        cleanups.push(unPeer);
+        keep(unPeer);
 
         const unState = await listen("peer-state-changed", () => void refreshPeers());
-        cleanups.push(unState);
+        keep(unState);
 
         const unFile = await listen<{
           peerId: string;
@@ -329,7 +334,7 @@ export default function App() {
             ]);
           },
         );
-        cleanups.push(unFile);
+        keep(unFile);
 
         const unClip = await listen<{ peerId: string; peerName: string; content: string }>(
           "clipboard-received",
@@ -350,17 +355,18 @@ export default function App() {
             ]);
           },
         );
-        cleanups.push(unClip);
+        keep(unClip);
 
         const ended = new Set<string>();
-        const unProgress = await onIncomingProgress((file) => setActivity((prev) => showIncoming(prev, file)));
-        cleanups.push(unProgress);
-        // An arrival also comes through file-received, which adds the finished row.
+        // An arrival also comes through file-received, which adds the finished row. Listened
+        // for before progress, so a file can't get a row whose end goes unheard.
         const unEnded = await onIncomingEnded((transferId) => {
           ended.add(transferId);
           setActivity((prev) => prev.filter((item) => item.id !== `in-${transferId}`));
         });
-        cleanups.push(unEnded);
+        keep(unEnded);
+        const unProgress = await onIncomingProgress((file) => setActivity((prev) => showIncoming(prev, file)));
+        keep(unProgress);
         // Only now, so nothing that starts meanwhile is missed. Events that arrived
         // while this loaded are newer, so they win over the snapshot.
         const incoming = await listIncoming();
@@ -392,7 +398,7 @@ export default function App() {
               ...prev,
             ]),
         );
-        cleanups.push(unSynced);
+        keep(unSynced);
       } catch {
         // Tauri events unsupported in current environment.
       }
