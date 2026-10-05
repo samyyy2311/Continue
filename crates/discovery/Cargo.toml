@@ -7,10 +7,9 @@ publish = false
 
 [dependencies]
 limits = { path = "../limits" }
-protocol = { path = "../protocol" }
-mdns-sd = "0.11"
-flume = { version = "0.11", default-features = false, features = ["async"] }
+mdns-sd = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
 rand = { workspace = true }
+hex = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

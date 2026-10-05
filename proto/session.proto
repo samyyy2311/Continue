@@ -4,6 +4,8 @@ syntax = "proto3";
 
 package continue.v1;
 
+import "device.proto";
+
 // Outer envelope for application-layer session messages.
 // All post-pairing messages are wrapped in a SessionEnvelope on the
 // control QUIC stream.
@@ -12,6 +14,9 @@ message SessionEnvelope {
     Ping       ping       = 1;
     Pong       pong       = 2;
     Disconnect disconnect = 3;
+    // Sent by each side when a session starts, so names stay current after a rename.
+    // The sender is the authenticated peer; its fingerprint and key fields are ignored.
+    DeviceInfo device_info = 4;
   }
 }
 
@@ -34,4 +39,7 @@ enum DisconnectReason {
   DISCONNECT_REASON_ERROR          = 2;
   DISCONNECT_REASON_PROTOCOL       = 3;
   DISCONNECT_REASON_UNAUTHORIZED   = 4;
+  // One of two connections to the same peer, closed because the other is kept. Unlike
+  // NORMAL it doesn't mean the peer was disconnected on purpose.
+  DISCONNECT_REASON_REDUNDANT      = 5;
 }

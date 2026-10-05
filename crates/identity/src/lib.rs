@@ -3,11 +3,13 @@
 
 mod error;
 mod fingerprint;
+mod platform_first;
 mod signer;
 mod store;
 
 pub use error::{IdentityError, SecretStoreError, SignerError};
 pub use fingerprint::Fingerprint;
+pub use platform_first::PlatformFirstStore;
 pub use signer::{IdentitySigner, InMemorySigner};
 pub use store::{FileSecretStore, SecretStore};
 
@@ -20,8 +22,6 @@ use zeroize::Zeroizing;
 /// On first run, a new seed is generated and stored via `SecretStore`.
 /// On subsequent runs, the existing seed is loaded, used to construct the keypair,
 /// and then zeroized from memory.
-///
-/// Returns a boxed `IdentitySigner` ready for use.
 pub fn load_or_create_identity(
     store: &dyn SecretStore,
     label: &str,

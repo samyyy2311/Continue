@@ -22,7 +22,6 @@ tokio = { workspace = true, features = ["sync", "time", "rt", "net", "macros"] }
 rand = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-prost = { workspace = true }
 
 [dev-dependencies]
 crypto = { path = "../crypto" }

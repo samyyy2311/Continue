@@ -101,7 +101,7 @@ const THEME_KEY = "continue.theme";
 const PEER_KEY = "continue.peer";
 const CLIPBOARD_SYNC_KEY = "continue.clipboardSync";
 
-/** Storage can be unavailable in restrictive environments, so reads fall back to nothing. */
+/** Storage can be unavailable in restrictive environments, so reads and writes do without. */
 function readStored(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -120,7 +120,7 @@ function writeStored(key: string, value: string | null) {
     if (value === null) localStorage.removeItem(key);
     else localStorage.setItem(key, value);
   } catch {
-    // Storage can be unavailable in restrictive environments.
+    // See readStored.
   }
 }
 
@@ -306,6 +306,9 @@ export default function App() {
 
         const unState = await listen("peer-state-changed", () => void refreshPeers());
         keep(unState);
+        // A device says its name just after connecting, and again after a rename.
+        const unRenamed = await listen("peer-renamed", () => void refreshPeers());
+        keep(unRenamed);
 
         const unFile = await listen<{
           peerId: string;
@@ -400,7 +403,7 @@ export default function App() {
         );
         keep(unSynced);
       } catch {
-        // Tauri events unsupported in current environment.
+        // Outside Tauri, e.g. in a browser preview, there are no events to hear.
       }
     };
 
@@ -1531,7 +1534,6 @@ function SettingsView(props: SettingsViewProps) {
 }
 
 /** Paired devices connect on their own; this is the fallback for when they can't find each other. */
-/** Connect normally, or by typing the address when the devices can't find each other. */
 function ManualConnect(props: {
   initialAddress?: string;
   isConnecting: boolean;

@@ -14,6 +14,20 @@ pub struct CapabilityQuery {
     pub negotiated_session_capabilities: HashSet<CapabilityId>,
 }
 
+impl CapabilityQuery {
+    /// A query for `capability` on a session that negotiated it, on a device and app able to
+    /// use it, so the only open question is whether the peer is authorized.
+    pub fn negotiated(capability: CapabilityId, is_peer_authorized: bool) -> Self {
+        Self {
+            capability,
+            is_os_available: true,
+            is_app_permitted: true,
+            is_peer_authorized,
+            negotiated_session_capabilities: HashSet::from([capability]),
+        }
+    }
+}
+
 /// Evaluates capability permission across the four required independent security boundaries:
 ///
 /// 1. OS Availability: Is the platform hardware / OS API supported?
@@ -68,7 +82,6 @@ mod tests {
         let mut caps = HashSet::new();
         caps.insert(CapabilityId::FILE_TRANSFER);
 
-        // OS unavailable
         let q1 = CapabilityQuery {
             capability: CapabilityId::FILE_TRANSFER,
             is_os_available: false,
@@ -81,7 +94,6 @@ mod tests {
             Err(CapabilityError::OsUnavailable(_))
         ));
 
-        // App permission denied
         let q2 = CapabilityQuery {
             capability: CapabilityId::FILE_TRANSFER,
             is_os_available: true,
@@ -94,7 +106,6 @@ mod tests {
             Err(CapabilityError::AppPermissionDenied(_))
         ));
 
-        // Peer denied
         let q3 = CapabilityQuery {
             capability: CapabilityId::FILE_TRANSFER,
             is_os_available: true,
@@ -107,7 +118,6 @@ mod tests {
             Err(CapabilityError::PeerDenied(_))
         ));
 
-        // Not in negotiated session set
         let q4 = CapabilityQuery {
             capability: CapabilityId::FILE_TRANSFER,
             is_os_available: true,

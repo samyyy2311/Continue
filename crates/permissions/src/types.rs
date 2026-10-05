@@ -1,4 +1,4 @@
-﻿// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,24 @@ pub enum PermissionState {
     AllowOnce,
 }
 
+impl PermissionState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Allow => "Allow",
+            Self::Deny => "Deny",
+            Self::Ask => "Ask",
+            Self::AllowOnce => "AllowOnce",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "AllowOnce" => Some(Self::AllowOnce),
+            _ => PersistedGrant::parse(s).map(Self::from),
+        }
+    }
+}
+
 impl From<PersistedGrant> for PermissionState {
     fn from(grant: PersistedGrant) -> Self {
         match grant {
@@ -46,11 +64,5 @@ impl From<PersistedGrant> for PermissionState {
             PersistedGrant::Deny => Self::Deny,
             PersistedGrant::Ask => Self::Ask,
         }
-    }
-}
-
-impl PermissionState {
-    pub fn is_allowed(&self) -> bool {
-        matches!(self, Self::Allow | Self::AllowOnce)
     }
 }

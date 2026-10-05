@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
@@ -13,7 +13,7 @@ use protocol::v1::{
 use transport::{read_msg, write_msg};
 
 use crate::error::TransferError;
-use crate::hex::hex_encode;
+use crate::partial;
 use crate::sanitizer::sanitize_filename;
 
 /// Told to the sender when the receiver stops a transfer part way.
@@ -32,8 +32,10 @@ pub struct ReceivedFile {
 ///
 /// `permission_checker` sees the request before anything is written and may take its time,
 /// e.g. to ask the user; the sender waits for the answer. Once accepted, `on_progress` hears
-/// how many bytes have arrived, starting at 0. When `stop` finishes first, the transfer is
-/// abandoned, the partial file removed and the sender told.
+/// how many bytes have arrived, starting with what an earlier, interrupted attempt at the
+/// same file left (0 for a new one). When `stop` finishes first, the transfer is abandoned,
+/// the partial file removed and the sender told. When the connection drops instead, a
+/// resumable request's partial file is kept for the next attempt.
 pub async fn receive_file<P, Fut, F, S>(
     send_stream: &mut quinn::SendStream,
     recv_stream: &mut quinn::RecvStream,
@@ -57,6 +59,7 @@ where
                 transfer_id: req.transfer_id,
                 status: TransferResponseStatus::Rejected as i32,
                 reason: e.to_string(),
+                resume_offset: 0,
             };
             write_msg(send_stream, &resp, MAX_FRAME_TRANSFER_META_BYTES).await?;
             return Err(e);
@@ -69,6 +72,7 @@ where
                 transfer_id: req.transfer_id,
                 status: TransferResponseStatus::Rejected as i32,
                 reason: "Permission denied".to_string(),
+                resume_offset: 0,
             };
             write_msg(send_stream, &resp, MAX_FRAME_TRANSFER_META_BYTES).await?;
             return Err(TransferError::Rejected("Permission denied".to_string()));
@@ -76,23 +80,33 @@ where
     }
 
     tokio::fs::create_dir_all(destination_dir).await?;
+    partial::prune_stale(destination_dir).await;
 
     // Isolate incoming payload in temporary file until checksum and length are verified.
-    let part_path = destination_dir.join(format!("{}.continue_part", req.transfer_id));
-    let mut part_file = tokio::fs::File::create(&part_path).await?;
+    let part = partial::claim_for(destination_dir, &req);
+    let part_path = part.path.clone();
+    let (resume_offset, mut hasher) = partial::already_received(&part, req.file_size).await;
+    let mut part_file = if resume_offset > 0 {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&part_path)
+            .await?
+    } else {
+        tokio::fs::File::create(&part_path).await?
+    };
 
     let resp = FileTransferResponse {
         transfer_id: req.transfer_id.clone(),
         status: TransferResponseStatus::Accepted as i32,
         reason: String::new(),
+        resume_offset,
     };
     write_msg(send_stream, &resp, MAX_FRAME_TRANSFER_META_BYTES).await?;
     if let Some(ref progress) = on_progress {
-        progress(&req, 0);
+        progress(&req, resume_offset);
     }
 
-    let mut hasher = Sha256::new();
-    let mut total_received = 0u64;
+    let mut total_received = resume_offset;
     let mut chunk = vec![0u8; TRANSFER_CHUNK_BYTES];
 
     let copy = async {
@@ -124,7 +138,10 @@ where
     drop(part_file);
 
     if let Err(e) = stream_result {
-        let _ = tokio::fs::remove_file(&part_path).await;
+        // Kept for a later attempt only when the connection, not the user, ended it.
+        if !part.resumable || matches!(e, TransferError::Cancelled) {
+            let _ = tokio::fs::remove_file(&part_path).await;
+        }
         return Err(e);
     }
 
@@ -152,8 +169,8 @@ where
         };
         let _ = write_msg(send_stream, &ack, MAX_FRAME_TRANSFER_META_BYTES).await;
         return Err(TransferError::ChecksumMismatch {
-            expected: hex_encode(&req.sha256_checksum),
-            actual: hex_encode(actual_hash),
+            expected: hex::encode(&req.sha256_checksum),
+            actual: hex::encode(actual_hash),
         });
     }
 

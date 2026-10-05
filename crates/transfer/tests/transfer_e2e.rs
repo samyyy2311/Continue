@@ -14,12 +14,11 @@ async fn file_transfer_e2e_success() {
     tokio::fs::create_dir_all(&send_dir).await.unwrap();
     tokio::fs::create_dir_all(&recv_dir).await.unwrap();
 
-    // Create 150 KB test file (spans multiple 64 KB chunks)
+    // Spans several chunks.
     let test_file = send_dir.join("sample_document.pdf");
     let test_data = vec![0xABu8; 150 * 1024];
     tokio::fs::write(&test_file, &test_data).await.unwrap();
 
-    // Setup TLS certificates
     let server_cert = TransportCertificate::generate().unwrap();
     let client_cert = TransportCertificate::generate().unwrap();
 
@@ -37,7 +36,6 @@ async fn file_transfer_e2e_success() {
     let client_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let client_endpoint = create_client_endpoint(client_addr, client_tls).unwrap();
 
-    // Server receiver task
     let recv_dir_clone = recv_dir.clone();
     let recv_handle = tokio::spawn(async move {
         let incoming = server_endpoint.accept().await.expect("incoming conn");
@@ -57,7 +55,6 @@ async fn file_transfer_e2e_success() {
         (result, conn)
     });
 
-    // Client sender task
     let client_conn = client_endpoint
         .connect(bound_addr, "continue-device")
         .unwrap()
@@ -82,11 +79,9 @@ async fn file_transfer_e2e_success() {
     assert_eq!(recv_result.bytes_received, 150 * 1024);
     assert_eq!(recv_result.file_name, "sample_document.pdf");
 
-    // Verify written file contents on disk
     let written = tokio::fs::read(&recv_result.path).await.unwrap();
     assert_eq!(written, test_data);
 
-    // Clean up
     let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 }
 

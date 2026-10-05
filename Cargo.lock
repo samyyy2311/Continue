@@ -237,9 +237,7 @@ version = "0.1.0"
 dependencies = [
  "limits",
  "protocol",
- "serde",
  "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
@@ -379,12 +377,10 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 name = "clipboard"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "capabilities",
  "crypto",
  "identity",
  "limits",
- "prost",
  "protocol",
  "quinn",
  "rcgen",
@@ -392,7 +388,6 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
  "transport",
 ]
 
@@ -548,6 +543,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 
 [[package]]
+name = "device"
+version = "0.1.0"
+dependencies = [
+ "capabilities",
+ "clipboard",
+ "discovery",
+ "history",
+ "identity",
+ "notifications",
+ "pairing",
+ "permissions",
+ "protocol",
+ "quinn",
+ "sessions",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "transfer",
+ "transport",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -562,10 +579,9 @@ dependencies = [
 name = "discovery"
 version = "0.1.0"
 dependencies = [
- "flume",
+ "hex",
  "limits",
  "mdns-sd",
- "protocol",
  "rand 0.8.8",
  "thiserror 1.0.69",
  "tokio",
@@ -659,14 +675,11 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 name = "ffi"
 version = "0.1.0"
 dependencies = [
- "capabilities",
- "clipboard",
  "crypto",
- "discovery",
+ "device",
+ "hex",
  "history",
  "identity",
- "limits",
- "notifications",
  "pairing",
  "permissions",
  "protocol",
@@ -674,10 +687,10 @@ dependencies = [
  "sessions",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
  "transfer",
  "transport",
  "uniffi",
+ "zeroize",
 ]
 
 [[package]]
@@ -843,6 +856,12 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "history"
@@ -1145,19 +1164,16 @@ dependencies = [
 name = "notifications"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "capabilities",
  "crypto",
  "identity",
  "limits",
- "prost",
  "protocol",
  "quinn",
  "rcgen",
  "rustls",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
  "transport",
 ]
 
@@ -1214,8 +1230,6 @@ dependencies = [
  "rand 0.8.8",
  "rusqlite",
  "thiserror 1.0.69",
- "tokio",
- "tracing",
  "transport",
  "x25519-dalek",
  "zeroize",
@@ -1263,10 +1277,7 @@ dependencies = [
  "limits",
  "notifications",
  "pairing",
- "permissions",
- "prost",
  "protocol",
- "quinn",
  "sessions",
  "tokio",
  "tracing",
@@ -1294,7 +1305,6 @@ dependencies = [
  "rusqlite",
  "serde",
  "thiserror 1.0.69",
- "tracing",
 ]
 
 [[package]]
@@ -1459,7 +1469,6 @@ name = "protocol"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "limits",
  "prost",
  "prost-build",
  "thiserror 1.0.69",
@@ -1917,7 +1926,6 @@ dependencies = [
  "notifications",
  "pairing",
  "permissions",
- "prost",
  "protocol",
  "quinn",
  "rand 0.8.8",
@@ -2300,7 +2308,7 @@ dependencies = [
 name = "transfer"
 version = "0.1.0"
 dependencies = [
- "bytes",
+ "hex",
  "limits",
  "protocol",
  "quinn",
@@ -2310,7 +2318,6 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
  "transport",
 ]
 
@@ -2328,7 +2335,6 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
 ]
 
 [[package]]

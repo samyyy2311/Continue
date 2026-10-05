@@ -46,4 +46,7 @@ pub enum TransferError {
 
     #[error("Cancelled")]
     Cancelled,
+
+    #[error("Not connected to that device")]
+    NotConnected,
 }

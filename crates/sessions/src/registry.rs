@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -19,6 +20,9 @@ use crate::session::Session;
 use crate::state::SessionState;
 
 const STREAM_BUFFER: usize = 16;
+
+/// How long a file being sent waits for a dropped connection to come back before giving up.
+pub const RESEND_WAIT: Duration = Duration::from_secs(120);
 
 /// Which side opened a connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +47,24 @@ struct Entry {
     reconnect_episode: u64,
     /// Set when either user ended the session, so discovery doesn't reconnect it.
     ended_on_purpose: bool,
+    /// Set while this device is dialing the peer, so the discovery, saved-address and
+    /// reconnect loops never have two dials to it in flight.
+    dialing: bool,
+}
+
+/// This device's one dial to a peer; ends the claim when dropped, even if the dial is
+/// cancelled midway.
+struct DialClaim {
+    registry: SessionRegistry,
+    peer: String,
+}
+
+impl Drop for DialClaim {
+    fn drop(&mut self) {
+        if let Some(entry) = self.registry.peers().get_mut(&self.peer) {
+            entry.dialing = false;
+        }
+    }
 }
 
 struct Inner {
@@ -131,9 +153,17 @@ impl SessionRegistry {
         spki_hash: [u8; 32],
         addr: SocketAddr,
     ) -> Result<(), TransportError> {
-        if self.get(peer).is_some() {
-            return Ok(());
-        }
+        // Another dial to the peer may be in flight; this one waits for it rather than racing
+        // it, and only dials if that one didn't connect.
+        let _claim = loop {
+            if self.get(peer).is_some() {
+                return Ok(());
+            }
+            if let Some(claim) = self.claim_dial(peer, spki_hash) {
+                break claim;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
         {
             let mut peers = self.peers();
             let entry = self.entry(&mut peers, peer, spki_hash);
@@ -188,6 +218,10 @@ impl SessionRegistry {
         addresses: &[SocketAddr],
         still_trusted: impl Fn() -> bool,
     ) -> Option<SocketAddr> {
+        if !self.wants_discovered(peer) || !still_trusted() {
+            return None;
+        }
+        let _claim = self.claim_dial(peer, spki_hash)?;
         for &addr in addresses {
             if !self.wants_discovered(peer) || !still_trusted() {
                 return None;
@@ -201,8 +235,10 @@ impl SessionRegistry {
             .await
             {
                 Ok(connection) => {
-                    if !self.wants_discovered(peer) || !still_trusted() {
-                        connection.close(close_code(DisconnectReason::Normal), b"not needed");
+                    // If the peer dialed in meanwhile, `attach` picks the same connection on
+                    // both sides; closing this one here could close the one the peer kept.
+                    if !self.still_wanted(peer) || !still_trusted() {
+                        connection.close(close_code(DisconnectReason::Redundant), b"not needed");
                         return None;
                     }
                     self.entry(&mut self.peers(), peer, spki_hash)
@@ -221,6 +257,28 @@ impl SessionRegistry {
             && self.peers().get(peer).is_none_or(|entry| {
                 !entry.ended_on_purpose && entry.session.state != SessionState::Connecting
             })
+    }
+
+    /// Whether a connection to `peer` that just succeeded should be kept: it is still paired
+    /// and wasn't disconnected on purpose meanwhile.
+    fn still_wanted(&self, peer: &str) -> bool {
+        self.peers()
+            .get(peer)
+            .is_some_and(|entry| !entry.ended_on_purpose)
+    }
+
+    /// Claims the right to dial `peer`, or `None` if this device is already dialing it.
+    fn claim_dial(&self, peer: &str, spki_hash: [u8; 32]) -> Option<DialClaim> {
+        let mut peers = self.peers();
+        let entry = self.entry(&mut peers, peer, spki_hash);
+        if entry.dialing {
+            return None;
+        }
+        entry.dialing = true;
+        Some(DialClaim {
+            registry: self.clone(),
+            peer: peer.to_string(),
+        })
     }
 
     /// Adopt an authenticated connection as the peer's session. Returns false if an existing
@@ -245,12 +303,12 @@ impl SessionRegistry {
                 if !self.replaces(peer, direction, entry) {
                     debug!("Keeping the existing connection to {peer}; closing the new one");
                     mux.connection()
-                        .close(close_code(DisconnectReason::Normal), b"duplicate");
+                        .close(close_code(DisconnectReason::Redundant), b"duplicate");
                     return false;
                 }
                 existing
                     .connection()
-                    .close(close_code(DisconnectReason::Normal), b"duplicate");
+                    .close(close_code(DisconnectReason::Redundant), b"duplicate");
             }
             entry.session.peer_transport_spki_hash = spki_hash;
             entry.session.attach_connection(mux.clone());
@@ -261,10 +319,86 @@ impl SessionRegistry {
 
         mux.spawn_keepalive_sender();
         spawn_capabilities_dispatcher(mux.clone(), self.inner.handlers.clone(), STREAM_BUFFER);
+        let introduction = {
+            let (mux, info) = (
+                mux.clone(),
+                self.inner
+                    .handlers
+                    .this_device
+                    .info(&self.inner.local_fingerprint),
+            );
+            async move { mux.send_device_info(info).await }
+        };
+        tokio::spawn(introduction);
         self.watch(peer.to_string(), mux);
         self.notify(peer, SessionState::Connected);
         info!("Session established with {peer} ({direction:?})");
         true
+    }
+
+    /// Sends a file to `peer`. If the connection drops part way, it waits up to `RESEND_WAIT`
+    /// for the peer to be connected again and sends the rest, carrying on where it stopped.
+    /// It doesn't try again after anything else: the receiver cancelling or refusing it, or
+    /// either side disconnecting on purpose.
+    pub async fn send_file<F>(
+        &self,
+        peer: &str,
+        file_path: &Path,
+        transfer_id: String,
+        on_progress: Option<F>,
+    ) -> Result<u64, transfer::TransferError>
+    where
+        F: Fn(u64, u64),
+    {
+        let mut mux = self
+            .get(peer)
+            .ok_or(transfer::TransferError::NotConnected)?;
+        loop {
+            let error = match mux
+                .send_file_to_peer(file_path, transfer_id.clone(), on_progress.as_ref())
+                .await
+            {
+                Ok(sent) => return Ok(sent),
+                Err(error) => error,
+            };
+            // A connection still up means the transfer itself failed, e.g. it was cancelled.
+            if mux.connection().close_reason().is_none() {
+                return Err(error);
+            }
+            debug!("Lost the connection to {peer} while sending; waiting for it to come back");
+            match self.next_connection(peer, &mux).await {
+                Some(next) => mux = next,
+                None => return Err(error),
+            }
+        }
+    }
+
+    /// The connection that replaces `lost`, once there is one, unless the peer was
+    /// disconnected on purpose or `RESEND_WAIT` runs out first.
+    async fn next_connection(
+        &self,
+        peer: &str,
+        lost: &Arc<SessionMultiplexer>,
+    ) -> Option<Arc<SessionMultiplexer>> {
+        let deadline = Instant::now() + RESEND_WAIT;
+        while Instant::now() < deadline {
+            let on_purpose = lost
+                .connection()
+                .close_reason()
+                .is_some_and(|reason| lost.ended_by_peer(&reason))
+                || self
+                    .peers()
+                    .get(peer)
+                    .is_none_or(|entry| entry.ended_on_purpose);
+            if on_purpose {
+                return None;
+            }
+            if let Some(next) = self.get(peer).filter(|next| !Arc::ptr_eq(next, lost)) {
+                return Some(next);
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        None
     }
 
     /// Disconnect at the user's request. No reconnect follows.
@@ -312,6 +446,7 @@ impl SessionRegistry {
                 established: Instant::now(),
                 reconnect_episode: 0,
                 ended_on_purpose: false,
+                dialing: false,
             }
         })
     }
@@ -390,24 +525,28 @@ impl SessionRegistry {
             let Some((spki_hash, addresses)) = self.reconnect_targets(&peer, episode) else {
                 return;
             };
-            for addr in addresses {
-                match connect_pinned(
-                    &self.inner.transport_cert,
-                    spki_hash,
-                    addr,
-                    &self.inner.config.dial,
-                )
-                .await
-                {
-                    Ok(connection) => {
-                        if self.reconnect_targets(&peer, episode).is_some() {
-                            self.attach(&peer, spki_hash, connection, Direction::Outbound);
-                        } else {
-                            connection.close(close_code(DisconnectReason::Normal), b"not needed");
+            // Skips this round if discovery is already dialing the peer.
+            if let Some(_claim) = self.claim_dial(&peer, spki_hash) {
+                for addr in addresses {
+                    match connect_pinned(
+                        &self.inner.transport_cert,
+                        spki_hash,
+                        addr,
+                        &self.inner.config.dial,
+                    )
+                    .await
+                    {
+                        Ok(connection) => {
+                            if self.still_wanted(&peer) {
+                                self.attach(&peer, spki_hash, connection, Direction::Outbound);
+                            } else {
+                                connection
+                                    .close(close_code(DisconnectReason::Redundant), b"not needed");
+                            }
+                            return;
                         }
-                        return;
+                        Err(error) => debug!("Reconnect to {peer} at {addr} failed: {error}"),
                     }
-                    Err(error) => debug!("Reconnect to {peer} at {addr} failed: {error}"),
                 }
             }
 

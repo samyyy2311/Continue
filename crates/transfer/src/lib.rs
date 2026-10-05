@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-//! Streaming file transfer over dedicated QUIC streams (Phase 1B).
+//! Streaming file transfer, one QUIC stream per file.
 
 pub mod error;
-mod hex;
+mod partial;
 pub mod receiver;
 pub mod sanitizer;
 pub mod sender;

@@ -13,9 +13,8 @@ struct CacheEntry {
     consumed: bool,
 }
 
-/// In-memory bounded replay cache for pairing session tokens.
-///
-/// Prevents token reuse and caps concurrent pairing session memory to 64 entries.
+/// The session tokens of codes on show, so each pairs at most once. Holds at most
+/// `MAX_PAIRING_CACHE_ENTRIES`, each for `MAX_PAIRING_SESSION_SECS`.
 pub struct ReplayCache {
     entries: Mutex<HashMap<[u8; 16], CacheEntry>>,
 }
@@ -33,12 +32,9 @@ impl ReplayCache {
         }
     }
 
-    /// Register a newly generated session token with a 60-second TTL.
     pub fn register(&self, token: [u8; 16]) -> Result<(), PairingError> {
         let mut map = self.entries.lock().unwrap();
         let now = Instant::now();
-
-        // Prune expired entries
         map.retain(|_, v| v.expires_at > now);
 
         if map.contains_key(&token) {
@@ -62,22 +58,21 @@ impl ReplayCache {
         Ok(())
     }
 
-    /// Atomically consume a token. Returns an error if expired, replayed, or unknown.
+    /// Uses up a token. Fails if it is unknown, expired or already used.
     pub fn consume(&self, token: &[u8; 16]) -> Result<(), PairingError> {
         let mut map = self.entries.lock().unwrap();
         let now = Instant::now();
-
-        // Prune expired entries
+        let expired = map
+            .get(token)
+            .ok_or(PairingError::SessionTokenMismatch)?
+            .expires_at
+            <= now;
         map.retain(|_, v| v.expires_at > now);
-
-        let entry = map
-            .get_mut(token)
-            .ok_or(PairingError::SessionTokenMismatch)?;
-
-        if entry.expires_at <= now {
+        if expired {
             return Err(PairingError::SessionTokenExpired);
         }
 
+        let entry = map.get_mut(token).expect("checked above");
         if entry.consumed {
             return Err(PairingError::SessionTokenReplayed);
         }
@@ -99,7 +94,6 @@ mod tests {
         cache.register(token).unwrap();
         assert!(cache.consume(&token).is_ok());
 
-        // Second consume must fail as replayed
         assert!(matches!(
             cache.consume(&token),
             Err(PairingError::SessionTokenReplayed)

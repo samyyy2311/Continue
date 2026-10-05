@@ -26,25 +26,21 @@ async fn session_multiplexer_routes_capability_streams() {
     let client_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
     let client_endpoint = create_client_endpoint(client_addr, client_tls).unwrap();
 
-    // Server router task
     let server_handle = tokio::spawn(async move {
         let incoming = server_endpoint.accept().await.expect("incoming conn");
         let conn = incoming.await.expect("conn");
         let mux = SessionMultiplexer::new("client-fingerprint".to_string(), conn);
         let mut rx = mux.spawn_router(8);
 
-        // Receive stream 1: File Transfer
         let stream1 = rx.recv().await.expect("receive stream 1");
         assert_eq!(stream1.capability, CapabilityId::FILE_TRANSFER);
 
-        // Receive stream 2: Clipboard
         let stream2 = rx.recv().await.expect("receive stream 2");
         assert_eq!(stream2.capability, CapabilityId::CLIPBOARD);
 
         mux
     });
 
-    // Client connection
     let client_conn = client_endpoint
         .connect(bound_addr, "continue-device")
         .unwrap()
@@ -53,14 +49,12 @@ async fn session_multiplexer_routes_capability_streams() {
 
     let client_mux = SessionMultiplexer::new("server-fingerprint".to_string(), client_conn);
 
-    // Open file transfer stream
     let (mut send1, _recv1) = client_mux
         .open_stream(CapabilityId::FILE_TRANSFER)
         .await
         .unwrap();
     send1.finish().unwrap();
 
-    // Open clipboard stream
     let (mut send2, _recv2) = client_mux
         .open_stream(CapabilityId::CLIPBOARD)
         .await

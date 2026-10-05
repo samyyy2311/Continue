@@ -5,12 +5,12 @@
 
 use std::path::{Path, PathBuf};
 
-use pairing::TrustStore;
+use device::Stores;
 use serde::Serialize;
 use sessions::{IncomingEvent, IncomingFile, IncomingListener};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::{peer_name, user_error, DesktopRuntimeState};
+use crate::{user_error, DesktopRuntimeState};
 
 /// Remembers the chosen folder between runs.
 const SAVE_FOLDER_FILE: &str = "save-folder";
@@ -27,9 +27,9 @@ pub struct IncomingDto {
     total: u64,
 }
 
-fn to_dto(file: IncomingFile, trust_store: &TrustStore) -> IncomingDto {
+fn to_dto(file: IncomingFile, stores: &Stores) -> IncomingDto {
     IncomingDto {
-        peer_name: peer_name(trust_store, &file.peer),
+        peer_name: stores.peer_name(&file.peer),
         transfer_id: file.transfer_id,
         peer_id: file.peer,
         file_name: file.file_name,
@@ -39,12 +39,10 @@ fn to_dto(file: IncomingFile, trust_store: &TrustStore) -> IncomingDto {
 }
 
 /// Tells the window as files start, move along and stop.
-pub fn listener(app: AppHandle, trust_store: TrustStore) -> IncomingListener {
+pub fn listener(app: AppHandle, stores: Stores) -> IncomingListener {
     std::sync::Arc::new(move |event| {
         let _ = match event {
-            IncomingEvent::Progress(file) => {
-                app.emit("incoming-progress", to_dto(file, &trust_store))
-            }
+            IncomingEvent::Progress(file) => app.emit("incoming-progress", to_dto(file, &stores)),
             IncomingEvent::Ended { transfer_id, .. } => app.emit("incoming-ended", transfer_id),
         };
     })
@@ -55,7 +53,7 @@ pub fn list_incoming(state: State<DesktopRuntimeState>) -> Vec<IncomingDto> {
     let files = state.incoming.list();
     files
         .into_iter()
-        .map(|file| to_dto(file, &state.trust_store))
+        .map(|file| to_dto(file, &state.device.stores))
         .collect()
 }
 

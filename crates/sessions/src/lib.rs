@@ -4,6 +4,7 @@
 pub mod auto_connect;
 pub mod backoff;
 pub mod capabilities_router;
+pub mod device;
 pub mod error;
 pub mod incoming;
 pub mod keepalive;
@@ -19,6 +20,7 @@ pub use capabilities_router::{
     spawn_capabilities_dispatcher, OnReceived, PermissionDecision, PermissionPrompt,
     PermissionRequest, SessionCapabilityHandlers, PROMPT_TIMEOUT,
 };
+pub use device::{clean_name, this_platform, PeerDevice, ThisDevice};
 pub use error::SessionError;
 pub use incoming::{IncomingEvent, IncomingFile, IncomingFiles, IncomingListener, SaveFolder};
 pub use keepalive::KeepaliveTracker;
@@ -27,6 +29,6 @@ pub use multiplexer::{
     close_code, open_capability_stream, read_capability_stream_header, IncomingCapabilityStream,
     SessionMultiplexer,
 };
-pub use registry::{Direction, RegistryConfig, SessionRegistry, StateListener};
+pub use registry::{Direction, RegistryConfig, SessionRegistry, StateListener, RESEND_WAIT};
 pub use session::Session;
 pub use state::SessionState;

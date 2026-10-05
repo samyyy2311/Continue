@@ -75,6 +75,18 @@ impl TrustStore {
         Ok(())
     }
 
+    /// Saves the name a peer goes by. Returns whether it changed, so callers only refresh
+    /// what shows it when needed.
+    pub fn set_display_name(&self, fingerprint: &str, name: &str) -> Result<bool, PairingError> {
+        let conn = self.conn.lock().unwrap();
+        let count = conn.execute(
+            "UPDATE trusted_peers SET display_name = ?2
+             WHERE fingerprint = ?1 AND display_name IS NOT ?2;",
+            params![fingerprint, name],
+        )?;
+        Ok(count > 0)
+    }
+
     pub fn last_endpoint(&self, fingerprint: &str) -> Result<Option<String>, PairingError> {
         let conn = self.conn.lock().unwrap();
         let endpoint = conn
@@ -95,7 +107,9 @@ impl TrustStore {
              ON CONFLICT(fingerprint) DO UPDATE SET
                  identity_pubkey = excluded.identity_pubkey,
                  transport_spki_hash = excluded.transport_spki_hash,
-                 display_name = excluded.display_name,
+                 -- Pairing again doesn't carry a name; keep the one the device last sent.
+                 display_name = CASE WHEN excluded.display_name = ''
+                     THEN trusted_peers.display_name ELSE excluded.display_name END,
                  paired_at = excluded.paired_at;",
             params![
                 peer.fingerprint,
@@ -237,6 +251,35 @@ impl TrustStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_are_saved_and_kept_when_pairing_again() {
+        let store = TrustStore::in_memory().unwrap();
+        let mut peer = TrustedPeer {
+            fingerprint: "phone".to_string(),
+            identity_pubkey: [7u8; 32],
+            transport_spki_hash: [9u8; 32],
+            display_name: String::new(),
+            paired_at: 1,
+        };
+        store.add_peer(&peer).unwrap();
+
+        assert!(store.set_display_name("phone", "Sam's Pixel").unwrap());
+        assert!(
+            !store.set_display_name("phone", "Sam's Pixel").unwrap(),
+            "unchanged"
+        );
+        assert!(
+            !store.set_display_name("stranger", "Laptop").unwrap(),
+            "not paired"
+        );
+
+        peer.paired_at = 2;
+        store.add_peer(&peer).unwrap();
+        let again = store.get_peer("phone").unwrap().unwrap();
+        assert_eq!(again.display_name, "Sam's Pixel");
+        assert_eq!(again.paired_at, 2);
+    }
 
     #[test]
     fn trust_store_crud() {

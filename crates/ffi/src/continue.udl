@@ -2,8 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace continue {
+    // Where the device keys are kept, set before `init_core`. Without it they stay in files.
+    void set_key_store(SecretStoreFfi store);
+
     [Throws=ContinueFfiError]
     void init_core(string db_path);
+
+    [Throws=ContinueFfiError]
+    void set_device_name(string name);
 
     [Throws=ContinueFfiError]
     string get_device_fingerprint();
@@ -141,6 +147,23 @@ dictionary TrustedPeerFfi {
     string fingerprint;
     string display_name;
     u64 paired_at;
+};
+
+// The platform's secret store, implemented by the app (the Android Keystore).
+callback interface SecretStoreFfi {
+    [Throws=SecretStoreFfiError]
+    void store(string label, bytes secret);
+
+    [Throws=SecretStoreFfiError]
+    bytes? load(string label);
+
+    [Throws=SecretStoreFfiError]
+    void delete(string label);
+};
+
+[Error]
+interface SecretStoreFfiError {
+    Unavailable(string reason);
 };
 
 [Error]

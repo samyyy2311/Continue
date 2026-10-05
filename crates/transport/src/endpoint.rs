@@ -29,7 +29,6 @@ pub fn default_transport_config() -> Arc<TransportConfig> {
     Arc::new(config)
 }
 
-/// Create a QUIC server endpoint bound to the given socket address.
 pub fn create_server_endpoint(
     bind_addr: SocketAddr,
     server_tls: RustlsServerConfig,
@@ -45,7 +44,6 @@ pub fn create_server_endpoint(
     Ok(endpoint)
 }
 
-/// Create a QUIC client endpoint bound to a local socket address.
 pub fn create_client_endpoint(
     bind_addr: SocketAddr,
     client_tls: RustlsClientConfig,

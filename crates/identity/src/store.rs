@@ -47,7 +47,17 @@ impl FileSecretStore {
         Ok(Self { base_dir: path })
     }
 
+    /// The folder the secrets are kept in.
+    pub fn dir(&self) -> &Path {
+        &self.base_dir
+    }
+
     fn path_for(&self, label: &str) -> PathBuf {
+        self.file_for(label, "secret")
+    }
+
+    /// A file in the store's folder named after `label`.
+    pub(crate) fn file_for(&self, label: &str, extension: &str) -> PathBuf {
         let safe_name: String = label
             .chars()
             .map(|c| {
@@ -58,23 +68,31 @@ impl FileSecretStore {
                 }
             })
             .collect();
-        self.base_dir.join(format!("{safe_name}.secret"))
+        self.base_dir.join(format!("{safe_name}.{extension}"))
     }
 }
 
 impl SecretStore for FileSecretStore {
     fn store(&self, label: &str, secret: Zeroizing<Vec<u8>>) -> Result<(), SecretStoreError> {
-        let file_path = self.path_for(label);
-        fs::write(&file_path, &*secret).map_err(|e| SecretStoreError::Io(e.to_string()))?;
+        use std::io::Write;
 
+        // Written whole beside the old one and then swapped in, so a crash never leaves half a
+        // key; readable only by this user from the start, not after the fact.
+        let file_path = self.path_for(label);
+        let partial = file_path.with_extension("secret.partial");
+        let io = |e: std::io::Error| SecretStoreError::Io(e.to_string());
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = fs::Permissions::from_mode(0o600);
-            let _ = fs::set_permissions(&file_path, perms);
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
-
-        Ok(())
+        let mut file = options.open(&partial).map_err(io)?;
+        file.write_all(&secret).map_err(io)?;
+        file.sync_all().map_err(io)?;
+        drop(file);
+        fs::rename(&partial, &file_path).map_err(io)
     }
 
     fn load(&self, label: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretStoreError> {
@@ -118,6 +136,31 @@ mod tests {
 
         store.delete("test_key").unwrap();
         assert_eq!(store.load("test_key").unwrap(), None);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn secrets_are_only_readable_by_this_user() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("continue_identity_mode_{nanos}"));
+        let store = FileSecretStore::new(&temp_dir).unwrap();
+        store.store("seed", Zeroizing::new(vec![1, 2, 3])).unwrap();
+        store.store("seed", Zeroizing::new(vec![4, 5, 6])).unwrap();
+
+        let mode = fs::metadata(temp_dir.join("seed.secret"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(&*store.load("seed").unwrap().unwrap(), &[4, 5, 6]);
+        assert_eq!(fs::read_dir(&temp_dir).unwrap().count(), 1, "no leftovers");
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
