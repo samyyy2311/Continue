@@ -11,7 +11,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "org.continueapp.android"
+        applicationId = "in.caffeinelabs.continue"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
