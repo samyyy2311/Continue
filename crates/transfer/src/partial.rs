@@ -5,7 +5,7 @@
 //! that can resume is named after the file's checksum and size, so a later attempt at the
 //! same file finds it; it survives a dropped connection and is pruned once left a day.
 
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
@@ -23,7 +23,7 @@ const SUFFIX: &str = ".part";
 pub const STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Partial files being written right now, so two transfers of the same file never share one.
-static IN_USE: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
+static IN_USE: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
 
 /// A transfer's claim on its partial file, released when dropped.
 pub struct Partial {
@@ -34,18 +34,12 @@ pub struct Partial {
 
 impl Drop for Partial {
     fn drop(&mut self) {
-        if let Some(in_use) = IN_USE.lock().unwrap().as_mut() {
-            in_use.remove(&self.path);
-        }
+        IN_USE.lock().unwrap().remove(&self.path);
     }
 }
 
 fn claim(path: PathBuf) -> Option<PathBuf> {
-    let mut in_use = IN_USE.lock().unwrap();
-    in_use
-        .get_or_insert_with(HashSet::new)
-        .insert(path.clone())
-        .then_some(path)
+    IN_USE.lock().unwrap().insert(path.clone()).then_some(path)
 }
 
 /// Claims the partial file for `req` in `dir`. A resumable request gets the one shared by
@@ -66,7 +60,7 @@ pub fn claim_for(dir: &Path, req: &FileTransferRequest) -> Partial {
         }
     }
     // Named from a hash, so nothing the peer sends ends up in the path.
-    let own: [u8; 32] = Sha256::digest(format!("{}:{}", req.transfer_id, rand_suffix())).into();
+    let own: [u8; 32] = Sha256::digest(format!("{}:{}", req.transfer_id, now_nanos())).into();
     let path = dir.join(format!("{PREFIX}{}{SUFFIX}", hex::encode(&own[..16])));
     Partial {
         path: claim(path.clone()).unwrap_or(path),
@@ -74,7 +68,7 @@ pub fn claim_for(dir: &Path, req: &FileTransferRequest) -> Partial {
     }
 }
 
-fn rand_suffix() -> u128 {
+fn now_nanos() -> u128 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos())
@@ -121,11 +115,7 @@ pub async fn prune_stale(dir: &Path) {
             continue;
         }
         let path = entry.path();
-        let in_use = IN_USE
-            .lock()
-            .unwrap()
-            .as_ref()
-            .is_some_and(|in_use| in_use.contains(&path));
+        let in_use = IN_USE.lock().unwrap().contains(&path);
         let stale = entry
             .metadata()
             .await

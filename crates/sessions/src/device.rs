@@ -32,7 +32,7 @@ impl ThisDevice {
             fingerprint: fingerprint.to_string(),
             display_name: name,
             platform: platform as i32,
-            protocol_version: 1,
+            protocol_version: protocol::CURRENT_PROTOCOL_VERSION,
             ed25519_public_key: Vec::new(),
         }
     }
