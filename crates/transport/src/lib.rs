@@ -15,7 +15,7 @@ pub use endpoint::{
     DialConfig, ALPN_CONTINUE,
 };
 pub use error::TransportError;
-pub use framed::{read_msg, write_msg};
+pub use framed::{read_msg, read_raw_msg, write_msg};
 pub use session::{AuthenticatedPeerSession, ConnectionPath};
 pub use spki::{compute_spki_hash, extract_and_hash_spki, extract_spki_bytes};
 pub use verifier::{

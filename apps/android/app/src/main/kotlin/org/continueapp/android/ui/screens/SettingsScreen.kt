@@ -2,6 +2,7 @@ package org.continueapp.android.ui.screens
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Wifi
@@ -32,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
 import org.continueapp.android.ContinueApplication
 import org.continueapp.android.needsNotificationPermission
 import org.continueapp.android.ui.components.ChoiceRow
@@ -140,6 +143,44 @@ private fun BackgroundRow() {
     )
 }
 
+/** Whether this app has permission to read notifications for cross-device sync. */
+private fun hasNotificationAccess(context: Context): Boolean =
+    NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+
+/** Opens the Android Settings screen where the user can grant notification listener access. */
+private fun notificationAccessSettingsIntent(): Intent {
+    return Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+}
+
+/** Shows notifications on your computer and allows quick reply. */
+@Composable
+private fun NotificationsRow() {
+    val context = LocalContext.current
+    var hasAccess by remember { mutableStateOf(hasNotificationAccess(context)) }
+
+    SettingsRow(
+        title = "Phone notifications on computer",
+        subtitle =
+            if (hasAccess) {
+                "Notifications from your phone show on your computer with quick reply."
+            } else {
+                "Allow notification access in Android settings so your computer can show notifications and reply."
+            },
+        icon = Icons.Outlined.Notifications,
+        onClick = {
+            context.startActivity(notificationAccessSettingsIntent())
+        },
+        trailing = {
+            Switch(
+                checked = hasAccess,
+                onCheckedChange = {
+                    context.startActivity(notificationAccessSettingsIntent())
+                },
+            )
+        },
+    )
+}
+
 @Composable
 fun SettingsScreen(
     visible: Boolean,
@@ -161,6 +202,7 @@ fun SettingsScreen(
             trailing = { Switch(checked = visible, onCheckedChange = onVisibleChange) },
         )
         BackgroundRow()
+        NotificationsRow()
         SendCopiesRow()
 
         SectionLabel("Received files")

@@ -385,6 +385,46 @@ fn session_handlers(
         );
     }));
 
+    let (app, stores_ref) = (app_handle.clone(), stores.clone());
+    handlers.on_notification_received = Some(Arc::new(move |peer, post| {
+        let name = stores_ref.peer_name(peer);
+        notify_if_away(
+            &app,
+            &format!("{}: {}", shown_name(name.clone()), post.title),
+            &post.body,
+        );
+        let _ = app.emit(
+            "notification-received",
+            serde_json::json!({
+                "peerId": peer,
+                "peerName": name,
+                "notificationId": post.notification_id,
+                "packageName": post.package_name,
+                "appName": post.app_name,
+                "title": post.title,
+                "body": post.body,
+                "timestamp": post.timestamp,
+                "actions": post.actions.into_iter().map(|a| serde_json::json!({
+                    "actionId": a.action_id,
+                    "label": a.label,
+                    "isReply": a.is_reply,
+                })).collect::<Vec<_>>(),
+            }),
+        );
+    }));
+
+    let app = app_handle.clone();
+    handlers.on_notification_dismiss = Some(Arc::new(move |peer, dismiss| {
+        let _ = app.emit(
+            "notification-dismissed",
+            serde_json::json!({
+                "peerId": peer,
+                "notificationId": dismiss.notification_id,
+                "packageName": dismiss.package_name,
+            }),
+        );
+    }));
+
     handlers
 }
 
@@ -658,7 +698,11 @@ fn get_permissions(
     state: State<DesktopRuntimeState>,
     peer_fingerprint: String,
 ) -> Result<Vec<PeerPermissionDto>, String> {
-    [CapabilityId::FILE_TRANSFER, CapabilityId::CLIPBOARD]
+    [
+        CapabilityId::FILE_TRANSFER,
+        CapabilityId::CLIPBOARD,
+        CapabilityId::NOTIFICATIONS,
+    ]
         .into_iter()
         .map(|capability| {
             let grant = state
@@ -817,6 +861,29 @@ fn set_clipboard_sync(state: State<DesktopRuntimeState>, enabled: bool) {
     state.clipboard.set_enabled(enabled);
 }
 
+#[tauri::command]
+async fn invoke_notification_action(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    notification_id: String,
+    action_id: String,
+    reply_text: String,
+) -> Result<(), String> {
+    state
+        .device
+        .invoke_notification_action(
+            &peer_fingerprint,
+            notifications::NotificationActionInvoke {
+                notification_id,
+                action_id,
+                reply_text,
+            },
+        )
+        .await
+        .map_err(user_error("Couldn't send the reply to the phone."))?;
+    Ok(())
+}
+
 /// Sends text to a connected device and saves it to history.
 async fn push_text(device: &Device, peer: &str, text: String) -> Result<(), String> {
     match device.send_text(peer, text).await {
@@ -972,7 +1039,8 @@ fn main() {
             disconnect_peer,
             reconnect_peer,
             send_file_to_peer,
-            send_clipboard_text
+            send_clipboard_text,
+            invoke_notification_action
         ])
         // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
         .on_window_event(|window, event| {

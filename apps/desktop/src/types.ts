@@ -107,10 +107,29 @@ export interface PermissionQuestion {
 
 export type PermissionAnswer = "allow" | "alwaysAllow" | "decline";
 
+export interface NotificationAction {
+  actionId: string;
+  label: string;
+  isReply: boolean;
+}
+
+export interface PhoneNotification {
+  peerId: string;
+  peerName: string;
+  notificationId: string;
+  packageName: string;
+  appName: string;
+  title: string;
+  body: string;
+  timestamp: number;
+  actions: NotificationAction[];
+}
+
 /** By capability id. */
 export const PERMISSIONS: Record<number, { label: string; description: string }> = {
   1: { label: "Files", description: "Send files to this computer" },
   2: { label: "Text", description: "Send copied text and links" },
+  3: { label: "Notifications", description: "Show phone notifications and reply" },
 };
 
 export const GRANT_OPTIONS: { value: Grant; label: string }[] = [

@@ -28,6 +28,7 @@ identity = { path = "../../../crates/identity" }
 pairing = { path = "../../../crates/pairing" }
 sessions = { path = "../../../crates/sessions" }
 permissions = { path = "../../../crates/permissions" }
+notifications = { path = "../../../crates/notifications" }
 history = { path = "../../../crates/history" }
 device = { path = "../../../crates/device" }
 transfer = { path = "../../../crates/transfer" }

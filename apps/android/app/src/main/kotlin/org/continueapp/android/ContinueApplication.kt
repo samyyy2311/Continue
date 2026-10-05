@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -129,6 +130,18 @@ class ContinueApplication : Application() {
         }
         scope.launch { state.questions.listen() }
         scope.launch { watchConnections() }
+        scope.launch(Dispatchers.IO) {
+            while (true) {
+                try {
+                    val action = coreBridge.nextNotificationAction(NOTIFICATION_POLL_TIMEOUT_MS)
+                    if (action != null) {
+                        ContinueNotificationListener.handleRemoteAction(this@ContinueApplication, action)
+                    }
+                } catch (_: Exception) {
+                    delay(NOTIFICATION_POLL_RETRY_DELAY_MS)
+                }
+            }
+        }
     }
 
     /** Keeps connection state fresh, often while on screen and now and then otherwise. */
@@ -216,5 +229,7 @@ class ContinueApplication : Application() {
         const val KEY_SAVE_FOLDER = "save_folder"
         const val ON_SCREEN_REFRESH_MS = 2_000L
         const val BACKGROUND_REFRESH_MS = 10_000L
+        const val NOTIFICATION_POLL_TIMEOUT_MS = 1_000L
+        const val NOTIFICATION_POLL_RETRY_DELAY_MS = 1_000L
     }
 }

@@ -36,3 +36,21 @@ pub async fn read_msg<M: Message + Default>(
         }
     }
 }
+
+/// Reads raw frame bytes of one length-prefixed frame without decoding into a specific type.
+pub async fn read_raw_msg(
+    stream: &mut quinn::RecvStream,
+    max_bytes: usize,
+) -> Result<bytes::Bytes, TransportError> {
+    let mut buf = BytesMut::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
+    loop {
+        if let Some(raw) = protocol::decode_raw_frame_from_buf(&mut buf, max_bytes)? {
+            return Ok(raw);
+        }
+        match stream.read(&mut chunk).await? {
+            Some(n) if n > 0 => buf.extend_from_slice(&chunk[..n]),
+            _ => return Err(TransportError::ConnectionClosed),
+        }
+    }
+}

@@ -124,3 +124,26 @@ data class IncomingFile(
     val received: Long,
     val total: Long,
 )
+
+data class NotificationActionModel(
+    val actionId: String,
+    val label: String,
+    val isReply: Boolean,
+)
+
+data class NotificationPostModel(
+    val notificationId: String,
+    val packageName: String,
+    val appName: String,
+    val title: String,
+    val body: String,
+    val timestamp: Long,
+    val actions: List<NotificationActionModel> = emptyList(),
+)
+
+data class NotificationActionInvokeModel(
+    val peerFingerprint: String,
+    val notificationId: String,
+    val actionId: String,
+    val replyText: String,
+)

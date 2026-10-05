@@ -77,6 +77,37 @@ namespace continue {
 
     [Throws=ContinueFfiError]
     void send_clipboard_text(string peer_fingerprint, string text);
+
+    [Throws=ContinueFfiError]
+    boolean send_notification(string peer_fingerprint, NotificationPostFfi notification);
+
+    [Throws=ContinueFfiError]
+    boolean send_notification_dismiss(string peer_fingerprint, string notification_id, string package_name);
+
+    NotificationActionInvokeFfi? next_notification_action(u32 timeout_ms);
+};
+
+dictionary NotificationActionFfi {
+    string action_id;
+    string label;
+    boolean is_reply;
+};
+
+dictionary NotificationPostFfi {
+    string notification_id;
+    string package_name;
+    string app_name;
+    string title;
+    string body;
+    u64 timestamp;
+    sequence<NotificationActionFfi> actions;
+};
+
+dictionary NotificationActionInvokeFfi {
+    string peer_fingerprint;
+    string notification_id;
+    string action_id;
+    string reply_text;
 };
 
 dictionary PermissionRequestFfi {

@@ -73,6 +73,9 @@ pub enum SendError {
 
     #[error(transparent)]
     Clipboard(#[from] clipboard::ClipboardError),
+
+    #[error(transparent)]
+    Notification(#[from] notifications::NotificationError),
 }
 
 /// Cheap to clone; every clone is the same device.
@@ -284,6 +287,51 @@ impl Device {
         });
         result?;
         Ok(())
+    }
+
+    /// Sends a notification to the peer.
+    pub async fn send_notification(
+        &self,
+        peer: &str,
+        post: notifications::NotificationPost,
+    ) -> Result<notifications::NotificationAck, SendError> {
+        let mux = self.sessions.get(peer).ok_or(SendError::NotConnected)?;
+        let dispatcher = notifications::NotificationDispatcher::new();
+        let query = CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, true);
+        let ack = mux
+            .send_notification_to_peer(&dispatcher, post, &query)
+            .await?;
+        Ok(ack)
+    }
+
+    /// Invokes a remote notification action (e.g. quick reply or action button click).
+    pub async fn invoke_notification_action(
+        &self,
+        peer: &str,
+        action: notifications::NotificationActionInvoke,
+    ) -> Result<notifications::NotificationAck, SendError> {
+        let mux = self.sessions.get(peer).ok_or(SendError::NotConnected)?;
+        let dispatcher = notifications::NotificationDispatcher::new();
+        let query = CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, true);
+        let ack = mux
+            .send_notification_action_to_peer(&dispatcher, action, &query)
+            .await?;
+        Ok(ack)
+    }
+
+    /// Sends a notification dismissal to the peer.
+    pub async fn dismiss_notification(
+        &self,
+        peer: &str,
+        dismiss: notifications::NotificationDismiss,
+    ) -> Result<notifications::NotificationAck, SendError> {
+        let mux = self.sessions.get(peer).ok_or(SendError::NotConnected)?;
+        let dispatcher = notifications::NotificationDispatcher::new();
+        let query = CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, true);
+        let ack = mux
+            .send_notification_dismiss_to_peer(&dispatcher, dismiss, &query)
+            .await?;
+        Ok(ack)
     }
 }
 

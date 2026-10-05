@@ -11,6 +11,7 @@ import type {
   PeerPermission,
   PermissionAnswer,
   PermissionQuestion,
+  PhoneNotification,
   TrustedPeer,
 } from "./types.ts";
 
@@ -119,6 +120,32 @@ export const onPairingCompleted = (handler: (peer: TrustedPeer) => void): Promis
 
 export const onPairingFailed = (handler: (message: string) => void): Promise<UnlistenFn> =>
   listen<string>("pairing-failed", (event) => handler(event.payload));
+
+export const invokeNotificationAction = (
+  peerFingerprint: string,
+  notificationId: string,
+  actionId: string,
+  replyText: string,
+) =>
+  invoke<void>("invoke_notification_action", {
+    peerFingerprint,
+    notificationId,
+    actionId,
+    replyText,
+  });
+
+export const onNotificationReceived = (
+  handler: (notification: PhoneNotification) => void,
+): Promise<UnlistenFn> =>
+  listen<PhoneNotification>("notification-received", (event) => handler(event.payload));
+
+export const onNotificationDismissed = (
+  handler: (data: { peerId: string; notificationId: string; packageName: string }) => void,
+): Promise<UnlistenFn> =>
+  listen<{ peerId: string; notificationId: string; packageName: string }>(
+    "notification-dismissed",
+    (event) => handler(event.payload),
+  );
 
 /** Commands reject with the backend's error string; anything else is unexpected. */
 export function errorMessage(error: unknown): string {

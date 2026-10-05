@@ -231,6 +231,9 @@ static QUESTIONS: Questions = Questions {
 static RECEIVED: Inbox<ReceivedFfi> = Inbox::new();
 const RECEIVED_LIMIT: usize = 100;
 
+static NOTIFICATION_ACTIONS: Inbox<NotificationActionInvokeFfi> = Inbox::new();
+const NOTIFICATION_ACTIONS_LIMIT: usize = 100;
+
 /// Saves received files and text to history and hands them to the app through
 /// `next_received`.
 fn deliver_received(
@@ -272,6 +275,17 @@ fn deliver_received(
                 text: Some(text),
             },
             RECEIVED_LIMIT,
+        );
+    }));
+    handlers.on_notification_action = Some(Arc::new(move |peer, action| {
+        NOTIFICATION_ACTIONS.push(
+            NotificationActionInvokeFfi {
+                peer_fingerprint: peer.to_string(),
+                notification_id: action.notification_id,
+                action_id: action.action_id,
+                reply_text: action.reply_text,
+            },
+            NOTIFICATION_ACTIONS_LIMIT,
         );
     }));
     handlers
@@ -676,6 +690,77 @@ pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(),
         .map_err(internal)
 }
 
+pub struct NotificationActionFfi {
+    pub action_id: String,
+    pub label: String,
+    pub is_reply: bool,
+}
+
+pub struct NotificationPostFfi {
+    pub notification_id: String,
+    pub package_name: String,
+    pub app_name: String,
+    pub title: String,
+    pub body: String,
+    pub timestamp: u64,
+    pub actions: Vec<NotificationActionFfi>,
+}
+
+pub struct NotificationActionInvokeFfi {
+    pub peer_fingerprint: String,
+    pub notification_id: String,
+    pub action_id: String,
+    pub reply_text: String,
+}
+
+pub fn send_notification(
+    peer_fingerprint: String,
+    notification: NotificationPostFfi,
+) -> Result<bool, ContinueFfiError> {
+    let (runtime, device) = device()?;
+    let post = notifications::NotificationPost {
+        notification_id: notification.notification_id,
+        package_name: notification.package_name,
+        app_name: notification.app_name,
+        title: notification.title,
+        body: notification.body,
+        timestamp: notification.timestamp,
+        actions: notification
+            .actions
+            .into_iter()
+            .map(|a| notifications::NotificationAction {
+                action_id: a.action_id,
+                label: a.label,
+                is_reply: a.is_reply,
+            })
+            .collect(),
+    };
+    let ack = runtime
+        .block_on(device.send_notification(&peer_fingerprint, post))
+        .map_err(internal)?;
+    Ok(ack.handled)
+}
+
+pub fn send_notification_dismiss(
+    peer_fingerprint: String,
+    notification_id: String,
+    package_name: String,
+) -> Result<bool, ContinueFfiError> {
+    let (runtime, device) = device()?;
+    let dismiss = notifications::NotificationDismiss {
+        notification_id,
+        package_name,
+    };
+    let ack = runtime
+        .block_on(device.dismiss_notification(&peer_fingerprint, dismiss))
+        .map_err(internal)?;
+    Ok(ack.handled)
+}
+
+pub fn next_notification_action(timeout_ms: u32) -> Option<NotificationActionInvokeFfi> {
+    NOTIFICATION_ACTIONS.next(Duration::from_millis(timeout_ms.into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -804,5 +889,29 @@ mod tests {
         assert_eq!(file.history_id, Some(saved[0].id));
         assert_eq!(saved[0].item.direction, Direction::Received);
         assert_eq!(saved[0].item.label, "report.pdf");
+    }
+
+    #[test]
+    fn notification_actions_reach_the_app() {
+        let stores = memory_stores();
+        let handlers = deliver_received(
+            sessions::SessionCapabilityHandlers::new(std::env::temp_dir()),
+            stores,
+        );
+        (handlers.on_notification_action.unwrap())(
+            "desktop_fingerprint",
+            notifications::NotificationActionInvoke {
+                notification_id: "notif-42".to_string(),
+                action_id: "reply_action".to_string(),
+                reply_text: "Sounds good!".to_string(),
+            },
+        );
+
+        let action = next_notification_action(100).expect("the notification action");
+        assert_eq!(action.peer_fingerprint, "desktop_fingerprint");
+        assert_eq!(action.notification_id, "notif-42");
+        assert_eq!(action.action_id, "reply_action");
+        assert_eq!(action.reply_text, "Sounds good!");
+        assert!(next_notification_action(10).is_none());
     }
 }

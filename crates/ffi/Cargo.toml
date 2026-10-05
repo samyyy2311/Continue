@@ -25,6 +25,7 @@ pairing = { path = "../pairing" }
 transport = { path = "../transport" }
 sessions = { path = "../sessions" }
 permissions = { path = "../permissions" }
+notifications = { path = "../notifications" }
 protocol = { path = "../protocol" }
 history = { path = "../history" }
 device = { path = "../device" }

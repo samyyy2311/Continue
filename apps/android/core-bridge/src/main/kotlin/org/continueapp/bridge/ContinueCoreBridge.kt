@@ -2,6 +2,9 @@ package org.continueapp.bridge
 
 import org.continueapp.bridge.ffi.ContinueFfiException
 import org.continueapp.bridge.ffi.HistoryEntryFfi
+import org.continueapp.bridge.ffi.NotificationActionFfi
+import org.continueapp.bridge.ffi.NotificationActionInvokeFfi
+import org.continueapp.bridge.ffi.NotificationPostFfi
 import org.continueapp.bridge.ffi.PermissionDecisionFfi
 import org.continueapp.bridge.ffi.PermissionRequestFfi
 import org.continueapp.bridge.ffi.ReceivedFfi
@@ -22,6 +25,7 @@ import org.continueapp.bridge.ffi.isPeerConnected as coreIsPeerConnected
 import org.continueapp.bridge.ffi.listHistory as coreListHistory
 import org.continueapp.bridge.ffi.listIncoming as coreListIncoming
 import org.continueapp.bridge.ffi.listTrustedPeers as coreListTrustedPeers
+import org.continueapp.bridge.ffi.nextNotificationAction as coreNextNotificationAction
 import org.continueapp.bridge.ffi.nextPermissionRequest as coreNextPermissionRequest
 import org.continueapp.bridge.ffi.nextReceived as coreNextReceived
 import org.continueapp.bridge.ffi.pairFromQr as corePairFromQr
@@ -30,6 +34,8 @@ import org.continueapp.bridge.ffi.reconnect as coreReconnect
 import org.continueapp.bridge.ffi.removeTrustedPeer as coreRemoveTrustedPeer
 import org.continueapp.bridge.ffi.sendClipboardText as coreSendClipboardText
 import org.continueapp.bridge.ffi.sendFile as coreSendFile
+import org.continueapp.bridge.ffi.sendNotification as coreSendNotification
+import org.continueapp.bridge.ffi.sendNotificationDismiss as coreSendNotificationDismiss
 import org.continueapp.bridge.ffi.setDeviceName as coreSetDeviceName
 import org.continueapp.bridge.ffi.setDeviceStatus as coreSetDeviceStatus
 import org.continueapp.bridge.ffi.setHistoryLocation as coreSetHistoryLocation
@@ -132,6 +138,19 @@ interface ContinueCoreBridge {
         peerFingerprint: String,
         text: String,
     )
+
+    fun sendNotification(
+        peerFingerprint: String,
+        notification: NotificationPostModel,
+    ): Boolean
+
+    fun sendNotificationDismiss(
+        peerFingerprint: String,
+        notificationId: String,
+        packageName: String,
+    ): Boolean
+
+    fun nextNotificationAction(timeoutMs: Long): NotificationActionInvokeModel?
 
     companion object {
         fun create(): ContinueCoreBridge = NativeContinueCoreBridge()
@@ -307,6 +326,29 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         checkInitialized()
     }
 
+    val notificationActions = LinkedBlockingQueue<NotificationActionInvokeModel>()
+
+    override fun sendNotification(
+        peerFingerprint: String,
+        notification: NotificationPostModel,
+    ): Boolean {
+        checkInitialized()
+        return true
+    }
+
+    override fun sendNotificationDismiss(
+        peerFingerprint: String,
+        notificationId: String,
+        packageName: String,
+    ): Boolean {
+        checkInitialized()
+        return true
+    }
+
+    override fun nextNotificationAction(timeoutMs: Long): NotificationActionInvokeModel? {
+        return notificationActions.poll(timeoutMs, MILLISECONDS)
+    }
+
     private fun checkInitialized() {
         if (!initialized) {
             throw ContinueException.NotInitializedException("Core runtime engine is not initialized")
@@ -413,7 +455,52 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
         peerFingerprint: String,
         text: String,
     ) = native { coreSendClipboardText(peerFingerprint, text) }
+
+    override fun sendNotification(
+        peerFingerprint: String,
+        notification: NotificationPostModel,
+    ): Boolean =
+        native {
+            val ffiPost =
+                NotificationPostFfi(
+                    notificationId = notification.notificationId,
+                    packageName = notification.packageName,
+                    appName = notification.appName,
+                    title = notification.title,
+                    body = notification.body,
+                    timestamp = notification.timestamp.toULong(),
+                    actions =
+                        notification.actions.map {
+                            NotificationActionFfi(
+                                actionId = it.actionId,
+                                label = it.label,
+                                isReply = it.isReply,
+                            )
+                        },
+                )
+            coreSendNotification(peerFingerprint, ffiPost)
+        }
+
+    override fun sendNotificationDismiss(
+        peerFingerprint: String,
+        notificationId: String,
+        packageName: String,
+    ): Boolean =
+        native {
+            coreSendNotificationDismiss(peerFingerprint, notificationId, packageName)
+        }
+
+    override fun nextNotificationAction(timeoutMs: Long): NotificationActionInvokeModel? =
+        coreNextNotificationAction(timeoutMs.toUInt())?.toNotificationActionInvoke()
 }
+
+private fun NotificationActionInvokeFfi.toNotificationActionInvoke() =
+    NotificationActionInvokeModel(
+        peerFingerprint = peerFingerprint,
+        notificationId = notificationId,
+        actionId = actionId,
+        replyText = replyText,
+    )
 
 private fun TrustedPeerFfi.toTrustedPeer() =
     TrustedPeer(
