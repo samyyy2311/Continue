@@ -31,6 +31,7 @@ import org.continueapp.bridge.ffi.removeTrustedPeer as coreRemoveTrustedPeer
 import org.continueapp.bridge.ffi.sendClipboardText as coreSendClipboardText
 import org.continueapp.bridge.ffi.sendFile as coreSendFile
 import org.continueapp.bridge.ffi.setDeviceName as coreSetDeviceName
+import org.continueapp.bridge.ffi.setDeviceStatus as coreSetDeviceStatus
 import org.continueapp.bridge.ffi.setHistoryLocation as coreSetHistoryLocation
 import org.continueapp.bridge.ffi.setKeyStore as coreSetKeyStore
 import org.continueapp.bridge.ffi.setPermission as coreSetPermission
@@ -46,6 +47,12 @@ interface ContinueCoreBridge {
 
     /** The name paired computers see for this phone, from the next connection on. */
     fun setDeviceName(name: String)
+
+    /** Sends the battery to connected computers, now and whenever they connect. */
+    fun setDeviceStatus(
+        batteryPercent: Int,
+        charging: Boolean,
+    )
 
     fun getDeviceFingerprint(): String
 
@@ -165,6 +172,11 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         checkInitialized()
         deviceName = name
     }
+
+    override fun setDeviceStatus(
+        batteryPercent: Int,
+        charging: Boolean,
+    ) = checkInitialized()
 
     override fun getDeviceFingerprint(): String {
         checkInitialized()
@@ -314,6 +326,11 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
         }
 
     override fun setDeviceName(name: String) = native { coreSetDeviceName(name) }
+
+    override fun setDeviceStatus(
+        batteryPercent: Int,
+        charging: Boolean,
+    ) = native { coreSetDeviceStatus(batteryPercent.toUInt(), charging) }
 
     override fun getDeviceFingerprint(): String = native { coreGetDeviceFingerprint() }
 

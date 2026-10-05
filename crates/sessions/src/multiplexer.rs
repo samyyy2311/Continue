@@ -10,7 +10,8 @@ use tracing::{debug, warn};
 use clipboard::ClipboardSynchronizer;
 use limits::KEEPALIVE_INTERVAL_SECS;
 use protocol::v1::{
-    session_envelope::Body, DeviceInfo, Disconnect, DisconnectReason, Ping, Pong, SessionEnvelope,
+    session_envelope::Body, DeviceInfo, DeviceStatus, Disconnect, DisconnectReason, Ping, Pong,
+    SessionEnvelope,
 };
 use protocol::CapabilityId;
 
@@ -43,8 +44,13 @@ pub async fn read_capability_stream_header(
     Ok(CapabilityId(u32::from_be_bytes(buf)))
 }
 
-/// Called with what the peer said about itself when the session started.
-pub type OnDeviceInfo = Arc<dyn Fn(DeviceInfo) + Send + Sync>;
+/// Something the peer said about itself on the control stream.
+pub enum PeerUpdate {
+    Info(DeviceInfo),
+    Status(DeviceStatus),
+}
+
+pub type OnPeerUpdate = Arc<dyn Fn(PeerUpdate) + Send + Sync>;
 
 /// QUIC application close code carrying a protocol `DisconnectReason`.
 pub fn close_code(reason: DisconnectReason) -> quinn::VarInt {
@@ -121,11 +127,11 @@ impl SessionMultiplexer {
         self.spawn_router_with(stream_buffer_size, None)
     }
 
-    /// Like `spawn_router`, also handing the peer's `DeviceInfo` to `on_device_info`.
+    /// Like `spawn_router`, also handing what the peer says about itself to `on_update`.
     pub fn spawn_router_with(
         &self,
         stream_buffer_size: usize,
-        on_device_info: Option<OnDeviceInfo>,
+        on_update: Option<OnPeerUpdate>,
     ) -> mpsc::Receiver<IncomingCapabilityStream> {
         let (tx, rx) = mpsc::channel(stream_buffer_size);
         let conn = self.connection.clone();
@@ -148,7 +154,7 @@ impl SessionMultiplexer {
                                             conn.clone(),
                                             keepalive.clone(),
                                             peer_disconnected.clone(),
-                                            on_device_info.clone(),
+                                            on_update.clone(),
                                         ));
                                     }
                                     Ok(cap) => {
@@ -229,7 +235,7 @@ impl SessionMultiplexer {
         conn: quinn::Connection,
         keepalive: Arc<Mutex<KeepaliveTracker>>,
         peer_disconnected: Arc<AtomicBool>,
-        on_device_info: Option<OnDeviceInfo>,
+        on_update: Option<OnPeerUpdate>,
     ) {
         if let Ok(env) = Session::read_envelope(&mut recv).await {
             match env.body {
@@ -249,8 +255,13 @@ impl SessionMultiplexer {
                     conn.close(close_code(reason), b"peer disconnected");
                 }
                 Some(Body::DeviceInfo(info)) => {
-                    if let Some(on_device_info) = on_device_info {
-                        on_device_info(info);
+                    if let Some(on_update) = on_update {
+                        on_update(PeerUpdate::Info(info));
+                    }
+                }
+                Some(Body::DeviceStatus(status)) => {
+                    if let Some(on_update) = on_update {
+                        on_update(PeerUpdate::Status(status));
                     }
                 }
                 _ => {}
@@ -258,17 +269,15 @@ impl SessionMultiplexer {
         }
     }
 
-    /// Tells the peer about this device. Best effort: a peer that misses it keeps the name
-    /// it had.
-    pub async fn send_device_info(&self, info: DeviceInfo) {
+    /// Tells the peer about this device. Best effort: a peer that misses it keeps what it
+    /// had.
+    pub async fn send_control(&self, body: Body) {
         let Ok((mut send, _recv)) =
             open_capability_stream(&self.connection, CapabilityId::CONTROL).await
         else {
             return;
         };
-        let env = SessionEnvelope {
-            body: Some(Body::DeviceInfo(info)),
-        };
+        let env = SessionEnvelope { body: Some(body) };
         if Session::send_envelope(&mut send, &env).await.is_ok() {
             let _ = send.finish();
         }

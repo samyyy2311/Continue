@@ -38,7 +38,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
-import { ButtonGroup, DeviceGlyph, ProgressBar, Switch } from "./components.tsx";
+import { ButtonGroup, ConnectionStatus, DeviceGlyph, ProgressBar, Switch } from "./components.tsx";
 import {
   cancelIncoming,
   clearHistory,
@@ -312,6 +312,8 @@ export default function App() {
         // A device says its name just after connecting, and again after a rename.
         const unRenamed = await listen("peer-renamed", () => void refreshPeers());
         keep(unRenamed);
+        const unStatus = await listen("peer-status", () => void refreshPeers());
+        keep(unStatus);
 
         const addRow = (row: Omit<Activity, "id" | "timestamp">) =>
           setActivity((prev) => [{ ...row, id: crypto.randomUUID(), timestamp: Date.now() }, ...prev]);
@@ -982,7 +984,7 @@ function HomeView(props: HomeViewProps) {
           <DeviceGlyph icon={<Smartphone size={28} strokeWidth={1.75} />} active={online} size="lg" />
           <div className="hero-text">
             <h1 className="display">{peer.displayName}</h1>
-            <span className={`status ${online ? "online" : ""}`}>{online ? "Connected" : "Not connected"}</span>
+            <ConnectionStatus peer={peer} />
           </div>
         </div>
         <p className="supporting">
@@ -1150,9 +1152,7 @@ function DeviceCard(props: {
         <DeviceGlyph icon={<Smartphone size={24} strokeWidth={1.75} />} active={peer.isConnected} />
         <div className="card-title">
           <h2 className="headline">{peer.displayName}</h2>
-          <span className={`status ${peer.isConnected ? "online" : ""}`}>
-            {peer.isConnected ? "Connected" : "Not connected"}
-          </span>
+          <ConnectionStatus peer={peer} />
         </div>
         <div className="card-actions">
           {peer.isConnected ? (

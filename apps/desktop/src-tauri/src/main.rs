@@ -58,7 +58,19 @@ pub struct TrustedPeerDto {
     pub paired_at: u64,
     pub is_connected: bool,
     pub endpoint: Option<String>,
+    /// Only while connected, and once the device has said.
+    pub battery: Option<BatteryDto>,
 }
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+pub struct BatteryDto {
+    pub percent: u32,
+    pub charging: bool,
+}
+
+/// The latest battery each device reported, by fingerprint.
+type Batteries = Arc<Mutex<HashMap<String, BatteryDto>>>;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -94,6 +106,7 @@ pub struct DesktopRuntimeState {
     save_folder: sessions::SaveFolder,
     incoming: sessions::IncomingFiles,
     clipboard: ClipboardSync,
+    batteries: Batteries,
 }
 
 #[derive(Serialize)]
@@ -389,6 +402,21 @@ fn device_info_listener(
     })
 }
 
+/// Keeps each device's latest battery for the window, and tells it when one changes.
+fn device_status_listener(
+    app: AppHandle,
+    batteries: Batteries,
+) -> sessions::OnReceived<protocol::v1::DeviceStatus> {
+    Arc::new(move |peer, status| {
+        let battery = BatteryDto {
+            percent: status.battery_percent,
+            charging: status.charging,
+        };
+        batteries.lock().insert(peer.to_string(), battery);
+        let _ = app.emit("peer-status", peer);
+    })
+}
+
 /// Asks in the window, which answers through `answer_permission`. The core stops waiting
 /// after `PROMPT_TIMEOUT`, and so does the window.
 fn permission_prompt(
@@ -524,12 +552,16 @@ fn get_trusted_peers(state: State<DesktopRuntimeState>) -> Result<Vec<TrustedPee
             let is_connected =
                 state.device.sessions.state(&p.fingerprint) == SessionState::Connected;
             let endpoint = trust.last_endpoint(&p.fingerprint).ok().flatten();
+            let battery = is_connected
+                .then(|| state.batteries.lock().get(&p.fingerprint).copied())
+                .flatten();
             TrustedPeerDto {
                 fingerprint: p.fingerprint,
                 display_name: shown_name(p.display_name),
                 paired_at: p.paired_at,
                 is_connected,
                 endpoint,
+                battery,
             }
         })
         .collect();
@@ -617,6 +649,7 @@ fn paired_dto(peer: pairing::TrustedPeer) -> TrustedPeerDto {
         paired_at: peer.paired_at,
         is_connected: false,
         endpoint: None,
+        battery: None,
     }
 }
 
@@ -817,6 +850,11 @@ fn initialize_desktop_runtime(
         stores.clone(),
         connected.clone(),
     ));
+    let batteries = Batteries::default();
+    handlers.on_device_status = Some(device_status_listener(
+        app_handle.clone(),
+        batteries.clone(),
+    ));
     let (save_folder, incoming) = (handlers.save_folder.clone(), handlers.incoming.clone());
     let on_state_change = session_state_listener(app_handle.clone(), stores.clone(), connected);
     let device = Device::new(stores, keys, handlers, Some(on_state_change))?;
@@ -829,6 +867,7 @@ fn initialize_desktop_runtime(
         save_folder,
         incoming,
         clipboard,
+        batteries,
     })
 }
 

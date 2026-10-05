@@ -5,29 +5,53 @@
 
 use std::sync::{Arc, RwLock};
 
-use protocol::v1::{DeviceInfo, Platform};
+use protocol::v1::{DeviceInfo, DeviceStatus, Platform};
 
 use limits::MAX_DEVICE_NAME_BYTES as MAX_NAME_BYTES;
 
-/// How this device introduces itself. Shared, so a rename reaches the next session.
+struct Own {
+    name: String,
+    platform: Platform,
+    status: Option<DeviceStatus>,
+}
+
+/// How this device introduces itself. Shared, so a rename or a new battery reading reaches
+/// every session.
 #[derive(Clone)]
-pub struct ThisDevice(Arc<RwLock<(String, Platform)>>);
+pub struct ThisDevice(Arc<RwLock<Own>>);
 
 impl ThisDevice {
     pub fn new(name: impl Into<String>, platform: Platform) -> Self {
-        Self(Arc::new(RwLock::new((clean_name(&name.into()), platform))))
+        Self(Arc::new(RwLock::new(Own {
+            name: clean_name(&name.into()),
+            platform,
+            status: None,
+        })))
     }
 
     pub fn name(&self) -> String {
-        self.0.read().unwrap().0.clone()
+        self.0.read().unwrap().name.clone()
     }
 
     pub fn set_name(&self, name: &str) {
-        self.0.write().unwrap().0 = clean_name(name);
+        self.0.write().unwrap().name = clean_name(name);
+    }
+
+    pub(crate) fn status(&self) -> Option<DeviceStatus> {
+        self.0.read().unwrap().status
+    }
+
+    /// Records a battery reading. False if it's the one peers already have.
+    pub(crate) fn set_status(&self, status: DeviceStatus) -> bool {
+        let mut own = self.0.write().unwrap();
+        let changed = own.status != Some(status);
+        own.status = Some(status);
+        changed
     }
 
     pub(crate) fn info(&self, fingerprint: &str) -> DeviceInfo {
-        let (name, platform) = self.0.read().unwrap().clone();
+        let own = self.0.read().unwrap();
+        let (name, platform) = (own.name.clone(), own.platform);
         DeviceInfo {
             fingerprint: fingerprint.to_string(),
             display_name: name,
