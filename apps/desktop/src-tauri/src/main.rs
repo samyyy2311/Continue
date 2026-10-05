@@ -64,8 +64,7 @@ pub struct TrustedPeerDto {
 #[serde(rename_all = "camelCase")]
 pub struct PeerPermissionDto {
     pub capability_id: u32,
-    pub capability_name: String,
-    pub grant: String,
+    pub grant: &'static str,
 }
 
 /// A question for the window, as it shows it.
@@ -626,27 +625,21 @@ fn get_permissions(
     state: State<DesktopRuntimeState>,
     peer_fingerprint: String,
 ) -> Result<Vec<PeerPermissionDto>, String> {
-    let store = &state.device.stores.permissions;
-    let capabilities = [
-        (CapabilityId::FILE_TRANSFER, "File Transfer"),
-        (CapabilityId::CLIPBOARD, "Clipboard Sync"),
-        (CapabilityId::NOTIFICATIONS, "Notification Relay"),
-    ];
-
-    let mut list = Vec::with_capacity(capabilities.len());
-    for (cap_id, name) in capabilities {
-        let perm_state = store
-            .query_state(&peer_fingerprint, cap_id)
-            .map_err(user_error("Couldn't load what this device can do."))?;
-
-        list.push(PeerPermissionDto {
-            capability_id: cap_id.raw(),
-            capability_name: name.to_string(),
-            grant: perm_state.as_str().to_string(),
-        });
-    }
-
-    Ok(list)
+    [CapabilityId::FILE_TRANSFER, CapabilityId::CLIPBOARD]
+        .into_iter()
+        .map(|capability| {
+            let grant = state
+                .device
+                .stores
+                .permissions
+                .query_state(&peer_fingerprint, capability)
+                .map_err(user_error("Couldn't load what this device can do."))?;
+            Ok(PeerPermissionDto {
+                capability_id: capability.raw(),
+                grant: grant.as_str(),
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -800,25 +793,6 @@ async fn push_text(device: &Device, peer: &str, text: String) -> Result<(), Stri
     }
 }
 
-#[tauri::command]
-async fn send_notification(
-    state: State<'_, DesktopRuntimeState>,
-    peer_fingerprint: String,
-    title: String,
-    body: String,
-    app_name: String,
-) -> Result<(), String> {
-    let sent = state
-        .device
-        .send_notification(&peer_fingerprint, "continue.desktop", app_name, title, body)
-        .await;
-    match sent {
-        Ok(()) => Ok(()),
-        Err(SendError::NotConnected) => Err(NOT_CONNECTED.to_string()),
-        Err(e) => Err(user_error("Couldn't send the notification.")(e)),
-    }
-}
-
 fn initialize_desktop_runtime(
     app_handle: &AppHandle,
     db_path: &Path,
@@ -959,8 +933,7 @@ fn main() {
             disconnect_peer,
             reconnect_peer,
             send_file_to_peer,
-            send_clipboard_text,
-            send_notification
+            send_clipboard_text
         ])
         // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
         .on_window_event(|window, event| {

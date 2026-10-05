@@ -551,7 +551,6 @@ dependencies = [
  "discovery",
  "history",
  "identity",
- "notifications",
  "pairing",
  "permissions",
  "protocol",

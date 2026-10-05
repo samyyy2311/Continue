@@ -29,8 +29,7 @@ class AppUnitTest {
 
     @Test
     fun appPairingFlowAddsPeer() {
-        val qrPayload = bridge.generateQrPayload("192.168.1.10:41235")
-        val peer = bridge.pairFromQr(qrPayload)
+        val peer = bridge.pairFromQr("continue://pair?endpoint=192.168.1.10:41235")
 
         assertNotNull(peer)
         val peers = bridge.listTrustedPeers()

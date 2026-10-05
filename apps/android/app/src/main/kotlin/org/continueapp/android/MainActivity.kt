@@ -139,7 +139,6 @@ private fun ContinueApp(
     val scope = rememberCoroutineScope()
     val showMessage: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
 
-    // The core has no connection events yet, so connection state is read on a short interval.
     PermissionPrompts(state.questions)
     SendNewCopies(state, onMessage = showMessage)
     BackHandler(enabled = overlay != null) { overlay = null }

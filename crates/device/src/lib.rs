@@ -73,9 +73,6 @@ pub enum SendError {
 
     #[error(transparent)]
     Clipboard(#[from] clipboard::ClipboardError),
-
-    #[error(transparent)]
-    Notification(#[from] notifications::NotificationError),
 }
 
 /// Cheap to clone; every clone is the same device.
@@ -286,35 +283,6 @@ impl Device {
             location: None,
         });
         result?;
-        Ok(())
-    }
-
-    /// Shows a notification on the peer, as posted by `app_name`.
-    pub async fn send_notification(
-        &self,
-        peer: &str,
-        package_name: &str,
-        app_name: String,
-        title: String,
-        body: String,
-    ) -> Result<(), SendError> {
-        let mux = self.sessions.get(peer).ok_or(SendError::NotConnected)?;
-        let now = unix_ms();
-        let post = notifications::NotificationPost {
-            notification_id: format!("notif-{now}"),
-            package_name: package_name.to_string(),
-            app_name,
-            title,
-            body,
-            timestamp: now,
-            actions: vec![],
-        };
-        mux.send_notification_to_peer(
-            &notifications::NotificationDispatcher::new(),
-            post,
-            &CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, true),
-        )
-        .await?;
         Ok(())
     }
 }

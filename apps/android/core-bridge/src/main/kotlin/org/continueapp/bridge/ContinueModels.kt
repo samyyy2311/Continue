@@ -111,8 +111,6 @@ sealed class ContinueException(
 
     class PairingFailedException(message: String) : ContinueException(message)
 
-    class PairingTimeoutException(message: String) : ContinueException(message)
-
     class DatabaseErrorException(message: String) : ContinueException(message)
 
     class NotInitializedException(message: String) : ContinueException(message)

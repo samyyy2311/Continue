@@ -17,7 +17,6 @@ export type Grant = "Allow" | "Ask" | "Deny" | "AllowOnce";
 
 export interface PeerPermission {
   capabilityId: number;
-  capabilityName: string;
   grant: Grant;
 }
 
@@ -106,10 +105,10 @@ export interface PermissionQuestion {
 
 export type PermissionAnswer = "allow" | "alwaysAllow" | "decline";
 
-export const PERMISSIONS: Record<string, { label: string; description: string }> = {
-  "File Transfer": { label: "Files", description: "Send files to this computer" },
-  "Clipboard Sync": { label: "Text", description: "Send copied text and links" },
-  "Notification Relay": { label: "Notifications", description: "Show its notifications here" },
+/** By capability id. */
+export const PERMISSIONS: Record<number, { label: string; description: string }> = {
+  1: { label: "Files", description: "Send files to this computer" },
+  2: { label: "Text", description: "Send copied text and links" },
 };
 
 export const GRANT_OPTIONS: { value: Grant; label: string }[] = [

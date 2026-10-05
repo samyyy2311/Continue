@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   Check,
@@ -95,6 +95,9 @@ import {
   type TrustedPeer,
   type View,
 } from "./types.ts";
+
+/** In rail order; Ctrl/Cmd plus 1 to 4 opens each. */
+const VIEW_ORDER: View[] = ["transfer", "devices", "history", "settings"];
 
 const ACCENT_KEY = "continue.accent";
 const THEME_KEY = "continue.theme";
@@ -310,6 +313,9 @@ export default function App() {
         const unRenamed = await listen("peer-renamed", () => void refreshPeers());
         keep(unRenamed);
 
+        const addRow = (row: Omit<Activity, "id" | "timestamp">) =>
+          setActivity((prev) => [{ ...row, id: crypto.randomUUID(), timestamp: Date.now() }, ...prev]);
+
         const unFile = await listen<{
           peerId: string;
           peerName: string;
@@ -320,21 +326,16 @@ export default function App() {
           "file-received",
           (event) => {
             showToast(`Received ${event.payload.fileName}`);
-            setActivity((prev) => [
-              {
-                id: `rx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                kind: "file",
-                label: event.payload.fileName,
-                peerId: event.payload.peerId,
-                peerName: event.payload.peerName,
-                status: "received",
-                timestamp: Date.now(),
-                path: event.payload.path,
-                bytesSent: event.payload.bytesReceived,
-                totalBytes: event.payload.bytesReceived,
-              },
-              ...prev,
-            ]);
+            addRow({
+              kind: "file",
+              label: event.payload.fileName,
+              peerId: event.payload.peerId,
+              peerName: event.payload.peerName,
+              status: "received",
+              path: event.payload.path,
+              bytesSent: event.payload.bytesReceived,
+              totalBytes: event.payload.bytesReceived,
+            });
           },
         );
         keep(unFile);
@@ -344,18 +345,13 @@ export default function App() {
           (event) => {
             // The app has already put it on the clipboard, even if this window is in the background.
             showToast(`Copied text from ${event.payload.peerName}`);
-            setActivity((prev) => [
-              {
-                id: `rx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                kind: "text",
-                label: event.payload.content,
-                peerId: event.payload.peerId,
-                peerName: event.payload.peerName,
-                status: "received",
-                timestamp: Date.now(),
-              },
-              ...prev,
-            ]);
+            addRow({
+              kind: "text",
+              label: event.payload.content,
+              peerId: event.payload.peerId,
+              peerName: event.payload.peerName,
+              status: "received",
+            });
           },
         );
         keep(unClip);
@@ -388,22 +384,17 @@ export default function App() {
         const unSynced = await listen<{ peerId: string; peerName: string; text: string; failed: boolean }>(
           "clipboard-synced",
           ({ payload }) =>
-            setActivity((prev) => [
-              {
-                id: `sync-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                kind: "text",
-                label: payload.text,
-                peerId: payload.peerId,
-                peerName: payload.peerName,
-                status: payload.failed ? "failed" : "sent",
-                timestamp: Date.now(),
-              },
-              ...prev,
-            ]),
+            addRow({
+              kind: "text",
+              label: payload.text,
+              peerId: payload.peerId,
+              peerName: payload.peerName,
+              status: payload.failed ? "failed" : "sent",
+            }),
         );
         keep(unSynced);
-      } catch {
-        // Outside Tauri, e.g. in a browser preview, there are no events to hear.
+      } catch (error) {
+        showError(errorMessage(error));
       }
     };
 
@@ -412,7 +403,7 @@ export default function App() {
       disposed = true;
       for (const cleanup of cleanups) cleanup();
     };
-  }, [refreshPeers, showToast]);
+  }, [refreshPeers, showToast, showError]);
 
   const handleConnect = async (peer: TrustedPeer, rawAddress: string) => {
     const address = rawAddress.trim();
@@ -570,8 +561,7 @@ export default function App() {
     }
   };
 
-  const handleSendText = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleSendText = async () => {
     const text = textInput.trim();
     const peer = readyPeer();
     if (!peer || !text) return;
@@ -659,28 +649,15 @@ export default function App() {
 
   useEffect(() => {
     const handleGlobalKeydown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setShowPairDialog(false);
-        return;
-      }
-
       const mod = isMac ? e.metaKey : e.ctrlKey;
       const target = e.target as HTMLElement | null;
       const isInputFocused =
         target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
 
-      if (mod && e.key === "1") {
+      const shortcutView = VIEW_ORDER[Number(e.key) - 1];
+      if (mod && shortcutView) {
         e.preventDefault();
-        setView("transfer");
-      } else if (mod && e.key === "2") {
-        e.preventDefault();
-        setView("devices");
-      } else if (mod && e.key === "3") {
-        e.preventDefault();
-        setView("history");
-      } else if (mod && e.key === "4") {
-        e.preventDefault();
-        setView("settings");
+        setView(shortcutView);
       } else if (mod && !e.shiftKey && e.key.toLowerCase() === "o") {
         e.preventDefault();
         void chooseFilesRef.current();
@@ -1203,15 +1180,16 @@ function DeviceCard(props: {
       <ul className="list">
         {permissions ? (
           permissions.map((perm) => {
-            const meta = PERMISSIONS[perm.capabilityName];
+            const meta = PERMISSIONS[perm.capabilityId];
+            if (!meta) return null;
             return (
               <li key={perm.capabilityId} className="list-item">
                 <div className="list-text">
-                  <span className="list-title">{meta?.label ?? perm.capabilityName}</span>
-                  {meta && <span className="list-sub">{meta.description}</span>}
+                  <span className="list-title">{meta.label}</span>
+                  <span className="list-sub">{meta.description}</span>
                 </div>
                 <ButtonGroup
-                  label={meta?.label ?? perm.capabilityName}
+                  label={meta.label}
                   options={GRANT_OPTIONS}
                   value={perm.grant}
                   onChange={(grant) => updateGrant(perm, grant)}
@@ -1533,7 +1511,7 @@ function SettingsView(props: SettingsViewProps) {
   );
 }
 
-/** Paired devices connect on their own; this is the fallback for when they can't find each other. */
+/** Connect normally, or by typing the address when the devices can't find each other. */
 function ManualConnect(props: {
   initialAddress?: string;
   isConnecting: boolean;
