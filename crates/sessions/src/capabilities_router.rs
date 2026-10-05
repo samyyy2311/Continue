@@ -340,7 +340,8 @@ pub fn spawn_capabilities_dispatcher(
                         };
 
                         if handlers.on_notification_action.is_some() {
-                            if let Ok(action) = NotificationActionInvoke::decode(raw_bytes.clone()) {
+                            if let Ok(action) = NotificationActionInvoke::decode(raw_bytes.clone())
+                            {
                                 if !action.action_id.is_empty()
                                     || !action.reply_text.is_empty()
                                     || (handlers.on_notification_received.is_none()
@@ -420,10 +421,7 @@ pub fn spawn_capabilities_dispatcher(
 
                         if let Ok(dismiss) = NotificationDismiss::decode(raw_bytes) {
                             if let Some(store) = &handlers.permission_store {
-                                store.consume_if_allow_once(
-                                    &peer_fp,
-                                    CapabilityId::NOTIFICATIONS,
-                                );
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::NOTIFICATIONS);
                             }
                             let notif_id = dismiss.notification_id.clone();
                             if let Some(cb) = &handlers.on_notification_dismiss {

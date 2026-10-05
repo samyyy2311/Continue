@@ -150,7 +150,10 @@ async fn notifications_routing_and_quick_reply_roundtrip() {
     let server_handle = tokio::spawn(async move {
         let incoming = server_endpoint.accept().await.expect("incoming conn");
         let conn = incoming.await.expect("conn");
-        let mux = std::sync::Arc::new(SessionMultiplexer::new("phone-fingerprint".to_string(), conn));
+        let mux = std::sync::Arc::new(SessionMultiplexer::new(
+            "phone-fingerprint".to_string(),
+            conn,
+        ));
 
         let mut handlers = sessions::SessionCapabilityHandlers::new(std::env::temp_dir());
         let n_tx = notif_tx.clone();
@@ -173,7 +176,10 @@ async fn notifications_routing_and_quick_reply_roundtrip() {
         .unwrap();
 
     // Phone side (client): sends notifications, receives actions
-    let client_mux = std::sync::Arc::new(SessionMultiplexer::new("desktop-fingerprint".to_string(), client_conn));
+    let client_mux = std::sync::Arc::new(SessionMultiplexer::new(
+        "desktop-fingerprint".to_string(),
+        client_conn,
+    ));
     let mut client_handlers = sessions::SessionCapabilityHandlers::new(std::env::temp_dir());
     let a_tx = action_tx.clone();
     client_handlers.on_notification_action = Some(std::sync::Arc::new(move |_peer, action| {
@@ -225,7 +231,10 @@ async fn notifications_routing_and_quick_reply_roundtrip() {
 
     let received_action = action_rx.recv().await.expect("received action on phone");
     assert_eq!(received_action.notification_id, "notif-001");
-    assert_eq!(received_action.reply_text, "Replying from desktop keyboard!");
+    assert_eq!(
+        received_action.reply_text,
+        "Replying from desktop keyboard!"
+    );
 
     // 3. Phone sends Dismiss to Desktop
     let dismiss = notifications::NotificationDismiss {
@@ -239,6 +248,9 @@ async fn notifications_routing_and_quick_reply_roundtrip() {
         .expect("send_notification_dismiss_to_peer");
     assert!(ack_dismiss.handled);
 
-    let received_dismiss = dismiss_rx.recv().await.expect("received dismiss on desktop");
+    let received_dismiss = dismiss_rx
+        .recv()
+        .await
+        .expect("received dismiss on desktop");
     assert_eq!(received_dismiss.notification_id, "notif-001");
 }
