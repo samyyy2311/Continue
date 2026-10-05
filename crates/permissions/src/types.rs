@@ -50,6 +50,15 @@ impl From<PersistedGrant> for PermissionState {
 }
 
 impl PermissionState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Allow => "Allow",
+            Self::Deny => "Deny",
+            Self::Ask => "Ask",
+            Self::AllowOnce => "AllowOnce",
+        }
+    }
+
     pub fn is_allowed(&self) -> bool {
         matches!(self, Self::Allow | Self::AllowOnce)
     }

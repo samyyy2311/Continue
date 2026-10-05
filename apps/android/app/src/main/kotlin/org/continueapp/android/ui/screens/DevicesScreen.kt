@@ -12,7 +12,6 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Laptop
-import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,7 +41,6 @@ import org.continueapp.android.ui.components.SettingsRow
 import org.continueapp.android.ui.components.StatusLabel
 import org.continueapp.bridge.CAPABILITY_CLIPBOARD_ID
 import org.continueapp.bridge.CAPABILITY_FILE_TRANSFER_ID
-import org.continueapp.bridge.CAPABILITY_NOTIFICATIONS_ID
 import org.continueapp.bridge.PermissionGrant
 import org.continueapp.bridge.TrustedPeer
 
@@ -115,14 +113,6 @@ fun DeviceScreen(
         SectionLabel("What ${peer.displayName} can do on this phone")
         PermissionRow(state, peer, CAPABILITY_FILE_TRANSFER_ID, "Send files", Icons.Outlined.Folder, onMessage)
         PermissionRow(state, peer, CAPABILITY_CLIPBOARD_ID, "Send text", Icons.Outlined.ContentPaste, onMessage)
-        PermissionRow(
-            state,
-            peer,
-            CAPABILITY_NOTIFICATIONS_ID,
-            "Send notifications",
-            Icons.Outlined.Notifications,
-            onMessage,
-        )
 
         TextButton(onClick = { confirmingForget = true }, modifier = Modifier.padding(vertical = 16.dp)) {
             Text("Forget this computer", color = MaterialTheme.colorScheme.error)

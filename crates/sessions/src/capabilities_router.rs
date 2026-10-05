@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -159,6 +158,13 @@ fn stored_answer(
     }
 }
 
+/// Uses up a one-time allow once the thing it allowed has arrived.
+fn consume_allow_once(handlers: &SessionCapabilityHandlers, peer: &str, capability: CapabilityId) {
+    if let Some(store) = &handlers.permission_store {
+        store.consume_if_allow_once(peer, capability);
+    }
+}
+
 /// Spawns the capability router loop processing incoming streams dispatched by the multiplexer.
 pub fn spawn_capabilities_dispatcher(
     mux: Arc<SessionMultiplexer>,
@@ -217,12 +223,11 @@ pub fn spawn_capabilities_dispatcher(
                                     "Successfully received file {} ({} bytes) from {peer_fp}",
                                     received.file_name, received.bytes_received
                                 );
-                                if let Some(store) = &handlers.permission_store {
-                                    store.consume_if_allow_once(
-                                        &peer_fp,
-                                        CapabilityId::FILE_TRANSFER,
-                                    );
-                                }
+                                consume_allow_once(
+                                    &handlers,
+                                    &peer_fp,
+                                    CapabilityId::FILE_TRANSFER,
+                                );
                                 if let Some(cb) = &handlers.on_file_received {
                                     cb(&peer_fp, received);
                                 }
@@ -237,16 +242,8 @@ pub fn spawn_capabilities_dispatcher(
                         debug!("Handling incoming clipboard stream from {peer_fp}");
                         let is_permitted =
                             permitted(&handlers, &peer_fp, CapabilityId::CLIPBOARD, None).await;
-
-                        let mut caps = HashSet::new();
-                        caps.insert(CapabilityId::CLIPBOARD);
-                        let query = CapabilityQuery {
-                            capability: CapabilityId::CLIPBOARD,
-                            is_os_available: true,
-                            is_app_permitted: true,
-                            is_peer_authorized: is_permitted,
-                            negotiated_session_capabilities: caps,
-                        };
+                        let query =
+                            CapabilityQuery::for_session(CapabilityId::CLIPBOARD, is_permitted);
 
                         let on_received = handlers.on_clipboard_received.clone();
                         let result = clipboard
@@ -266,9 +263,7 @@ pub fn spawn_capabilities_dispatcher(
 
                         match result {
                             Ok(update) => {
-                                if let Some(store) = &handlers.permission_store {
-                                    store.consume_if_allow_once(&peer_fp, CapabilityId::CLIPBOARD);
-                                }
+                                consume_allow_once(&handlers, &peer_fp, CapabilityId::CLIPBOARD);
                                 if let Some(cb) = on_received {
                                     cb(&peer_fp, update);
                                 }
@@ -282,16 +277,8 @@ pub fn spawn_capabilities_dispatcher(
                         debug!("Handling incoming notification stream from {peer_fp}");
                         let is_permitted =
                             permitted(&handlers, &peer_fp, CapabilityId::NOTIFICATIONS, None).await;
-
-                        let mut caps = HashSet::new();
-                        caps.insert(CapabilityId::NOTIFICATIONS);
-                        let query = CapabilityQuery {
-                            capability: CapabilityId::NOTIFICATIONS,
-                            is_os_available: true,
-                            is_app_permitted: true,
-                            is_peer_authorized: is_permitted,
-                            negotiated_session_capabilities: caps,
-                        };
+                        let query =
+                            CapabilityQuery::for_session(CapabilityId::NOTIFICATIONS, is_permitted);
 
                         let on_received = handlers.on_notification_received.clone();
                         let result = handlers
@@ -306,12 +293,11 @@ pub fn spawn_capabilities_dispatcher(
 
                         match result {
                             Ok(post) => {
-                                if let Some(store) = &handlers.permission_store {
-                                    store.consume_if_allow_once(
-                                        &peer_fp,
-                                        CapabilityId::NOTIFICATIONS,
-                                    );
-                                }
+                                consume_allow_once(
+                                    &handlers,
+                                    &peer_fp,
+                                    CapabilityId::NOTIFICATIONS,
+                                );
                                 if let Some(cb) = on_received {
                                     cb(&peer_fp, post);
                                 }

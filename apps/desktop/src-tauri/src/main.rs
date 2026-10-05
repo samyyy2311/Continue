@@ -63,8 +63,7 @@ pub struct TrustedPeerDto {
 #[serde(rename_all = "camelCase")]
 pub struct PeerPermissionDto {
     pub capability_id: u32,
-    pub capability_name: String,
-    pub grant: String,
+    pub grant: &'static str,
 }
 
 struct ActivePairingServer {
@@ -781,34 +780,19 @@ fn get_permissions(
     state: State<DesktopRuntimeState>,
     peer_fingerprint: String,
 ) -> Result<Vec<PeerPermissionDto>, String> {
-    let store = &state.permission_store;
-    let capabilities = [
-        (CapabilityId::FILE_TRANSFER, "File Transfer"),
-        (CapabilityId::CLIPBOARD, "Clipboard Sync"),
-        (CapabilityId::NOTIFICATIONS, "Notification Relay"),
-    ];
-
-    let mut list = Vec::with_capacity(capabilities.len());
-    for (cap_id, name) in capabilities {
-        let perm_state = store
-            .query_state(&peer_fingerprint, cap_id)
-            .map_err(user_error("Couldn't load what this device can do."))?;
-
-        let grant_str = match perm_state {
-            permissions::PermissionState::Allow => "Allow",
-            permissions::PermissionState::Deny => "Deny",
-            permissions::PermissionState::Ask => "Ask",
-            permissions::PermissionState::AllowOnce => "AllowOnce",
-        };
-
-        list.push(PeerPermissionDto {
-            capability_id: cap_id.raw(),
-            capability_name: name.to_string(),
-            grant: grant_str.to_string(),
-        });
-    }
-
-    Ok(list)
+    [CapabilityId::FILE_TRANSFER, CapabilityId::CLIPBOARD]
+        .into_iter()
+        .map(|capability| {
+            let grant = state
+                .permission_store
+                .query_state(&peer_fingerprint, capability)
+                .map_err(user_error("Couldn't load what this device can do."))?;
+            Ok(PeerPermissionDto {
+                capability_id: capability.raw(),
+                grant: grant.as_str(),
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -818,18 +802,14 @@ fn set_permission(
     capability_id: u32,
     grant: String,
 ) -> Result<(), String> {
-    let parsed_grant = match grant.as_str() {
-        "Allow" => permissions::PersistedGrant::Allow,
-        "Deny" => permissions::PersistedGrant::Deny,
-        "Ask" => permissions::PersistedGrant::Ask,
-        "AllowOnce" => {
-            state
-                .permission_store
-                .grant_allow_once(&peer_fingerprint, CapabilityId(capability_id));
-            return Ok(());
-        }
-        _ => return Err(user_error(SAVE_FAILED)(format!("unknown grant {grant}"))),
-    };
+    if grant == permissions::PermissionState::AllowOnce.as_str() {
+        state
+            .permission_store
+            .grant_allow_once(&peer_fingerprint, CapabilityId(capability_id));
+        return Ok(());
+    }
+    let parsed_grant = permissions::PersistedGrant::parse(&grant)
+        .ok_or_else(|| user_error(SAVE_FAILED)(format!("unknown grant {grant}")))?;
 
     state
         .permission_store
@@ -1040,16 +1020,7 @@ async fn push_text(
         .get(&peer_fingerprint)
         .ok_or_else(|| NOT_CONNECTED.to_string())?;
 
-    let mut caps = std::collections::HashSet::new();
-    caps.insert(protocol::CapabilityId::CLIPBOARD);
-    let query = capabilities::CapabilityQuery {
-        capability: protocol::CapabilityId::CLIPBOARD,
-        is_os_available: true,
-        is_app_permitted: true,
-        is_peer_authorized: true,
-        negotiated_session_capabilities: caps,
-    };
-
+    let query = capabilities::CapabilityQuery::for_session(CapabilityId::CLIPBOARD, true);
     let result = mux
         .send_clipboard_to_peer(
             clipboard::ClipboardFormat::TextPlain,
@@ -1073,52 +1044,6 @@ async fn push_text(
     result
         .map(|_| ())
         .map_err(user_error("Couldn't send the text."))
-}
-
-#[tauri::command]
-async fn send_notification(
-    state: State<'_, DesktopRuntimeState>,
-    peer_fingerprint: String,
-    title: String,
-    body: String,
-    app_name: String,
-) -> Result<(), String> {
-    let mux = state
-        .sessions
-        .get(&peer_fingerprint)
-        .ok_or_else(|| NOT_CONNECTED.to_string())?;
-
-    let dispatcher = notifications::NotificationDispatcher::new();
-    let mut caps = std::collections::HashSet::new();
-    caps.insert(protocol::CapabilityId::NOTIFICATIONS);
-    let query = capabilities::CapabilityQuery {
-        capability: protocol::CapabilityId::NOTIFICATIONS,
-        is_os_available: true,
-        is_app_permitted: true,
-        is_peer_authorized: true,
-        negotiated_session_capabilities: caps,
-    };
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-
-    let post = notifications::NotificationPost {
-        notification_id: format!("notif-{now}"),
-        package_name: "continue.desktop".to_string(),
-        app_name,
-        title,
-        body,
-        timestamp: now,
-        actions: vec![],
-    };
-
-    mux.send_notification_to_peer(&dispatcher, post, &query)
-        .await
-        .map_err(user_error("Couldn't send the notification."))?;
-
-    Ok(())
 }
 
 fn initialize_desktop_runtime(
@@ -1297,8 +1222,7 @@ fn main() {
             disconnect_peer,
             reconnect_peer,
             send_file_to_peer,
-            send_clipboard_text,
-            send_notification
+            send_clipboard_text
         ])
         // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
         .on_window_event(|window, event| {

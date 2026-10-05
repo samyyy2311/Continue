@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use history::{Direction, HistoryStore, Kind};
 use identity::{FileSecretStore, IdentitySigner};
-use pairing::{DeviceKeys, InitiatorPairing, ReplayCache, TrustStore, TrustedPeer};
+use pairing::{DeviceKeys, TrustStore, TrustedPeer};
 use permissions::{PermissionStore, PersistedGrant};
 use protocol::CapabilityId;
 use sessions::{PermissionDecision, SessionMultiplexer, SessionRegistry, SessionState};
@@ -31,19 +31,11 @@ pub enum ContinueFfiError {
     #[error("Pairing failed: {0}")]
     PairingFailed(String),
 
-    #[error("Pairing timed out")]
-    PairingTimeout,
-
     #[error("Database error: {0}")]
     DatabaseError(String),
 
     #[error("Core has not been initialized")]
     NotInitialized,
-}
-
-struct ActivePairing {
-    server_endpoint: quinn::Endpoint,
-    result_rx: tokio::sync::oneshot::Receiver<Result<TrustedPeer, pairing::PairingError>>,
 }
 
 struct CoreState {
@@ -53,8 +45,6 @@ struct CoreState {
     history: HistoryStore,
     transport_cert: Arc<TransportCertificate>,
     identity_signer: Arc<dyn IdentitySigner>,
-    replay_cache: Arc<ReplayCache>,
-    active_pairing: Option<ActivePairing>,
     sessions: SessionRegistry,
     /// Transport keys of paired devices; only these may connect to `listener`.
     trusted_keys: Arc<RwLock<HashSet<[u8; 32]>>>,
@@ -456,8 +446,6 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
         history,
         transport_cert,
         identity_signer,
-        replay_cache: Arc::new(ReplayCache::new()),
-        active_pairing: None,
         sessions,
         trusted_keys,
         listener,
@@ -585,170 +573,6 @@ fn stop_tasks(tasks: &mut Vec<tokio::task::JoinHandle<()>>) {
     }
 }
 
-pub fn generate_qr_payload(endpoint: String) -> Result<String, ContinueFfiError> {
-    let mut lock = CORE.lock().unwrap();
-    let state = lock.as_mut().ok_or(ContinueFfiError::NotInitialized)?;
-
-    let mut initiator = InitiatorPairing::new(
-        state.identity_signer.clone(),
-        state.transport_cert.clone(),
-        state.trust_store.clone(),
-        state.replay_cache.clone(),
-    );
-
-    let qr = initiator
-        .generate_qr(endpoint)
-        .map_err(|e| ContinueFfiError::PairingFailed(e.to_string()))?;
-
-    Ok(qr.encode())
-}
-
-pub fn start_pairing_server(
-    listen_port: u16,
-    advertised_endpoint: String,
-) -> Result<String, ContinueFfiError> {
-    let mut lock = CORE.lock().unwrap();
-    let state = lock.as_mut().ok_or(ContinueFfiError::NotInitialized)?;
-
-    if let Some(existing) = state.active_pairing.take() {
-        existing.server_endpoint.close(0u32.into(), b"superseded");
-    }
-
-    let recorded_spki: Arc<Mutex<Option<[u8; 32]>>> = Arc::new(Mutex::new(None));
-    let server_tls = state
-        .transport_cert
-        .build_pairing_server_tls(recorded_spki.clone())
-        .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
-
-    let bind_addr = std::net::SocketAddr::from(([0, 0, 0, 0], listen_port));
-    let server_endpoint = transport::create_server_endpoint(bind_addr, server_tls)
-        .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
-
-    let mut initiator = InitiatorPairing::new(
-        state.identity_signer.clone(),
-        state.transport_cert.clone(),
-        state.trust_store.clone(),
-        state.replay_cache.clone(),
-    );
-
-    let qr = initiator
-        .generate_qr(advertised_endpoint)
-        .map_err(|e| ContinueFfiError::PairingFailed(e.to_string()))?;
-
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let endpoint_clone = server_endpoint.clone();
-    let trust_store = state.trust_store.clone();
-    let registry = state.sessions.clone();
-
-    state.runtime.spawn(async move {
-        let incoming = match endpoint_clone.accept().await {
-            Some(inc) => inc,
-            None => {
-                let _ = tx.send(Err(transport::TransportError::HandshakeFailed(
-                    "Listener closed".to_string(),
-                )
-                .into()));
-                return;
-            }
-        };
-
-        let conn = match incoming.await {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = tx.send(Err(transport::TransportError::HandshakeFailed(format!(
-                    "Connection failed: {e}"
-                ))
-                .into()));
-                return;
-            }
-        };
-
-        let (mut send_stream, mut recv_stream) = match conn.accept_bi().await {
-            Ok(s) => s,
-            Err(e) => {
-                let _ = tx.send(Err(transport::TransportError::HandshakeFailed(format!(
-                    "Stream accept failed: {e}"
-                ))
-                .into()));
-                return;
-            }
-        };
-
-        let recorded_hash = match *recorded_spki.lock().unwrap() {
-            Some(h) => h,
-            None => {
-                let _ = tx.send(Err(pairing::PairingError::SpkiMismatch));
-                return;
-            }
-        };
-
-        let result = initiator
-            .complete_handshake(&mut send_stream, &mut recv_stream, recorded_hash)
-            .await;
-        if let Ok(peer) = &result {
-            sessions::remember_peer_address(
-                &trust_store,
-                &peer.fingerprint,
-                conn.remote_address().ip(),
-            );
-            registry.redial_now();
-        }
-        let _ = tx.send(result);
-    });
-
-    state.active_pairing = Some(ActivePairing {
-        server_endpoint,
-        result_rx: rx,
-    });
-
-    Ok(qr.encode())
-}
-
-pub fn await_pairing_result(timeout_secs: u32) -> Result<TrustedPeerFfi, ContinueFfiError> {
-    let (runtime, trusted_keys, mut active_pairing) = {
-        let mut lock = CORE.lock().unwrap();
-        let state = lock.as_mut().ok_or(ContinueFfiError::NotInitialized)?;
-        let pairing = state.active_pairing.take().ok_or_else(|| {
-            ContinueFfiError::InternalError("No active pairing server".to_string())
-        })?;
-        (state.runtime.clone(), state.trusted_keys.clone(), pairing)
-    };
-
-    let result = runtime.block_on(async {
-        tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs as u64),
-            &mut active_pairing.result_rx,
-        )
-        .await
-    });
-
-    active_pairing
-        .server_endpoint
-        .close(0u32.into(), b"complete");
-
-    match result {
-        Ok(Ok(Ok(peer))) => {
-            trust_key(&trusted_keys, peer.transport_spki_hash);
-            Ok(peer.into())
-        }
-        Ok(Ok(Err(pairing_err))) => Err(ContinueFfiError::PairingFailed(pairing_err.to_string())),
-        Ok(Err(_channel_closed)) => Err(ContinueFfiError::PairingFailed(
-            "Pairing cancelled or aborted".to_string(),
-        )),
-        Err(_elapsed) => Err(ContinueFfiError::PairingTimeout),
-    }
-}
-
-pub fn cancel_pairing() -> Result<(), ContinueFfiError> {
-    let mut lock = CORE.lock().unwrap();
-    let state = lock.as_mut().ok_or(ContinueFfiError::NotInitialized)?;
-
-    if let Some(pairing) = state.active_pairing.take() {
-        pairing.server_endpoint.close(0u32.into(), b"cancelled");
-    }
-    Ok(())
-}
-
 pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiError> {
     let (runtime, transport_cert, identity_signer, trust_store, trusted_keys, registry) = {
         let lock = CORE.lock().unwrap();
@@ -845,14 +669,6 @@ pub fn remove_trusted_peer(fingerprint: String) -> Result<bool, ContinueFfiError
     Ok(removed)
 }
 
-pub fn get_capabilities() -> Result<Vec<u32>, ContinueFfiError> {
-    Ok(vec![
-        CapabilityId::FILE_TRANSFER.raw(),
-        CapabilityId::CLIPBOARD.raw(),
-        CapabilityId::NOTIFICATIONS.raw(),
-    ])
-}
-
 pub fn query_permission(
     peer_fingerprint: String,
     capability_id: u32,
@@ -865,12 +681,7 @@ pub fn query_permission(
         .query_state(&peer_fingerprint, CapabilityId(capability_id))
         .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;
 
-    Ok(match status {
-        permissions::PermissionState::Allow => "Allow".to_string(),
-        permissions::PermissionState::Deny => "Deny".to_string(),
-        permissions::PermissionState::Ask => "Ask".to_string(),
-        permissions::PermissionState::AllowOnce => "AllowOnce".to_string(),
-    })
+    Ok(status.as_str().to_string())
 }
 
 pub fn set_permission(
@@ -881,22 +692,14 @@ pub fn set_permission(
     let lock = CORE.lock().unwrap();
     let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
 
-    let parsed_grant = match grant.as_str() {
-        "Allow" => PersistedGrant::Allow,
-        "Deny" => PersistedGrant::Deny,
-        "Ask" => PersistedGrant::Ask,
-        "AllowOnce" => {
-            state
-                .permission_store
-                .grant_allow_once(&peer_fingerprint, CapabilityId(capability_id));
-            return Ok(());
-        }
-        _ => {
-            return Err(ContinueFfiError::InternalError(format!(
-                "Invalid grant string: {grant}"
-            )))
-        }
-    };
+    if grant == permissions::PermissionState::AllowOnce.as_str() {
+        state
+            .permission_store
+            .grant_allow_once(&peer_fingerprint, CapabilityId(capability_id));
+        return Ok(());
+    }
+    let parsed_grant = PersistedGrant::parse(&grant)
+        .ok_or_else(|| ContinueFfiError::InternalError(format!("Invalid grant string: {grant}")))?;
 
     state
         .permission_store
@@ -905,30 +708,6 @@ pub fn set_permission(
             CapabilityId(capability_id),
             1,
             parsed_grant,
-        )
-        .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;
-
-    Ok(())
-}
-
-pub fn revoke_permission(
-    peer_fingerprint: String,
-    capability_id: u32,
-) -> Result<(), ContinueFfiError> {
-    let lock = CORE.lock().unwrap();
-    let state = lock.as_ref().ok_or(ContinueFfiError::NotInitialized)?;
-
-    state
-        .permission_store
-        .clear_allow_once_for_peer(&peer_fingerprint);
-
-    state
-        .permission_store
-        .set_persisted_grant(
-            &peer_fingerprint,
-            CapabilityId(capability_id),
-            1,
-            PersistedGrant::Deny,
         )
         .map_err(|e| ContinueFfiError::DatabaseError(e.to_string()))?;
 
@@ -1057,16 +836,7 @@ pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(),
     } = connected_session(&peer_fingerprint)?;
     let sent = text.clone();
     let result = runtime.block_on(async move {
-        let mut caps = std::collections::HashSet::new();
-        caps.insert(protocol::CapabilityId::CLIPBOARD);
-        let query = capabilities::CapabilityQuery {
-            capability: protocol::CapabilityId::CLIPBOARD,
-            is_os_available: true,
-            is_app_permitted: true,
-            is_peer_authorized: true,
-            negotiated_session_capabilities: caps,
-        };
-
+        let query = capabilities::CapabilityQuery::for_session(CapabilityId::CLIPBOARD, true);
         mux.send_clipboard_to_peer(
             clipboard::ClipboardFormat::TextPlain,
             sent.into_bytes(),
@@ -1090,49 +860,6 @@ pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(),
     result
         .map(|_| ())
         .map_err(|e| ContinueFfiError::InternalError(e.to_string()))
-}
-
-pub fn send_notification(
-    peer_fingerprint: String,
-    title: String,
-    body: String,
-    app_name: String,
-) -> Result<(), ContinueFfiError> {
-    let Connected { runtime, mux, .. } = connected_session(&peer_fingerprint)?;
-
-    runtime.block_on(async move {
-        let dispatcher = notifications::NotificationDispatcher::new();
-        let mut caps = std::collections::HashSet::new();
-        caps.insert(protocol::CapabilityId::NOTIFICATIONS);
-        let query = capabilities::CapabilityQuery {
-            capability: protocol::CapabilityId::NOTIFICATIONS,
-            is_os_available: true,
-            is_app_permitted: true,
-            is_peer_authorized: true,
-            negotiated_session_capabilities: caps,
-        };
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-
-        let post = notifications::NotificationPost {
-            notification_id: format!("notif-{now}"),
-            package_name: "continue.ffi".to_string(),
-            app_name,
-            title,
-            body,
-            timestamp: now,
-            actions: vec![],
-        };
-
-        mux.send_notification_to_peer(&dispatcher, post, &query)
-            .await
-            .map_err(|e| ContinueFfiError::InternalError(e.to_string()))?;
-
-        Ok(())
-    })
 }
 
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
