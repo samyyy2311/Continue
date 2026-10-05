@@ -326,121 +326,13 @@ pub fn spawn_capabilities_dispatcher(
                             return;
                         }
 
-                        let raw_bytes = match transport::read_raw_msg(
+                        handle_incoming_notification(
+                            &handlers,
+                            &peer_fp,
+                            &mut stream.send_stream,
                             &mut stream.recv_stream,
-                            limits::MAX_FRAME_NOTIFICATION_BYTES,
                         )
-                        .await
-                        {
-                            Ok(bytes) => bytes,
-                            Err(e) => {
-                                error!("Failed to read notification frame from {peer_fp}: {e}");
-                                return;
-                            }
-                        };
-
-                        if handlers.on_notification_action.is_some() {
-                            if let Ok(action) = NotificationActionInvoke::decode(raw_bytes.clone())
-                            {
-                                if !action.action_id.is_empty()
-                                    || !action.reply_text.is_empty()
-                                    || (handlers.on_notification_received.is_none()
-                                        && handlers.on_notification_dismiss.is_none())
-                                {
-                                    if let Some(store) = &handlers.permission_store {
-                                        store.consume_if_allow_once(
-                                            &peer_fp,
-                                            CapabilityId::NOTIFICATIONS,
-                                        );
-                                    }
-                                    let notif_id = action.notification_id.clone();
-                                    if let Some(cb) = &handlers.on_notification_action {
-                                        cb(&peer_fp, action);
-                                    }
-                                    let ack = NotificationAck {
-                                        notification_id: notif_id,
-                                        handled: true,
-                                    };
-                                    let _ = transport::write_msg(
-                                        &mut stream.send_stream,
-                                        &ack,
-                                        limits::MAX_FRAME_NOTIFICATION_BYTES,
-                                    )
-                                    .await;
-                                    return;
-                                }
-                            }
-                        }
-
-                        if let Ok(post) = NotificationPost::decode(raw_bytes.clone()) {
-                            let is_post = !post.title.is_empty()
-                                || !post.body.is_empty()
-                                || post.timestamp > 0
-                                || !post.actions.is_empty()
-                                || (handlers.on_notification_received.is_some()
-                                    && handlers.on_notification_dismiss.is_none());
-
-                            if is_post {
-                                if post.body.len() > limits::MAX_NOTIFICATION_BODY_BYTES {
-                                    let _ = transport::write_msg(
-                                        &mut stream.send_stream,
-                                        &NotificationAck {
-                                            notification_id: post.notification_id.clone(),
-                                            handled: false,
-                                        },
-                                        limits::MAX_FRAME_NOTIFICATION_BYTES,
-                                    )
-                                    .await;
-                                    error!("Notification body too large from {peer_fp}");
-                                    return;
-                                }
-
-                                if let Some(store) = &handlers.permission_store {
-                                    store.consume_if_allow_once(
-                                        &peer_fp,
-                                        CapabilityId::NOTIFICATIONS,
-                                    );
-                                }
-                                let notif_id = post.notification_id.clone();
-                                if let Some(cb) = &handlers.on_notification_received {
-                                    cb(&peer_fp, post);
-                                }
-                                let ack = NotificationAck {
-                                    notification_id: notif_id,
-                                    handled: true,
-                                };
-                                let _ = transport::write_msg(
-                                    &mut stream.send_stream,
-                                    &ack,
-                                    limits::MAX_FRAME_NOTIFICATION_BYTES,
-                                )
-                                .await;
-                                return;
-                            }
-                        }
-
-                        if let Ok(dismiss) = NotificationDismiss::decode(raw_bytes) {
-                            if let Some(store) = &handlers.permission_store {
-                                store.consume_if_allow_once(&peer_fp, CapabilityId::NOTIFICATIONS);
-                            }
-                            let notif_id = dismiss.notification_id.clone();
-                            if let Some(cb) = &handlers.on_notification_dismiss {
-                                cb(&peer_fp, dismiss);
-                            }
-                            let ack = NotificationAck {
-                                notification_id: notif_id,
-                                handled: true,
-                            };
-                            let _ = transport::write_msg(
-                                &mut stream.send_stream,
-                                &ack,
-                                limits::MAX_FRAME_NOTIFICATION_BYTES,
-                            )
-                            .await;
-                            return;
-                        }
-
-                        error!("Unrecognized notification message from {peer_fp}");
+                        .await;
                     }
                     unknown => {
                         debug!("Received unsupported capability stream {unknown:?} from {peer_fp}");
@@ -449,6 +341,115 @@ pub fn spawn_capabilities_dispatcher(
             });
         }
     });
+}
+
+enum IncomingNotification {
+    Action(NotificationActionInvoke),
+    Post(NotificationPost),
+    Dismiss(NotificationDismiss),
+}
+
+fn parse_incoming_notification(
+    bytes: &[u8],
+    handlers: &SessionCapabilityHandlers,
+) -> Option<IncomingNotification> {
+    if handlers.on_notification_action.is_some() {
+        if let Ok(action) = NotificationActionInvoke::decode(bytes) {
+            if !action.action_id.is_empty()
+                || !action.reply_text.is_empty()
+                || (handlers.on_notification_received.is_none()
+                    && handlers.on_notification_dismiss.is_none())
+            {
+                return Some(IncomingNotification::Action(action));
+            }
+        }
+    }
+
+    if let Ok(post) = NotificationPost::decode(bytes) {
+        let is_post = !post.title.is_empty()
+            || !post.body.is_empty()
+            || post.timestamp > 0
+            || !post.actions.is_empty()
+            || (handlers.on_notification_received.is_some()
+                && handlers.on_notification_dismiss.is_none());
+        if is_post {
+            return Some(IncomingNotification::Post(post));
+        }
+    }
+
+    if let Ok(dismiss) = NotificationDismiss::decode(bytes) {
+        return Some(IncomingNotification::Dismiss(dismiss));
+    }
+
+    None
+}
+
+async fn handle_incoming_notification(
+    handlers: &SessionCapabilityHandlers,
+    peer_fp: &str,
+    send_stream: &mut quinn::SendStream,
+    recv_stream: &mut quinn::RecvStream,
+) {
+    let raw_bytes =
+        match transport::read_raw_msg(recv_stream, limits::MAX_FRAME_NOTIFICATION_BYTES).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Failed to read notification frame from {peer_fp}: {e}");
+                return;
+            }
+        };
+
+    let Some(incoming) = parse_incoming_notification(&raw_bytes, handlers) else {
+        error!("Unrecognized notification message from {peer_fp}");
+        return;
+    };
+
+    let notif_id = match incoming {
+        IncomingNotification::Action(action) => {
+            let id = action.notification_id.clone();
+            if let Some(cb) = &handlers.on_notification_action {
+                cb(peer_fp, action);
+            }
+            id
+        }
+        IncomingNotification::Post(post) => {
+            if post.body.len() > limits::MAX_NOTIFICATION_BODY_BYTES {
+                let _ = transport::write_msg(
+                    send_stream,
+                    &NotificationAck {
+                        notification_id: post.notification_id,
+                        handled: false,
+                    },
+                    limits::MAX_FRAME_NOTIFICATION_BYTES,
+                )
+                .await;
+                error!("Notification body too large from {peer_fp}");
+                return;
+            }
+            let id = post.notification_id.clone();
+            if let Some(cb) = &handlers.on_notification_received {
+                cb(peer_fp, post);
+            }
+            id
+        }
+        IncomingNotification::Dismiss(dismiss) => {
+            let id = dismiss.notification_id.clone();
+            if let Some(cb) = &handlers.on_notification_dismiss {
+                cb(peer_fp, dismiss);
+            }
+            id
+        }
+    };
+
+    if let Some(store) = &handlers.permission_store {
+        store.consume_if_allow_once(peer_fp, CapabilityId::NOTIFICATIONS);
+    }
+
+    let ack = NotificationAck {
+        notification_id: notif_id,
+        handled: true,
+    };
+    let _ = transport::write_msg(send_stream, &ack, limits::MAX_FRAME_NOTIFICATION_BYTES).await;
 }
 
 impl SessionMultiplexer {

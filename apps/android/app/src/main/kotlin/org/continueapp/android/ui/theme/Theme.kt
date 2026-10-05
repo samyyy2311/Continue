@@ -25,7 +25,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import org.continueapp.android.R
 
@@ -98,7 +97,7 @@ private fun style(
     fontSize = size.sp,
     lineHeight = lineHeight.sp,
     fontWeight = weight,
-    letterSpacing = tracking.em,
+    letterSpacing = (size * tracking).sp,
 )
 
 private val AppTypography =
@@ -109,6 +108,7 @@ private val AppTypography =
         titleMedium = style(17, 22, FontWeight.Medium),
         bodyLarge = style(16, 23),
         bodyMedium = style(14, 20),
+        bodySmall = style(12, 16),
         labelLarge = style(15, 20, FontWeight.Medium),
         labelMedium = style(13, 18, FontWeight.Medium),
         labelSmall = style(12, 16, FontWeight.Medium),

@@ -93,6 +93,15 @@ class ContinueNotificationListener : NotificationListenerService() {
             pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
         }.getOrDefault(packageName)
 
+    private inline fun broadcastToPeers(send: (ContinueApplication, String) -> Unit) {
+        val app = applicationContext as? ContinueApplication ?: return
+        for (peer in app.state.peers) {
+            if (peer.fingerprint in app.state.connected) {
+                send(app, peer.fingerprint)
+            }
+        }
+    }
+
     private fun dispatchNotification(
         sbn: StatusBarNotification,
         title: String,
@@ -112,16 +121,11 @@ class ContinueNotificationListener : NotificationListenerService() {
                 actions = actionModels,
             )
 
-        val app = applicationContext as? ContinueApplication
-        app?.let { application ->
-            for (peer in application.state.peers) {
-                if (peer.fingerprint in application.state.connected) {
-                    runCatching {
-                        application.coreBridge.sendNotification(peer.fingerprint, post)
-                    }.onFailure { e ->
-                        Log.e(TAG, "Failed to send notification to ${peer.fingerprint}", e)
-                    }
-                }
+        broadcastToPeers { app, peer ->
+            runCatching {
+                app.coreBridge.sendNotification(peer, post)
+            }.onFailure { e ->
+                Log.e(TAG, "Failed to send notification to $peer", e)
             }
         }
     }
@@ -144,20 +148,11 @@ class ContinueNotificationListener : NotificationListenerService() {
 
         cachedActions.remove(sbn.key)
 
-        val app = applicationContext as? ContinueApplication
-        app?.let { application ->
-            for (peer in application.state.peers) {
-                if (peer.fingerprint in application.state.connected) {
-                    runCatching {
-                        application.coreBridge.sendNotificationDismiss(
-                            peer.fingerprint,
-                            sbn.key,
-                            sbn.packageName,
-                        )
-                    }.onFailure { e ->
-                        Log.e(TAG, "Failed to send notification dismiss to ${peer.fingerprint}", e)
-                    }
-                }
+        broadcastToPeers { app, peer ->
+            runCatching {
+                app.coreBridge.sendNotificationDismiss(peer, sbn.key, sbn.packageName)
+            }.onFailure { e ->
+                Log.e(TAG, "Failed to send notification dismiss to $peer", e)
             }
         }
     }

@@ -51,42 +51,34 @@ export function NotificationOverlay() {
     }
   };
 
-  const handleAction = async (notif: PhoneNotification, action: NotificationAction) => {
-    if (action.isReply) {
-      if (
-        activeReply?.notificationId === notif.notificationId &&
-        activeReply?.actionId === action.actionId
-      ) {
-        setActiveReply(null);
-        setReplyText("");
-      } else {
-        setActiveReply({ notificationId: notif.notificationId, actionId: action.actionId });
-        setReplyText("");
-      }
-      return;
-    }
-
+  const executeAction = async (notif: PhoneNotification, actionId: string, text: string = "") => {
     try {
-      await invokeNotificationAction(notif.peerId, notif.notificationId, action.actionId, "");
+      await invokeNotificationAction(notif.peerId, notif.notificationId, actionId, text);
       dismiss(notif.notificationId);
     } catch (e) {
       console.error("Failed to invoke notification action", e);
     }
   };
 
+  const handleAction = async (notif: PhoneNotification, action: NotificationAction) => {
+    if (action.isReply) {
+      const isCurrent =
+        activeReply?.notificationId === notif.notificationId &&
+        activeReply?.actionId === action.actionId;
+      setActiveReply(isCurrent ? null : { notificationId: notif.notificationId, actionId: action.actionId });
+      setReplyText("");
+      return;
+    }
+
+    await executeAction(notif, action.actionId);
+  };
+
   const sendReply = async (notif: PhoneNotification, actionId: string) => {
-    if (!replyText.trim() || sending) return;
+    const text = replyText.trim();
+    if (!text || sending) return;
     setSending(true);
     try {
-      await invokeNotificationAction(
-        notif.peerId,
-        notif.notificationId,
-        actionId,
-        replyText.trim(),
-      );
-      dismiss(notif.notificationId);
-    } catch (e) {
-      console.error("Failed to send notification reply", e);
+      await executeAction(notif, actionId, text);
     } finally {
       setSending(false);
     }

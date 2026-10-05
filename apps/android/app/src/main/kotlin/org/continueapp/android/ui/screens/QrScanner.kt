@@ -56,14 +56,16 @@ fun QrScanner(
                     mainExecutor.execute { latestOnScanned(text) }
                 }
             }
-            val provider = providerFuture.get()
-            provider.unbindAll()
-            provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+            runCatching {
+                val provider = providerFuture.get()
+                provider.unbindAll()
+                provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+            }
         }, mainExecutor)
 
         onDispose {
             if (providerFuture.isDone) {
-                providerFuture.get().unbindAll()
+                runCatching { providerFuture.get().unbindAll() }
             }
             analysisExecutor.shutdown()
         }

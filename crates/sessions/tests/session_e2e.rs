@@ -146,7 +146,6 @@ async fn notifications_routing_and_quick_reply_roundtrip() {
     let (action_tx, mut action_rx) = tokio::sync::mpsc::channel(1);
     let (dismiss_tx, mut dismiss_rx) = tokio::sync::mpsc::channel(1);
 
-    // Desktop side (server): receives notifications & dismissals, sends actions
     let server_handle = tokio::spawn(async move {
         let incoming = server_endpoint.accept().await.expect("incoming conn");
         let conn = incoming.await.expect("conn");
@@ -175,7 +174,6 @@ async fn notifications_routing_and_quick_reply_roundtrip() {
         .await
         .unwrap();
 
-    // Phone side (client): sends notifications, receives actions
     let client_mux = std::sync::Arc::new(SessionMultiplexer::new(
         "desktop-fingerprint".to_string(),
         client_conn,
@@ -190,7 +188,6 @@ async fn notifications_routing_and_quick_reply_roundtrip() {
     let query = capabilities::CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, true);
     let dispatcher = notifications::NotificationDispatcher::new();
 
-    // 1. Phone sends NotificationPost to Desktop
     let post = notifications::NotificationPost {
         notification_id: "notif-001".to_string(),
         package_name: "com.example.chat".to_string(),
@@ -215,7 +212,6 @@ async fn notifications_routing_and_quick_reply_roundtrip() {
     assert_eq!(received_post.notification_id, "notif-001");
     assert_eq!(received_post.body, "Hello from phone!");
 
-    // 2. Desktop sends quick reply action back to Phone
     let server_mux = server_handle.await.unwrap();
     let action_invoke = notifications::NotificationActionInvoke {
         notification_id: "notif-001".to_string(),
@@ -236,7 +232,6 @@ async fn notifications_routing_and_quick_reply_roundtrip() {
         "Replying from desktop keyboard!"
     );
 
-    // 3. Phone sends Dismiss to Desktop
     let dismiss = notifications::NotificationDismiss {
         notification_id: "notif-001".to_string(),
         package_name: "com.example.chat".to_string(),
