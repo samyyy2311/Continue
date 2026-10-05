@@ -45,10 +45,7 @@ class ContinueCoreBridgeTest {
     @Test
     fun pairingFlowAndPeers() {
         bridge.initCore(":memory:")
-        val qrPayload = bridge.generateQrPayload("192.168.1.50:41235")
-        assertTrue(qrPayload.startsWith("continue://pair"))
-
-        val pairedPeer = bridge.pairFromQr(qrPayload)
+        val pairedPeer = bridge.pairFromQr("continue://pair?endpoint=192.168.1.50:41235")
         assertNotNull(pairedPeer.fingerprint)
 
         val peers = bridge.listTrustedPeers()
@@ -80,7 +77,7 @@ class ContinueCoreBridgeTest {
         val updatedGrant = bridge.queryPermission(peerFp, Capability.FILE_TRANSFER.id)
         assertEquals(PermissionGrant.ALLOW.rawValue, updatedGrant)
 
-        bridge.revokePermission(peerFp, Capability.FILE_TRANSFER.id)
+        bridge.setPermission(peerFp, Capability.FILE_TRANSFER.id, PermissionGrant.ASK.rawValue)
         val revokedGrant = bridge.queryPermission(peerFp, Capability.FILE_TRANSFER.id)
         assertEquals(PermissionGrant.ASK.rawValue, revokedGrant)
     }
@@ -108,6 +105,5 @@ class ContinueCoreBridgeTest {
         assertEquals(0L, bytesSent)
 
         bridge.sendClipboardText(peerFp, "Test clipboard payload")
-        bridge.sendNotification(peerFp, "Alert", "Incoming message", "Messages")
     }
 }

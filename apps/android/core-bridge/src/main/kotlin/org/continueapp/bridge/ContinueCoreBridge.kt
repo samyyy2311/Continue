@@ -11,14 +11,10 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit.MILLISECONDS
 import org.continueapp.bridge.ffi.answerPermissionRequest as coreAnswerPermissionRequest
-import org.continueapp.bridge.ffi.awaitPairingResult as coreAwaitPairingResult
 import org.continueapp.bridge.ffi.cancelIncoming as coreCancelIncoming
-import org.continueapp.bridge.ffi.cancelPairing as coreCancelPairing
 import org.continueapp.bridge.ffi.clearHistory as coreClearHistory
 import org.continueapp.bridge.ffi.connectToPeer as coreConnectToPeer
 import org.continueapp.bridge.ffi.disconnect as coreDisconnect
-import org.continueapp.bridge.ffi.generateQrPayload as coreGenerateQrPayload
-import org.continueapp.bridge.ffi.getCapabilities as coreGetCapabilities
 import org.continueapp.bridge.ffi.getDeviceFingerprint as coreGetDeviceFingerprint
 import org.continueapp.bridge.ffi.getDeviceSpkiHash as coreGetDeviceSpkiHash
 import org.continueapp.bridge.ffi.initCore as coreInitCore
@@ -32,16 +28,13 @@ import org.continueapp.bridge.ffi.pairFromQr as corePairFromQr
 import org.continueapp.bridge.ffi.queryPermission as coreQueryPermission
 import org.continueapp.bridge.ffi.reconnect as coreReconnect
 import org.continueapp.bridge.ffi.removeTrustedPeer as coreRemoveTrustedPeer
-import org.continueapp.bridge.ffi.revokePermission as coreRevokePermission
 import org.continueapp.bridge.ffi.sendClipboardText as coreSendClipboardText
 import org.continueapp.bridge.ffi.sendFile as coreSendFile
-import org.continueapp.bridge.ffi.sendNotification as coreSendNotification
 import org.continueapp.bridge.ffi.setDeviceName as coreSetDeviceName
 import org.continueapp.bridge.ffi.setHistoryLocation as coreSetHistoryLocation
 import org.continueapp.bridge.ffi.setKeyStore as coreSetKeyStore
 import org.continueapp.bridge.ffi.setPermission as coreSetPermission
 import org.continueapp.bridge.ffi.startDiscovery as coreStartDiscovery
-import org.continueapp.bridge.ffi.startPairingServer as coreStartPairingServer
 import org.continueapp.bridge.ffi.stopDiscovery as coreStopDiscovery
 
 private const val SECONDS_DIVISOR = 1000L
@@ -63,24 +56,11 @@ interface ContinueCoreBridge {
 
     fun stopDiscovery()
 
-    fun generateQrPayload(endpoint: String): String
-
-    fun startPairingServer(
-        listenPort: Int = 41235,
-        advertisedEndpoint: String,
-    ): String
-
-    fun awaitPairingResult(timeoutSecs: Long = 60L): TrustedPeer
-
-    fun cancelPairing()
-
     fun pairFromQr(qrPayload: String): TrustedPeer
 
     fun listTrustedPeers(): List<TrustedPeer>
 
     fun removeTrustedPeer(fingerprint: String): Boolean
-
-    fun getCapabilities(): List<Int>
 
     fun queryPermission(
         peerFingerprint: String,
@@ -91,11 +71,6 @@ interface ContinueCoreBridge {
         peerFingerprint: String,
         capabilityId: Int,
         grant: String,
-    )
-
-    fun revokePermission(
-        peerFingerprint: String,
-        capabilityId: Int,
     )
 
     /**
@@ -149,13 +124,6 @@ interface ContinueCoreBridge {
     fun sendClipboardText(
         peerFingerprint: String,
         text: String,
-    )
-
-    fun sendNotification(
-        peerFingerprint: String,
-        title: String,
-        body: String,
-        appName: String,
     )
 
     companion object {
@@ -218,35 +186,6 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         isDiscovering = false
     }
 
-    override fun generateQrPayload(endpoint: String): String {
-        checkInitialized()
-        return "continue://pair?endpoint=$endpoint&pubkey=mock-public-key"
-    }
-
-    override fun startPairingServer(
-        listenPort: Int,
-        advertisedEndpoint: String,
-    ): String {
-        checkInitialized()
-        return "mock-pin-123456"
-    }
-
-    override fun awaitPairingResult(timeoutSecs: Long): TrustedPeer {
-        checkInitialized()
-        val peer =
-            TrustedPeer(
-                fingerprint = "mock-paired-peer-1",
-                displayName = "Mock Trusted Device",
-                pairedAt = System.currentTimeMillis() / SECONDS_DIVISOR,
-            )
-        peers[peer.fingerprint] = peer
-        return peer
-    }
-
-    override fun cancelPairing() {
-        checkInitialized()
-    }
-
     override fun pairFromQr(qrPayload: String): TrustedPeer {
         checkInitialized()
         if (!qrPayload.startsWith("continue://pair")) {
@@ -275,11 +214,6 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         return peers.remove(fingerprint) != null
     }
 
-    override fun getCapabilities(): List<Int> {
-        checkInitialized()
-        return Capability.entries.map { it.id }
-    }
-
     override fun queryPermission(
         peerFingerprint: String,
         capabilityId: Int,
@@ -297,15 +231,6 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         checkInitialized()
         val key = "$peerFingerprint:$capabilityId"
         permissions[key] = grant
-    }
-
-    override fun revokePermission(
-        peerFingerprint: String,
-        capabilityId: Int,
-    ) {
-        checkInitialized()
-        val key = "$peerFingerprint:$capabilityId"
-        permissions.remove(key)
     }
 
     override fun nextPermissionQuestion(timeoutMs: Long): PermissionQuestion? = questions.poll(timeoutMs, MILLISECONDS)
@@ -370,15 +295,6 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         checkInitialized()
     }
 
-    override fun sendNotification(
-        peerFingerprint: String,
-        title: String,
-        body: String,
-        appName: String,
-    ) {
-        checkInitialized()
-    }
-
     private fun checkInitialized() {
         if (!initialized) {
             throw ContinueException.NotInitializedException("Core runtime engine is not initialized")
@@ -407,25 +323,11 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
 
     override fun stopDiscovery() = native { coreStopDiscovery() }
 
-    override fun generateQrPayload(endpoint: String): String = native { coreGenerateQrPayload(endpoint) }
-
-    override fun startPairingServer(
-        listenPort: Int,
-        advertisedEndpoint: String,
-    ): String = native { coreStartPairingServer(listenPort.toUShort(), advertisedEndpoint) }
-
-    override fun awaitPairingResult(timeoutSecs: Long): TrustedPeer =
-        native { coreAwaitPairingResult(timeoutSecs.toUInt()).toTrustedPeer() }
-
-    override fun cancelPairing() = native { coreCancelPairing() }
-
     override fun pairFromQr(qrPayload: String): TrustedPeer = native { corePairFromQr(qrPayload).toTrustedPeer() }
 
     override fun listTrustedPeers(): List<TrustedPeer> = native { coreListTrustedPeers().map { it.toTrustedPeer() } }
 
     override fun removeTrustedPeer(fingerprint: String): Boolean = native { coreRemoveTrustedPeer(fingerprint) }
-
-    override fun getCapabilities(): List<Int> = native { coreGetCapabilities().map { it.toInt() } }
 
     override fun queryPermission(
         peerFingerprint: String,
@@ -437,11 +339,6 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
         capabilityId: Int,
         grant: String,
     ) = native { coreSetPermission(peerFingerprint, capabilityId.toUInt(), grant) }
-
-    override fun revokePermission(
-        peerFingerprint: String,
-        capabilityId: Int,
-    ) = native { coreRevokePermission(peerFingerprint, capabilityId.toUInt()) }
 
     override fun nextPermissionQuestion(timeoutMs: Long): PermissionQuestion? =
         coreNextPermissionRequest(timeoutMs.toUInt())?.toPermissionQuestion()
@@ -499,13 +396,6 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
         peerFingerprint: String,
         text: String,
     ) = native { coreSendClipboardText(peerFingerprint, text) }
-
-    override fun sendNotification(
-        peerFingerprint: String,
-        title: String,
-        body: String,
-        appName: String,
-    ) = native { coreSendNotification(peerFingerprint, title, body, appName) }
 }
 
 private fun TrustedPeerFfi.toTrustedPeer() =
@@ -564,8 +454,6 @@ private inline fun <T> native(call: () -> T): T =
                 ContinueException.InvalidQrException(message)
             is ContinueFfiException.PairingFailed ->
                 ContinueException.PairingFailedException(message)
-            is ContinueFfiException.PairingTimeout ->
-                ContinueException.PairingTimeoutException(message)
             is ContinueFfiException.DatabaseException ->
                 ContinueException.DatabaseErrorException(message)
             is ContinueFfiException.NotInitialized ->

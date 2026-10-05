@@ -13,11 +13,11 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use thiserror::Error;
 
-use device::{Device, PairError, PairingServer, Stores};
+use device::{Device, PairError, Stores};
 use history::{Direction, Kind};
 use identity::FileSecretStore;
 use pairing::{DeviceKeys, TrustedPeer};
-use permissions::{PermissionState, PersistedGrant};
+use permissions::PermissionState;
 use protocol::CapabilityId;
 use sessions::{PermissionDecision, SessionState};
 use tokio::runtime::Runtime;
@@ -33,9 +33,6 @@ pub enum ContinueFfiError {
 
     #[error("Pairing failed: {0}")]
     PairingFailed(String),
-
-    #[error("Pairing timed out")]
-    PairingTimeout,
 
     #[error("Database error: {0}")]
     DatabaseError(String),
@@ -127,7 +124,6 @@ impl identity::SecretStore for AppSecretStore {
 struct CoreState {
     runtime: Arc<Runtime>,
     device: Device,
-    active_pairing: Option<PairingServer>,
     listener: quinn::Endpoint,
     discovery_tasks: Vec<tokio::task::JoinHandle<()>>,
     incoming: sessions::IncomingFiles,
@@ -452,7 +448,6 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
     *CORE.lock().unwrap() = Some(CoreState {
         runtime,
         device,
-        active_pairing: None,
         listener,
         discovery_tasks: Vec::new(),
         incoming,
@@ -564,55 +559,8 @@ fn stop_tasks(tasks: &mut Vec<tokio::task::JoinHandle<()>>) {
     }
 }
 
-pub fn generate_qr_payload(endpoint: String) -> Result<String, ContinueFfiError> {
-    with_core(|core| {
-        let qr = core.device.initiator().generate_qr(endpoint);
-        Ok(qr.map_err(pairing_failed)?.encode())
-    })
-}
-
 fn pairing_failed(error: impl ToString) -> ContinueFfiError {
     ContinueFfiError::PairingFailed(error.to_string())
-}
-
-pub fn start_pairing_server(
-    listen_port: u16,
-    advertised_endpoint: String,
-) -> Result<String, ContinueFfiError> {
-    with_core(|core| {
-        // Dropping the one before stops it.
-        core.active_pairing = None;
-        let _runtime = core.runtime.enter();
-        let server = core
-            .device
-            .start_pairing(listen_port, |_| advertised_endpoint)
-            .map_err(internal)?;
-        let code = server.code.clone();
-        core.active_pairing = Some(server);
-        Ok(code)
-    })
-}
-
-pub fn await_pairing_result(timeout_secs: u32) -> Result<TrustedPeerFfi, ContinueFfiError> {
-    let (runtime, server) = with_core(|core| {
-        let server = core
-            .active_pairing
-            .take()
-            .ok_or_else(|| internal("No active pairing server"))?;
-        Ok((core.runtime.clone(), server))
-    })?;
-    let timeout = Duration::from_secs(timeout_secs.into());
-    match runtime.block_on(tokio::time::timeout(timeout, server.finish())) {
-        Ok(result) => Ok(result.map_err(pairing_failed)?.into()),
-        Err(_elapsed) => Err(ContinueFfiError::PairingTimeout),
-    }
-}
-
-pub fn cancel_pairing() -> Result<(), ContinueFfiError> {
-    with_core(|core| {
-        core.active_pairing = None;
-        Ok(())
-    })
 }
 
 pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiError> {
@@ -634,14 +582,6 @@ pub fn remove_trusted_peer(fingerprint: String) -> Result<bool, ContinueFfiError
     runtime
         .block_on(device.forget(&fingerprint))
         .map_err(database)
-}
-
-pub fn get_capabilities() -> Result<Vec<u32>, ContinueFfiError> {
-    Ok(vec![
-        CapabilityId::FILE_TRANSFER.raw(),
-        CapabilityId::CLIPBOARD.raw(),
-        CapabilityId::NOTIFICATIONS.raw(),
-    ])
 }
 
 pub fn query_permission(
@@ -671,24 +611,6 @@ pub fn set_permission(
             .stores
             .permissions
             .set_state(&peer_fingerprint, CapabilityId(capability_id), state)
-            .map_err(database)
-    })
-}
-
-pub fn revoke_permission(
-    peer_fingerprint: String,
-    capability_id: u32,
-) -> Result<(), ContinueFfiError> {
-    with_core(|core| {
-        let permissions = &core.device.stores.permissions;
-        permissions.clear_allow_once_for_peer(&peer_fingerprint);
-        permissions
-            .set_persisted_grant(
-                &peer_fingerprint,
-                CapabilityId(capability_id),
-                1,
-                PersistedGrant::Deny,
-            )
             .map_err(database)
     })
 }
@@ -740,24 +662,6 @@ pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(),
     let (runtime, device) = device()?;
     runtime
         .block_on(device.send_text(&peer_fingerprint, text))
-        .map_err(internal)
-}
-
-pub fn send_notification(
-    peer_fingerprint: String,
-    title: String,
-    body: String,
-    app_name: String,
-) -> Result<(), ContinueFfiError> {
-    let (runtime, device) = device()?;
-    runtime
-        .block_on(device.send_notification(
-            &peer_fingerprint,
-            "continue.ffi",
-            app_name,
-            title,
-            body,
-        ))
         .map_err(internal)
 }
 

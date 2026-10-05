@@ -294,7 +294,6 @@ private fun messageFor(
 ): String =
     when (error) {
         is ContinueException.InvalidQrException -> "That isn't a Continue pairing code."
-        is ContinueException.PairingTimeoutException -> "Pairing took too long. Try again."
         is ContinueException.PairingFailedException ->
             "Couldn't pair. Check that both devices are on the same network and try again."
         else -> fallback
