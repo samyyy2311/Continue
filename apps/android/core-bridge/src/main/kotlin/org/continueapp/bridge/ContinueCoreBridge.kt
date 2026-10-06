@@ -327,8 +327,7 @@ class MockContinueCoreBridge : ContinueCoreBridge {
 
     override fun forwardNotificationRemoved(id: String) = checkInitialized()
 
-    override fun nextNotificationEvent(timeoutMs: Long): NotificationEvent? =
-        notificationEvents.poll(timeoutMs, MILLISECONDS)
+    override fun nextNotificationEvent(timeoutMs: Long): NotificationEvent? = notificationEvents.poll(timeoutMs, MILLISECONDS)
 
     private fun checkInitialized() {
         if (!initialized) {
@@ -437,8 +436,7 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
         text: String,
     ) = native { coreSendClipboardText(peerFingerprint, text) }
 
-    override fun forwardNotification(notification: PhoneNotification) =
-        native { coreForwardNotification(notification.toFfi()) }
+    override fun forwardNotification(notification: PhoneNotification) = native { coreForwardNotification(notification.toFfi()) }
 
     override fun forwardNotificationRemoved(id: String) = native { coreForwardNotificationRemoved(id) }
 
