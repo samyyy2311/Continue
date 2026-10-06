@@ -10,7 +10,7 @@ use identity::{FileSecretStore, PlatformFirstStore, SecretStore, SecretStoreErro
 use zeroize::Zeroizing;
 
 /// Groups this app's items in the OS store; matches the app identifier.
-const SERVICE: &str = "org.continue.desktop";
+const SERVICE: &str = "in.caffeinelabs.continue.desktop";
 
 struct OsSecretStore {
     service: String,
