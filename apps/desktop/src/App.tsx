@@ -38,7 +38,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
-import { ButtonGroup, ConnectionStatus, DeviceGlyph, ProgressBar, Switch } from "./components.tsx";
+import { ButtonGroup, ConnectionStatus, ProgressBar, Switch } from "./components.tsx";
 import {
   cancelIncoming,
   clearHistory,
@@ -187,19 +187,19 @@ function getFileIcon(name: string) {
   const category = getFileCategory(name);
   switch (category) {
     case "image":
-      return <FileImage size={18} className="file-kind-icon icon-image" />;
+      return <FileImage size={18} />;
     case "video":
-      return <FileVideo size={18} className="file-kind-icon icon-media" />;
+      return <FileVideo size={18} />;
     case "audio":
-      return <FileAudio size={18} className="file-kind-icon icon-media" />;
+      return <FileAudio size={18} />;
     case "archive":
-      return <FileArchive size={18} className="file-kind-icon icon-archive" />;
+      return <FileArchive size={18} />;
     case "code":
-      return <FileCode size={18} className="file-kind-icon icon-code" />;
+      return <FileCode size={18} />;
     case "document":
-      return <FileText size={18} className="file-kind-icon icon-doc" />;
+      return <FileText size={18} />;
     default:
-      return <File size={18} className="file-kind-icon icon-other" />;
+      return <File size={18} />;
   }
 }
 
@@ -709,7 +709,7 @@ export default function App() {
   if (loadError) {
     return (
       <main className="standalone">
-        <DeviceGlyph icon={<Laptop size={28} strokeWidth={1.75} />} size="lg" />
+        <Laptop size={56} strokeWidth={1.25} className="device-icon" />
         <h1 className="headline">Continue couldn't start</h1>
         <p className="supporting">{loadError}</p>
         <button type="button" className="btn btn-filled" onClick={() => window.location.reload()}>
@@ -819,7 +819,7 @@ export default function App() {
       {dragCount !== null && (
         <div className="drop-scrim" aria-hidden="true">
           <div className="drop-target">
-            <DeviceGlyph icon={<Upload size={28} strokeWidth={1.75} />} active={selectedPeer?.isConnected} size="lg" />
+            <Upload size={40} strokeWidth={1.5} className="text-accent" />
             <p className="headline">
               {selectedPeer?.isConnected ? `Drop to send to ${selectedPeer.displayName}` : "Connect your phone first"}
             </p>
@@ -877,15 +877,12 @@ function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: bo
             <span className="list-sub">
               {item.totalBytes
                 ? `${formatBytes(item.bytesSent ?? 0)} of ${formatBytes(item.totalBytes)}`
-                : "Getting ready"}{" "}
-              · {who}
+                : "Getting ready"}
             </span>
           </>
         ) : (
           <span className="list-sub">
-            {who} ·{" "}
-            {when}
-            {item.kind === "file" && item.bytesSent !== undefined && ` · ${formatBytes(item.bytesSent)}`}
+            {who}, {when}
           </span>
         )}
       </div>
@@ -966,7 +963,7 @@ function HomeView(props: HomeViewProps) {
   if (!peer) {
     return (
       <div className="empty">
-        <DeviceGlyph icon={<Smartphone size={28} strokeWidth={1.75} />} size="lg" />
+        <Smartphone size={56} strokeWidth={1.25} className="device-icon" />
         <h1 className="display">Pair your phone</h1>
         <p className="supporting">
           Scan a code once, then send files and text between your phone and this computer over your own network.
@@ -983,59 +980,22 @@ function HomeView(props: HomeViewProps) {
   const busy = activeTransfers.length + recentActivity.length > 0;
 
   return (
-    <div className="page home">
-      {peers.length > 1 && (
-        <div className="chips" role="radiogroup" aria-label="Device">
-          {peers.map((p) => (
-            <button
-              key={p.fingerprint}
-              type="button"
-              role="radio"
-              aria-checked={p.fingerprint === peer.fingerprint}
-              className="chip"
-              onClick={() => onSelectPeer(p.fingerprint)}
-            >
-              {p.fingerprint === peer.fingerprint && <Check size={16} />}
-              {p.displayName}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <section className={`hero ${online ? "online" : ""}`}>
-        <div className="hero-head">
-          <DeviceGlyph icon={<Smartphone size={28} strokeWidth={1.75} />} active={online} size="lg" />
-          <div className="hero-text">
-            <h1 className="display">{peer.displayName}</h1>
-            <ConnectionStatus peer={peer} />
-          </div>
-        </div>
+    <div className="home">
+      <aside className="home-device">
+        <Smartphone size={56} strokeWidth={1.25} className={`device-icon ${online ? "online" : ""}`} />
+        <h1 className="display">{peer.displayName}</h1>
+        <ConnectionStatus peer={peer} />
         <p className="supporting">
           {online
             ? "Drop or paste files anywhere in this window to send them."
-            : "It connects on its own when both devices are on the same Wi-Fi."}
+            : "It connects on its own when both are on the same Wi-Fi."}
         </p>
-        {online ? (
-          <div className="hero-actions">
-            <button type="button" className="btn btn-filled btn-large" onClick={onChooseFiles} title={`${MOD_KEY}O`}>
-              <Upload size={20} />
-              Send files
-            </button>
-            <button
-              type="button"
-              className="btn btn-tonal btn-large"
-              onClick={onSendClipboard}
-              title={`${MOD_SHIFT_KEY}V`}
-            >
-              <ClipboardPaste size={20} />
-              Send clipboard
-            </button>
-            <button type="button" className="btn btn-text" onClick={onDisconnect}>
+        <div className="device-actions">
+          {online ? (
+            <button type="button" className="btn btn-tonal" onClick={onDisconnect}>
               Disconnect
             </button>
-          </div>
-        ) : (
-          <div className="hero-actions">
+          ) : (
             <ManualConnect
               key={peer.fingerprint}
               initialAddress={peer.endpoint}
@@ -1043,51 +1003,88 @@ function HomeView(props: HomeViewProps) {
               onConnect={onConnect}
               onReconnect={onReconnect}
             />
+          )}
+        </div>
+        {peers.length > 1 && (
+          <div className="chips" role="radiogroup" aria-label="Device">
+            {peers.map((p) => (
+              <button
+                key={p.fingerprint}
+                type="button"
+                role="radio"
+                aria-checked={p.fingerprint === peer.fingerprint}
+                className="chip"
+                onClick={() => onSelectPeer(p.fingerprint)}
+              >
+                {p.displayName}
+              </button>
+            ))}
           </div>
         )}
-      </section>
+      </aside>
 
-      <form
-        className={`composer ${online ? "" : "disabled"}`}
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSendText();
-        }}
-      >
-        <input
-          value={textInput}
-          onChange={(e) => onTextInputChange(e.target.value)}
-          placeholder={online ? `Send text to ${peer.displayName}` : "Connect to send text"}
-          aria-label="Text to send"
-          disabled={!online}
-        />
-        <button type="submit" className="composer-send" disabled={!online || !textInput.trim()} aria-label="Send">
-          <ArrowUp size={22} />
-        </button>
-      </form>
-
-      {online && notifications.length > 0 && (
+      <div className="home-main">
         <section className="section">
-          <h2 className="title">Notifications</h2>
-          <NotificationList notifications={notifications} onError={onError} />
-        </section>
-      )}
-
-      {busy && (
-        <section className="section">
-          <div className="section-head">
-            <h2 className="title">Recent</h2>
-            <button type="button" className="btn btn-text" onClick={onNavigateHistory}>
-              See all
+          {online && (
+            <div className="send-actions">
+              <button type="button" className="btn btn-filled btn-large" onClick={onChooseFiles} title={`${MOD_KEY}O`}>
+                <Upload size={20} />
+                Send files
+              </button>
+              <button
+                type="button"
+                className="btn btn-tonal btn-large"
+                onClick={onSendClipboard}
+                title={`${MOD_SHIFT_KEY}V`}
+              >
+                <ClipboardPaste size={20} />
+                Send clipboard
+              </button>
+            </div>
+          )}
+          <form
+            className={`composer ${online ? "" : "disabled"}`}
+            onSubmit={(e) => {
+              e.preventDefault();
+              onSendText();
+            }}
+          >
+            <input
+              value={textInput}
+              onChange={(e) => onTextInputChange(e.target.value)}
+              placeholder={online ? `Send text to ${peer.displayName}` : "Connect to send text"}
+              aria-label="Text to send"
+              disabled={!online}
+            />
+            <button type="submit" className="composer-send" disabled={!online || !textInput.trim()} aria-label="Send">
+              <ArrowUp size={22} />
             </button>
-          </div>
-          <ul className="list">
-            {[...activeTransfers, ...recentActivity].map((item) => (
-              <ActivityRow key={item.id} item={item} actions={rowActions} />
-            ))}
-          </ul>
+          </form>
         </section>
-      )}
+
+        {online && notifications.length > 0 && (
+          <section className="section">
+            <h2 className="title">Notifications</h2>
+            <NotificationList notifications={notifications} onError={onError} />
+          </section>
+        )}
+
+        {busy && (
+          <section className="section">
+            <div className="section-head">
+              <h2 className="title">Recent</h2>
+              <button type="button" className="btn btn-text" onClick={onNavigateHistory}>
+                See all
+              </button>
+            </div>
+            <ul className="list">
+              {[...activeTransfers, ...recentActivity].map((item) => (
+                <ActivityRow key={item.id} item={item} actions={rowActions} />
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
     </div>
   );
 }
@@ -1177,14 +1174,14 @@ function DeviceCard(props: {
   };
 
   return (
-    <section className="card">
-      <div className="card-head">
-        <DeviceGlyph icon={<Smartphone size={24} strokeWidth={1.75} />} active={peer.isConnected} />
-        <div className="card-title">
+    <section className="device">
+      <div className="device-head">
+        <Smartphone size={32} strokeWidth={1.5} className={`device-icon ${peer.isConnected ? "online" : ""}`} />
+        <div className="list-text">
           <h2 className="headline">{peer.displayName}</h2>
           <ConnectionStatus peer={peer} />
         </div>
-        <div className="card-actions">
+        <div className="device-actions">
           {peer.isConnected ? (
             <>
               <button type="button" className="btn btn-filled" onClick={onSelect}>
@@ -1235,7 +1232,7 @@ function DeviceCard(props: {
         )}
       </ul>
 
-      <div className="card-foot">
+      <div>
         <button
           type="button"
           className={`btn ${confirmingForget ? "btn-danger" : "btn-text danger"}`}

@@ -25,31 +25,33 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import org.continueapp.android.R
 
 enum class ThemeMode { System, Light, Dark }
 
-// The same palette as the desktop app. Every foreground/background pair meets WCAG AA contrast.
+// The same palette as the desktop app: pure black or white behind everything, one accent, and
+// greys for the few filled controls. Every text colour meets WCAG AA on what it sits on.
 private val DarkColors =
     darkColorScheme(
         primary = Color(0xFFA8BFFF),
         onPrimary = Color(0xFF0B1B45),
-        primaryContainer = Color(0xFF323948),
+        primaryContainer = Color(0xFF1E2638),
         onPrimaryContainer = Color(0xFFCBD9FF),
-        secondaryContainer = Color(0xFF2A2F35),
-        onSecondaryContainer = Color(0xFFE7E9EC),
-        background = Color(0xFF15171A),
-        onBackground = Color(0xFFE7E9EC),
-        surface = Color(0xFF15171A),
-        onSurface = Color(0xFFE7E9EC),
-        onSurfaceVariant = Color(0xFF9BA1A8),
-        surfaceContainer = Color(0xFF1C1F23),
-        surfaceContainerHigh = Color(0xFF23272B),
-        surfaceContainerHighest = Color(0xFF2C3035),
+        secondaryContainer = Color(0xFF1F2024),
+        onSecondaryContainer = Color(0xFFF1F2F4),
+        background = Color.Black,
+        onBackground = Color(0xFFF1F2F4),
+        surface = Color.Black,
+        onSurface = Color(0xFFF1F2F4),
+        onSurfaceVariant = Color(0xFF9CA1A9),
+        surfaceContainerLowest = Color.Black,
+        surfaceContainerLow = Color.Black,
+        surfaceContainer = Color.Black,
+        surfaceContainerHigh = Color(0xFF16171A),
+        surfaceContainerHighest = Color(0xFF1F2024),
         outline = Color(0xFF4A5057),
-        outlineVariant = Color(0xFF2A2E33),
+        outlineVariant = Color(0xFF222428),
         error = Color(0xFFF2877E),
     )
 
@@ -57,20 +59,22 @@ private val LightColors =
     lightColorScheme(
         primary = Color(0xFF2457D6),
         onPrimary = Color.White,
-        primaryContainer = Color(0xFFDCE4F8),
+        primaryContainer = Color(0xFFE3EAFB),
         onPrimaryContainer = Color(0xFF17398B),
-        secondaryContainer = Color(0xFFE2E6EB),
-        onSecondaryContainer = Color(0xFF16202B),
-        background = Color(0xFFF3F6F9),
-        onBackground = Color(0xFF16202B),
-        surface = Color(0xFFF3F6F9),
-        onSurface = Color(0xFF16202B),
-        onSurfaceVariant = Color(0xFF5B6576),
+        secondaryContainer = Color(0xFFF1F2F4),
+        onSecondaryContainer = Color(0xFF111418),
+        background = Color.White,
+        onBackground = Color(0xFF111418),
+        surface = Color.White,
+        onSurface = Color(0xFF111418),
+        onSurfaceVariant = Color(0xFF5A616B),
+        surfaceContainerLowest = Color.White,
+        surfaceContainerLow = Color.White,
         surfaceContainer = Color.White,
-        surfaceContainerHigh = Color(0xFFE9EDF2),
-        surfaceContainerHighest = Color(0xFFDBE2EA),
+        surfaceContainerHigh = Color(0xFFF1F2F4),
+        surfaceContainerHighest = Color(0xFFE7E9EC),
         outline = Color(0xFF8A94A4),
-        outlineVariant = Color(0xFFD3D9E1),
+        outlineVariant = Color(0xFFE4E6EA),
         error = Color(0xFFB3261E),
     )
 
@@ -98,12 +102,12 @@ private fun style(
     fontSize = size.sp,
     lineHeight = lineHeight.sp,
     fontWeight = weight,
-    letterSpacing = tracking.em,
+    letterSpacing = (size * tracking).sp,
 )
 
 private val AppTypography =
     Typography(
-        headlineLarge = style(30, 36, FontWeight.SemiBold, -0.015),
+        headlineLarge = style(32, 38, FontWeight.SemiBold, -0.02),
         headlineSmall = style(22, 28, FontWeight.SemiBold, -0.01),
         titleLarge = style(20, 26, FontWeight.SemiBold),
         titleMedium = style(17, 22, FontWeight.Medium),

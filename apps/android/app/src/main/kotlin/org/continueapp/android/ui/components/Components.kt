@@ -37,9 +37,6 @@ import org.continueapp.android.ui.theme.success
 
 val ScreenPadding = 20.dp
 
-private const val GLYPH_CORNER_RATIO = 0.32f
-private const val GLYPH_ICON_RATIO = 0.45f
-
 @Composable
 fun PageTitle(
     text: String,
@@ -113,22 +110,21 @@ fun <T> ChoiceRow(
     }
 }
 
+/** A device's icon, in the accent colour while it's connected. */
 @Composable
 fun DeviceGlyph(
     icon: ImageVector,
     active: Boolean,
     modifier: Modifier = Modifier,
-    size: Dp = 64.dp,
+    size: Dp = 56.dp,
 ) {
     val colors = MaterialTheme.colorScheme
-    val container = if (active) colors.primaryContainer else colors.surfaceContainerHigh
-    val content = if (active) colors.onPrimaryContainer else colors.onSurfaceVariant
-    Box(
-        modifier = modifier.size(size).clip(RoundedCornerShape(size * GLYPH_CORNER_RATIO)).background(container),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(size * GLYPH_ICON_RATIO))
-    }
+    Icon(
+        icon,
+        contentDescription = null,
+        tint = if (active) colors.primary else colors.onSurfaceVariant,
+        modifier = modifier.size(size),
+    )
 }
 
 /** A list row with an optional icon, a subtitle and something on the trailing edge. */

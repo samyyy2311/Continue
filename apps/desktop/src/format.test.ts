@@ -38,7 +38,7 @@ describe("formatRelativeTime", () => {
 
   it("names yesterday instead of giving a date", () => {
     const evening = new Date(2026, 9, 3, 22).getTime();
-    expect(formatRelativeTime(new Date(2026, 9, 2, 9).getTime(), evening)).toBe("Yesterday");
+    expect(formatRelativeTime(new Date(2026, 9, 2, 9).getTime(), evening)).toBe("yesterday");
   });
 });
 
