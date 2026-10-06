@@ -11,6 +11,7 @@ import type {
   PeerPermission,
   PermissionAnswer,
   PermissionQuestion,
+  PhoneNotification,
   TrustedPeer,
 } from "./types.ts";
 
@@ -119,6 +120,20 @@ export const onPairingCompleted = (handler: (peer: TrustedPeer) => void): Promis
 
 export const onPairingFailed = (handler: (message: string) => void): Promise<UnlistenFn> =>
   listen<string>("pairing-failed", (event) => handler(event.payload));
+
+export const onNotificationPosted = (handler: (notification: PhoneNotification) => void): Promise<UnlistenFn> =>
+  listen<PhoneNotification>("notification-posted", (event) => handler(event.payload));
+
+export const onNotificationRemoved = (handler: (id: string) => void): Promise<UnlistenFn> =>
+  listen<string>("notification-removed", (event) => handler(event.payload));
+
+/** Presses a button on a phone notification; `reply` is the text for a button that takes some. */
+export const pressNotificationButton = (peerFingerprint: string, notificationId: string, buttonId: string, reply: string) =>
+  invoke<void>("press_notification_button", { peerFingerprint, notificationId, buttonId, reply });
+
+/** Clears a notification on the phone too. */
+export const dismissNotification = (peerFingerprint: string, notificationId: string) =>
+  invoke<void>("dismiss_notification", { peerFingerprint, notificationId });
 
 /** Commands reject with the backend's error string; anything else is unexpected. */
 export function errorMessage(error: unknown): string {

@@ -25,6 +25,7 @@ pairing = { path = "../pairing" }
 transport = { path = "../transport" }
 sessions = { path = "../sessions" }
 permissions = { path = "../permissions" }
+notifications = { path = "../notifications" }
 protocol = { path = "../protocol" }
 history = { path = "../history" }
 device = { path = "../device" }
@@ -33,6 +34,7 @@ uniffi = { workspace = true }
 quinn = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "time", "sync"] }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [build-dependencies]
 uniffi = { workspace = true, features = ["build"] }

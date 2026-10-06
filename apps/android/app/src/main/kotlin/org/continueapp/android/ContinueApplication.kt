@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -129,6 +130,9 @@ class ContinueApplication : Application() {
         }
         scope.launch { state.questions.listen() }
         scope.launch { watchConnections() }
+        scope.launch(Dispatchers.IO) {
+            while (true) coreBridge.nextNotificationEvent(EVENT_WAIT_MS)?.let(ContinueNotificationListener::handle)
+        }
     }
 
     /** Keeps connection state fresh, often while on screen and now and then otherwise. */
@@ -206,6 +210,7 @@ class ContinueApplication : Application() {
 
     private companion object {
         const val PERCENT = 100
+        const val EVENT_WAIT_MS = 1_000L
         const val KEY_VISIBLE = "visible"
         const val KEY_THEME = "theme"
         const val KEY_WALLPAPER_COLORS = "wallpaper_colors"

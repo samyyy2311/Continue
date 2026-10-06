@@ -40,3 +40,12 @@ message NotificationAck {
   string notification_id = 1;
   bool   handled         = 2;
 }
+
+// Everything sent on a notifications stream, so the receiver knows which it is.
+message NotificationMessage {
+  oneof body {
+    NotificationPost         post    = 1;
+    NotificationDismiss      dismiss = 2;
+    NotificationActionInvoke action  = 3;
+  }
+}

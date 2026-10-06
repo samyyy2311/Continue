@@ -17,12 +17,6 @@ pub enum NotificationError {
     #[error("Notification body too large: {size} bytes (limit: {limit})")]
     BodyTooLarge { size: usize, limit: usize },
 
-    #[error("Notification not found: {0}")]
-    NotFound(String),
-
     #[error("Action not handled: {0}")]
     ActionFailed(String),
-
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
 }
