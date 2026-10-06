@@ -2,7 +2,6 @@ package org.continueapp.android.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -121,13 +120,7 @@ private fun VisibilityLine(
 @Composable
 private fun NoDevices(onPair: () -> Unit) {
     Column(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(top = 24.dp)
-                .clip(MaterialTheme.shapes.extraLarge)
-                .background(MaterialTheme.colorScheme.surfaceContainer)
-                .padding(28.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -155,19 +148,13 @@ private fun LinkPanel(
 ) {
     val scope = rememberCoroutineScope()
     Column(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(top = 20.dp)
-                .clip(MaterialTheme.shapes.extraLarge)
-                .background(MaterialTheme.colorScheme.surfaceContainer)
-                .padding(24.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            DeviceGlyph(Icons.Outlined.Laptop, active = connected, size = 56.dp)
+            DeviceGlyph(Icons.Outlined.Laptop, active = connected, size = 48.dp)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(peer.displayName, style = MaterialTheme.typography.titleLarge)
+                Text(peer.displayName, style = MaterialTheme.typography.headlineSmall)
                 StatusLabel(connected = connected)
             }
             OutlinedButton(
