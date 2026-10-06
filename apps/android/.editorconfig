@@ -1,4 +1,6 @@
 root = true
 
 [*.{kt,kts}]
+# The same limit detekt uses, so the two agree on where lines wrap.
+max_line_length = 120
 ktlint_function_naming_ignore_when_annotated_with = Composable
