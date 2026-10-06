@@ -37,7 +37,6 @@ import org.continueapp.android.ui.theme.success
 
 val ScreenPadding = 20.dp
 
-
 @Composable
 fun PageTitle(
     text: String,
