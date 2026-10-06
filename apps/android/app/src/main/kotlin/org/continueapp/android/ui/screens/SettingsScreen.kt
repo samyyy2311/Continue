@@ -147,7 +147,9 @@ private fun BackgroundRow() {
 @Composable
 private fun NotificationsRow() {
     val context = LocalContext.current
+
     fun granted() = context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
+
     var on by remember { mutableStateOf(granted()) }
     val openSettings =
         rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { on = granted() }
