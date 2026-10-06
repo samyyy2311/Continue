@@ -11,6 +11,8 @@ export interface TrustedPeer {
   pairedAt: number;
   isConnected: boolean;
   endpoint?: string;
+  /** Only while connected, once the device has reported it. */
+  battery: { percent: number; charging: boolean } | null;
 }
 
 export type Grant = "Allow" | "Ask" | "Deny" | "AllowOnce";

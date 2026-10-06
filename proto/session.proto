@@ -17,6 +17,8 @@ message SessionEnvelope {
     // Sent by each side when a session starts, so names stay current after a rename.
     // The sender is the authenticated peer; its fingerprint and key fields are ignored.
     DeviceInfo device_info = 4;
+    // Sent when the sender's battery changes, and when a session starts.
+    DeviceStatus device_status = 5;
   }
 }
 

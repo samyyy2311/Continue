@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
 use limits::CONNECTION_TIMEOUT_SECS;
-use protocol::v1::DisconnectReason;
+use protocol::v1::session_envelope::Body;
+use protocol::v1::{DeviceStatus, DisconnectReason};
 use transport::{connect_pinned, DialConfig, TransportCertificate, TransportError};
 
 use crate::backoff::ReconnectPolicy;
@@ -138,6 +139,22 @@ impl SessionRegistry {
             .get(peer)
             .and_then(|entry| entry.session.active.clone())
             .filter(|mux| mux.connection().close_reason().is_none())
+    }
+
+    /// Sends this device's battery to every connected peer, unless they already have it.
+    /// Must be called inside the Tokio runtime the registry runs on.
+    pub fn report_status(&self, status: DeviceStatus) {
+        if !self.inner.handlers.this_device.set_status(status) {
+            return;
+        }
+        let connected: Vec<_> = self
+            .peers()
+            .values()
+            .filter_map(|entry| entry.session.active.clone())
+            .collect();
+        for mux in connected {
+            tokio::spawn(async move { mux.send_control(Body::DeviceStatus(status)).await });
+        }
     }
 
     pub fn state(&self, peer: &str) -> SessionState {
@@ -320,14 +337,18 @@ impl SessionRegistry {
         mux.spawn_keepalive_sender();
         spawn_capabilities_dispatcher(mux.clone(), self.inner.handlers.clone(), STREAM_BUFFER);
         let introduction = {
-            let (mux, info) = (
+            let this_device = &self.inner.handlers.this_device;
+            let (mux, info, status) = (
                 mux.clone(),
-                self.inner
-                    .handlers
-                    .this_device
-                    .info(&self.inner.local_fingerprint),
+                this_device.info(&self.inner.local_fingerprint),
+                this_device.status(),
             );
-            async move { mux.send_device_info(info).await }
+            async move {
+                mux.send_control(Body::DeviceInfo(info)).await;
+                if let Some(status) = status {
+                    mux.send_control(Body::DeviceStatus(status)).await;
+                }
+            }
         };
         tokio::spawn(introduction);
         self.watch(peer.to_string(), mux);

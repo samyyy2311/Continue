@@ -1,13 +1,17 @@
 package org.continueapp.android
 
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.net.wifi.WifiManager
+import android.os.BatteryManager
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.runtime.mutableStateOf
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.MainScope
@@ -105,6 +109,7 @@ class ContinueApplication : Application() {
         dbFile.parentFile?.mkdirs()
         coreBridge.initCore(dbFile.absolutePath)
         coreBridge.setDeviceName(phoneName())
+        reportBattery()
         applyVisibility(visible)
         createNotificationChannels(this)
         listen()
@@ -175,7 +180,32 @@ class ContinueApplication : Application() {
         }
     }
 
+    /** Keeps connected computers up to date with the battery. The core only sends changes. */
+    private fun reportBattery() {
+        val receiver =
+            object : BroadcastReceiver() {
+                override fun onReceive(
+                    context: Context,
+                    intent: Intent,
+                ) {
+                    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                    val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                    if (level < 0 || scale <= 0) return
+                    val charging = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+                    coreBridge.setDeviceStatus(level * PERCENT / scale, charging)
+                }
+            }
+        // The battery broadcast is sticky, so this also delivers the current reading.
+        ContextCompat.registerReceiver(
+            this,
+            receiver,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
+
     private companion object {
+        const val PERCENT = 100
         const val KEY_VISIBLE = "visible"
         const val KEY_THEME = "theme"
         const val KEY_WALLPAPER_COLORS = "wallpaper_colors"

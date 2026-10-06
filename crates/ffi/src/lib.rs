@@ -493,6 +493,17 @@ pub fn set_device_name(name: String) -> Result<(), ContinueFfiError> {
     })
 }
 
+/// Sends the phone's battery to connected computers, now and whenever they connect.
+pub fn set_device_status(battery_percent: u32, charging: bool) -> Result<(), ContinueFfiError> {
+    let (runtime, device) = device()?;
+    let _runtime = runtime.enter();
+    device.sessions.report_status(protocol::v1::DeviceStatus {
+        battery_percent: battery_percent.min(100),
+        charging,
+    });
+    Ok(())
+}
+
 pub fn get_device_fingerprint() -> Result<String, ContinueFfiError> {
     with_core(|core| Ok(core.device.fingerprint.clone()))
 }

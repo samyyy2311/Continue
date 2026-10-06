@@ -12,6 +12,9 @@ namespace continue {
     void set_device_name(string name);
 
     [Throws=ContinueFfiError]
+    void set_device_status(u32 battery_percent, boolean charging);
+
+    [Throws=ContinueFfiError]
     string get_device_fingerprint();
 
     [Throws=ContinueFfiError]

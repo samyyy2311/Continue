@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use capabilities::CapabilityQuery;
 use clipboard::ClipboardFormat;
 use pairing::{TrustStore, TrustedPeer};
+use protocol::v1::DeviceStatus;
 use protocol::CapabilityId;
 use sessions::{
     accept_peers, connect_paired_peers, listen_for_peers, Direction, IncomingEvent, IncomingFiles,
@@ -51,6 +52,8 @@ struct Node {
     files: Arc<Mutex<Vec<transfer::ReceivedFile>>>,
     /// Bytes received so far, each time a file coming in reported progress.
     progress: Arc<Mutex<Vec<u64>>>,
+    /// Battery readings the peer reported.
+    statuses: Arc<Mutex<Vec<DeviceStatus>>>,
 }
 
 /// A device that accepts sessions from `trusted` peers and registers them as inbound.
@@ -77,6 +80,11 @@ fn node(
     let received = clips.clone();
     handlers.on_clipboard_received = Some(Arc::new(move |_peer, update| {
         received.lock().unwrap().push(update.payload);
+    }));
+    let statuses = Arc::new(Mutex::new(Vec::new()));
+    let reported = statuses.clone();
+    handlers.on_device_status = Some(Arc::new(move |_peer, status| {
+        reported.lock().unwrap().push(status);
     }));
     let arrived = files.clone();
     handlers.on_file_received = Some(Arc::new(move |_peer, file| {
@@ -123,6 +131,7 @@ fn node(
         clips,
         files,
         progress,
+        statuses,
     }
 }
 
@@ -765,4 +774,35 @@ async fn connecting_twice_at_once_makes_one_connection() {
         },
     )
     .await;
+}
+
+#[tokio::test]
+async fn battery_status_reaches_the_peer_on_connect_and_when_it_changes() {
+    let (low, high) = pair();
+    let at = |battery_percent, charging| DeviceStatus {
+        battery_percent,
+        charging,
+    };
+    low.registry.report_status(at(80, false));
+
+    low.registry
+        .connect(HIGH, high.cert.spki_hash, high.listen_addr)
+        .await
+        .unwrap();
+    eventually("the reading taken before connecting arrives", || {
+        high.statuses.lock().unwrap().as_slice() == [at(80, false)]
+    })
+    .await;
+
+    low.registry.report_status(at(80, false));
+    low.registry.report_status(at(81, true));
+    eventually("a change arrives", || {
+        high.statuses.lock().unwrap().last() == Some(&at(81, true))
+    })
+    .await;
+    assert_eq!(
+        high.statuses.lock().unwrap().len(),
+        2,
+        "an unchanged reading isn't sent again"
+    );
 }

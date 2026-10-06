@@ -15,7 +15,7 @@ use transfer::{receive_file, send_file, ReceivedFile};
 
 use crate::device::{PeerDevice, ThisDevice};
 use crate::incoming::{IncomingFiles, SaveFolder};
-use crate::multiplexer::{OnDeviceInfo, SessionMultiplexer};
+use crate::multiplexer::{OnPeerUpdate, PeerUpdate, SessionMultiplexer};
 
 /// How long a question waits for the user before it counts as declined.
 pub const PROMPT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -61,6 +61,8 @@ pub struct SessionCapabilityHandlers {
     pub this_device: ThisDevice,
     /// Called with what a peer says about itself each time a session starts.
     pub on_device_info: Option<OnReceived<PeerDevice>>,
+    /// Called with the peer's battery when a session starts and each time it changes.
+    pub on_device_status: Option<OnReceived<protocol::v1::DeviceStatus>>,
     pub permission_store: Option<Arc<permissions::PermissionStore>>,
     pub permission_prompt: Option<PermissionPrompt>,
     /// Keeps to one question at a time, so a batch of files asks once when the first answer is
@@ -79,6 +81,7 @@ impl SessionCapabilityHandlers {
             on_notification_received: None,
             this_device: ThisDevice::default(),
             on_device_info: None,
+            on_device_status: None,
             permission_store: None,
             permission_prompt: None,
             prompt_turn: Arc::default(),
@@ -177,15 +180,27 @@ pub fn spawn_capabilities_dispatcher(
     buffer_size: usize,
 ) {
     let peer_fingerprint = mux.peer_fingerprint().to_string();
-    let on_device_info = handlers.on_device_info.clone().map(|on_device_info| {
-        let peer = peer_fingerprint.clone();
-        Arc::new(move |info: protocol::v1::DeviceInfo| {
-            if let Some(device) = PeerDevice::from_info(&info) {
-                on_device_info(&peer, device);
+    let on_update: OnPeerUpdate = {
+        let (peer, on_info, on_status) = (
+            peer_fingerprint.clone(),
+            handlers.on_device_info.clone(),
+            handlers.on_device_status.clone(),
+        );
+        Arc::new(move |update| match update {
+            PeerUpdate::Info(info) => {
+                if let (Some(on_info), Some(device)) = (&on_info, PeerDevice::from_info(&info)) {
+                    on_info(&peer, device);
+                }
             }
-        }) as OnDeviceInfo
-    });
-    let mut stream_rx = mux.spawn_router_with(buffer_size, on_device_info);
+            PeerUpdate::Status(status) if status.battery_percent <= 100 => {
+                if let Some(on_status) = &on_status {
+                    on_status(&peer, status);
+                }
+            }
+            PeerUpdate::Status(_) => {}
+        })
+    };
+    let mut stream_rx = mux.spawn_router_with(buffer_size, Some(on_update));
     let clipboard = mux.clipboard().clone();
 
     tokio::spawn(async move {

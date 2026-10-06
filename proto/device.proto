@@ -33,3 +33,9 @@ message DeviceInfo {
   // Used by the peer to recompute and verify the fingerprint.
   bytes ed25519_public_key = 5;
 }
+
+// A device's battery, so the other side can show it.
+message DeviceStatus {
+  uint32 battery_percent = 1; // 0 to 100
+  bool   charging        = 2;
+}
