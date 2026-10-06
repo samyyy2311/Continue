@@ -55,6 +55,8 @@ import {
   listIncoming,
   onIncomingEnded,
   onIncomingProgress,
+  onNotificationPosted,
+  onNotificationRemoved,
   openLink,
   openReceived,
   savePastedFile,
@@ -74,6 +76,7 @@ import {
   getFileCategory,
   linkIn,
 } from "./format.ts";
+import { NotificationList } from "./Notifications.tsx";
 import { PairDialog } from "./PairDialog.tsx";
 import {
   ACCENT_PALETTE,
@@ -89,6 +92,7 @@ import {
   MOD_KEY,
   MOD_SHIFT_KEY,
   type PeerPermission,
+  type PhoneNotification,
   PERMISSIONS,
   type Theme,
   type Toast,
@@ -216,6 +220,7 @@ export default function App() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [dragCount, setDragCount] = useState<number | null>(null);
   const [textInput, setTextInput] = useState("");
+  const [notifications, setNotifications] = useState<PhoneNotification[]>([]);
 
   const selectedPeer = peers?.find((p) => p.fingerprint === selectedPeerId) ?? peers?.[0] ?? null;
 
@@ -239,6 +244,12 @@ export default function App() {
   }, [accent]);
 
   useEffect(() => writeStored(PEER_KEY, selectedPeerId), [selectedPeerId]);
+
+  // A disconnected phone can't say when its notifications go away, so they're dropped.
+  useEffect(() => {
+    const connected = new Set(peers?.filter((p) => p.isConnected).map((p) => p.fingerprint));
+    setNotifications((prev) => prev.filter((n) => connected.has(n.peerId)));
+  }, [peers]);
 
   const [clipboardSync, setClipboardSync] = useState(() => readChoice(CLIPBOARD_SYNC_KEY, ["on", "off"], "on") === "on");
   useEffect(() => {
@@ -314,6 +325,14 @@ export default function App() {
         keep(unRenamed);
         const unStatus = await listen("peer-status", () => void refreshPeers());
         keep(unStatus);
+        const unPosted = await onNotificationPosted((posted) =>
+          setNotifications((prev) => [posted, ...prev.filter((n) => n.id !== posted.id)]),
+        );
+        keep(unPosted);
+        const unRemoved = await onNotificationRemoved((id) =>
+          setNotifications((prev) => prev.filter((n) => n.id !== id)),
+        );
+        keep(unRemoved);
 
         const addRow = (row: Omit<Activity, "id" | "timestamp">) =>
           setActivity((prev) => [{ ...row, id: crypto.randomUUID(), timestamp: Date.now() }, ...prev]);
@@ -753,6 +772,8 @@ export default function App() {
               isConnecting={connecting === selectedPeer?.fingerprint}
               activeTransfers={activeTransfers}
               recentActivity={recentActivity}
+              notifications={notifications.filter((n) => n.peerId === selectedPeer?.fingerprint)}
+              onError={showError}
               rowActions={rowActions}
               onNavigateHistory={() => setView("history")}
             />
@@ -933,12 +954,14 @@ interface HomeViewProps {
   recentActivity: Activity[];
   rowActions: RowActions;
   onNavigateHistory: () => void;
+  notifications: PhoneNotification[];
+  onError: (message: string) => void;
 }
 
 function HomeView(props: HomeViewProps) {
   const { peer, peers, onSelectPeer, onOpenPair, onChooseFiles, onSendClipboard, textInput } = props;
   const { onTextInputChange, onSendText, onConnect, onReconnect, onDisconnect, isConnecting } = props;
-  const { activeTransfers, recentActivity, rowActions, onNavigateHistory } = props;
+  const { activeTransfers, recentActivity, rowActions, onNavigateHistory, notifications, onError } = props;
 
   if (!peer) {
     return (
@@ -1042,6 +1065,13 @@ function HomeView(props: HomeViewProps) {
           <ArrowUp size={22} />
         </button>
       </form>
+
+      {online && notifications.length > 0 && (
+        <section className="section">
+          <h2 className="title">Notifications</h2>
+          <NotificationList notifications={notifications} onError={onError} />
+        </section>
+      )}
 
       {busy && (
         <section className="section">

@@ -267,9 +267,8 @@ async fn test_clipboard_capability_and_echo_suppression() -> Result<()> {
 
 async fn test_notification_body_size_enforcement() -> Result<()> {
     use capabilities::CapabilityQuery;
-    use notifications::{NotificationDispatcher, NotificationPost};
+    use notifications::{Body, NotificationPost};
 
-    let dispatcher = NotificationDispatcher::new();
     let query = CapabilityQuery::negotiated(protocol::CapabilityId::NOTIFICATIONS, true);
 
     let oversized_post = NotificationPost {
@@ -284,9 +283,7 @@ async fn test_notification_body_size_enforcement() -> Result<()> {
 
     let (client, _server) = setup_connected_peer_pair().await?;
     let (mut send, mut recv) = client.connection().open_bi().await?;
-    let res = dispatcher
-        .send_post(&mut send, &mut recv, oversized_post, &query)
-        .await;
+    let res = notifications::send(&mut send, &mut recv, Body::Post(oversized_post), &query).await;
     assert!(matches!(
         res,
         Err(notifications::NotificationError::BodyTooLarge { .. })
@@ -448,13 +445,14 @@ async fn test_end_to_end_notification_relay() -> Result<()> {
 
     let (notif_tx, mut notif_rx) = tokio::sync::mpsc::channel(1);
     let mut handlers = sessions::SessionCapabilityHandlers::new(std::env::temp_dir());
-    handlers.on_notification_received = Some(Arc::new(move |_peer, post| {
-        let _ = notif_tx.try_send(post);
+    handlers.on_notification = Some(Arc::new(move |_peer, body| {
+        if let notifications::Body::Post(post) = body {
+            let _ = notif_tx.try_send(post);
+        }
     }));
 
     sessions::spawn_capabilities_dispatcher(server_mux, handlers, 16);
 
-    let dispatcher = notifications::NotificationDispatcher::new();
     let query =
         capabilities::CapabilityQuery::negotiated(protocol::CapabilityId::NOTIFICATIONS, true);
 
@@ -468,12 +466,10 @@ async fn test_end_to_end_notification_relay() -> Result<()> {
         actions: vec![],
     };
 
-    let ack = client_mux
-        .send_notification_to_peer(&dispatcher, post.clone(), &query)
+    client_mux
+        .send_notification_to_peer(notifications::Body::Post(post.clone()), &query)
         .await
         .map_err(|e| anyhow::anyhow!("send_notification_to_peer failed: {e}"))?;
-
-    assert!(ack.handled);
 
     let received = tokio::time::timeout(std::time::Duration::from_secs(5), notif_rx.recv())
         .await?

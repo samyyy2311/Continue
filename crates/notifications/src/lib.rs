@@ -4,9 +4,9 @@
 pub mod dispatcher;
 pub mod error;
 
-pub use dispatcher::NotificationDispatcher;
+pub use dispatcher::{acknowledge, read, send};
 pub use error::NotificationError;
+pub use protocol::v1::notification_message::Body;
 pub use protocol::v1::{
-    NotificationAck, NotificationAction, NotificationActionInvoke, NotificationDismiss,
-    NotificationPost,
+    NotificationAction, NotificationActionInvoke, NotificationDismiss, NotificationPost,
 };

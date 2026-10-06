@@ -48,6 +48,40 @@ data class ReceivedText(
     val text: String,
 ) : Received
 
+/** One of this phone's notifications, to show on connected computers. */
+data class PhoneNotification(
+    val id: String,
+    val packageName: String,
+    val appName: String,
+    val title: String,
+    val text: String,
+    /** Unix time in milliseconds. */
+    val postedAt: Long,
+    val buttons: List<NotificationButton>,
+)
+
+data class NotificationButton(
+    val id: String,
+    val label: String,
+    /** Whether it takes typed text, like a messaging app's Reply. */
+    val isReply: Boolean,
+)
+
+/** What a computer did with one of this phone's notifications. */
+sealed interface NotificationEvent {
+    val notificationId: String
+
+    data class Pressed(
+        override val notificationId: String,
+        val buttonId: String,
+        val replyText: String,
+    ) : NotificationEvent
+
+    data class Dismissed(
+        override val notificationId: String,
+    ) : NotificationEvent
+}
+
 /** A saved send or receive. */
 data class HistoryEntry(
     val id: Long,

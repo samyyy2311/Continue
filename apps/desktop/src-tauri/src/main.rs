@@ -385,7 +385,61 @@ fn session_handlers(
         );
     }));
 
+    let app = app_handle.clone();
+    handlers.on_notification = Some(Arc::new(move |peer, body| match body {
+        notifications::Body::Post(post) => {
+            notify_if_away(&app, &post.title, &post.body);
+            let _ = app.emit(
+                "notification-posted",
+                PhoneNotificationDto {
+                    peer_id: peer.to_string(),
+                    id: post.notification_id,
+                    app_name: post.app_name,
+                    title: post.title,
+                    text: post.body,
+                    posted_at: post.timestamp,
+                    buttons: post
+                        .actions
+                        .into_iter()
+                        .map(|action| NotificationButtonDto {
+                            id: action.action_id,
+                            label: action.label,
+                            is_reply: action.is_reply,
+                        })
+                        .collect(),
+                },
+            );
+        }
+        notifications::Body::Dismiss(dismiss) => {
+            let _ = app.emit("notification-removed", dismiss.notification_id);
+        }
+        // Only the phone carries out button presses.
+        notifications::Body::Action(_) => {}
+    }));
+
     handlers
+}
+
+/// A notification from the phone, as the window shows it.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct PhoneNotificationDto {
+    peer_id: String,
+    id: String,
+    app_name: String,
+    title: String,
+    text: String,
+    /// Unix time in milliseconds.
+    posted_at: u64,
+    buttons: Vec<NotificationButtonDto>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct NotificationButtonDto {
+    id: String,
+    label: String,
+    is_reply: bool,
 }
 
 /// Saves the name a device sends when it connects, and shows it in the window and tray.
@@ -658,21 +712,25 @@ fn get_permissions(
     state: State<DesktopRuntimeState>,
     peer_fingerprint: String,
 ) -> Result<Vec<PeerPermissionDto>, String> {
-    [CapabilityId::FILE_TRANSFER, CapabilityId::CLIPBOARD]
-        .into_iter()
-        .map(|capability| {
-            let grant = state
-                .device
-                .stores
-                .permissions
-                .query_state(&peer_fingerprint, capability)
-                .map_err(user_error("Couldn't load what this device can do."))?;
-            Ok(PeerPermissionDto {
-                capability_id: capability.raw(),
-                grant: grant.as_str(),
-            })
+    [
+        CapabilityId::FILE_TRANSFER,
+        CapabilityId::CLIPBOARD,
+        CapabilityId::NOTIFICATIONS,
+    ]
+    .into_iter()
+    .map(|capability| {
+        let grant = state
+            .device
+            .stores
+            .permissions
+            .query_state(&peer_fingerprint, capability)
+            .map_err(user_error("Couldn't load what this device can do."))?;
+        Ok(PeerPermissionDto {
+            capability_id: capability.raw(),
+            grant: grant.as_str(),
         })
-        .collect()
+    })
+    .collect()
 }
 
 #[tauri::command]
@@ -815,6 +873,59 @@ fn send_copied_text(app: &AppHandle, text: String) {
 #[tauri::command]
 fn set_clipboard_sync(state: State<DesktopRuntimeState>, enabled: bool) {
     state.clipboard.set_enabled(enabled);
+}
+
+/// Presses a button on one of the phone's notifications, with `reply` for one that takes text.
+#[tauri::command]
+async fn press_notification_button(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    notification_id: String,
+    button_id: String,
+    reply: String,
+) -> Result<(), String> {
+    let action = notifications::NotificationActionInvoke {
+        notification_id,
+        action_id: button_id,
+        reply_text: reply,
+    };
+    send_notification(
+        &state,
+        &peer_fingerprint,
+        notifications::Body::Action(action),
+    )
+    .await
+}
+
+/// Clears one of the phone's notifications, there as well as here.
+#[tauri::command]
+async fn dismiss_notification(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    notification_id: String,
+) -> Result<(), String> {
+    let dismiss = notifications::NotificationDismiss {
+        notification_id,
+        package_name: String::new(),
+    };
+    send_notification(
+        &state,
+        &peer_fingerprint,
+        notifications::Body::Dismiss(dismiss),
+    )
+    .await
+}
+
+async fn send_notification(
+    state: &DesktopRuntimeState,
+    peer: &str,
+    body: notifications::Body,
+) -> Result<(), String> {
+    match state.device.send_notification(peer, body).await {
+        Ok(()) => Ok(()),
+        Err(SendError::NotConnected) => Err(NOT_CONNECTED.to_string()),
+        Err(e) => Err(user_error("Couldn't reach your phone. Try again.")(e)),
+    }
 }
 
 /// Sends text to a connected device and saves it to history.
@@ -972,7 +1083,9 @@ fn main() {
             disconnect_peer,
             reconnect_peer,
             send_file_to_peer,
-            send_clipboard_text
+            send_clipboard_text,
+            press_notification_button,
+            dismiss_notification
         ])
         // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
         .on_window_event(|window, event| {

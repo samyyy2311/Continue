@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Wifi
@@ -32,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
 import org.continueapp.android.ContinueApplication
 import org.continueapp.android.needsNotificationPermission
 import org.continueapp.android.ui.components.ChoiceRow
@@ -140,6 +143,26 @@ private fun BackgroundRow() {
     )
 }
 
+/** Shows the phone's notifications on the computer. Android grants the access in its own settings. */
+@Composable
+private fun NotificationsRow() {
+    val context = LocalContext.current
+
+    fun granted() = context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
+
+    var on by remember { mutableStateOf(granted()) }
+    val openSettings =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { on = granted() }
+    val toggle = { openSettings.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+    SettingsRow(
+        title = "Show notifications on your computer",
+        subtitle = "Read and reply to them from your computer. Turn on Continue in the list that opens.",
+        icon = Icons.Outlined.Notifications,
+        onClick = toggle,
+        trailing = { Switch(checked = on, onCheckedChange = { toggle() }) },
+    )
+}
+
 @Composable
 fun SettingsScreen(
     visible: Boolean,
@@ -161,6 +184,7 @@ fun SettingsScreen(
             trailing = { Switch(checked = visible, onCheckedChange = onVisibleChange) },
         )
         BackgroundRow()
+        NotificationsRow()
         SendCopiesRow()
 
         SectionLabel("Received files")

@@ -2,6 +2,9 @@ package org.continueapp.bridge
 
 import org.continueapp.bridge.ffi.ContinueFfiException
 import org.continueapp.bridge.ffi.HistoryEntryFfi
+import org.continueapp.bridge.ffi.NotificationActionFfi
+import org.continueapp.bridge.ffi.NotificationEventFfi
+import org.continueapp.bridge.ffi.NotificationFfi
 import org.continueapp.bridge.ffi.PermissionDecisionFfi
 import org.continueapp.bridge.ffi.PermissionRequestFfi
 import org.continueapp.bridge.ffi.ReceivedFfi
@@ -15,6 +18,8 @@ import org.continueapp.bridge.ffi.cancelIncoming as coreCancelIncoming
 import org.continueapp.bridge.ffi.clearHistory as coreClearHistory
 import org.continueapp.bridge.ffi.connectToPeer as coreConnectToPeer
 import org.continueapp.bridge.ffi.disconnect as coreDisconnect
+import org.continueapp.bridge.ffi.forwardNotification as coreForwardNotification
+import org.continueapp.bridge.ffi.forwardNotificationRemoved as coreForwardNotificationRemoved
 import org.continueapp.bridge.ffi.getDeviceFingerprint as coreGetDeviceFingerprint
 import org.continueapp.bridge.ffi.getDeviceSpkiHash as coreGetDeviceSpkiHash
 import org.continueapp.bridge.ffi.initCore as coreInitCore
@@ -22,6 +27,7 @@ import org.continueapp.bridge.ffi.isPeerConnected as coreIsPeerConnected
 import org.continueapp.bridge.ffi.listHistory as coreListHistory
 import org.continueapp.bridge.ffi.listIncoming as coreListIncoming
 import org.continueapp.bridge.ffi.listTrustedPeers as coreListTrustedPeers
+import org.continueapp.bridge.ffi.nextNotificationEvent as coreNextNotificationEvent
 import org.continueapp.bridge.ffi.nextPermissionRequest as coreNextPermissionRequest
 import org.continueapp.bridge.ffi.nextReceived as coreNextReceived
 import org.continueapp.bridge.ffi.pairFromQr as corePairFromQr
@@ -133,6 +139,15 @@ interface ContinueCoreBridge {
         text: String,
     )
 
+    /** Shows [notification] on connected computers. Returns straight away. */
+    fun forwardNotification(notification: PhoneNotification)
+
+    /** Takes a notification that went away on the phone off connected computers. Returns straight away. */
+    fun forwardNotificationRemoved(id: String)
+
+    /** Waits up to [timeoutMs] for a computer to act on one of this phone's notifications, or returns null. */
+    fun nextNotificationEvent(timeoutMs: Long): NotificationEvent?
+
     companion object {
         fun create(): ContinueCoreBridge = NativeContinueCoreBridge()
 
@@ -149,6 +164,7 @@ class MockContinueCoreBridge : ContinueCoreBridge {
     private val connectedPeers = ConcurrentHashMap<String, String>()
     private val questions = LinkedBlockingQueue<PermissionQuestion>()
     private val received = LinkedBlockingQueue<Received>()
+    private val notificationEvents = LinkedBlockingQueue<NotificationEvent>()
     val answers = ConcurrentHashMap<Long, PermissionAnswer>()
 
     /** Puts a question to the app as a device set to Ask would. */
@@ -307,6 +323,13 @@ class MockContinueCoreBridge : ContinueCoreBridge {
         checkInitialized()
     }
 
+    override fun forwardNotification(notification: PhoneNotification) = checkInitialized()
+
+    override fun forwardNotificationRemoved(id: String) = checkInitialized()
+
+    override fun nextNotificationEvent(timeoutMs: Long): NotificationEvent? =
+        notificationEvents.poll(timeoutMs, MILLISECONDS)
+
     private fun checkInitialized() {
         if (!initialized) {
             throw ContinueException.NotInitializedException("Core runtime engine is not initialized")
@@ -413,7 +436,31 @@ class NativeContinueCoreBridge : ContinueCoreBridge {
         peerFingerprint: String,
         text: String,
     ) = native { coreSendClipboardText(peerFingerprint, text) }
+
+    override fun forwardNotification(notification: PhoneNotification) =
+        native { coreForwardNotification(notification.toFfi()) }
+
+    override fun forwardNotificationRemoved(id: String) = native { coreForwardNotificationRemoved(id) }
+
+    override fun nextNotificationEvent(timeoutMs: Long): NotificationEvent? =
+        when (val event = coreNextNotificationEvent(timeoutMs.toUInt())) {
+            is NotificationEventFfi.Action ->
+                NotificationEvent.Pressed(event.notificationId, event.actionId, event.replyText)
+            is NotificationEventFfi.Dismiss -> NotificationEvent.Dismissed(event.notificationId)
+            null -> null
+        }
 }
+
+private fun PhoneNotification.toFfi() =
+    NotificationFfi(
+        notificationId = id,
+        packageName = packageName,
+        appName = appName,
+        title = title,
+        body = text,
+        timestamp = postedAt.toULong(),
+        actions = buttons.map { NotificationActionFfi(it.id, it.label, it.isReply) },
+    )
 
 private fun TrustedPeerFfi.toTrustedPeer() =
     TrustedPeer(

@@ -157,6 +157,21 @@ impl SessionRegistry {
         }
     }
 
+    /// Fingerprints of the peers connected right now.
+    pub fn connected(&self) -> Vec<String> {
+        self.peers()
+            .iter()
+            .filter(|(_, entry)| {
+                entry
+                    .session
+                    .active
+                    .as_ref()
+                    .is_some_and(|mux| mux.connection().close_reason().is_none())
+            })
+            .map(|(peer, _)| peer.clone())
+            .collect()
+    }
+
     pub fn state(&self, peer: &str) -> SessionState {
         self.peers()
             .get(peer)

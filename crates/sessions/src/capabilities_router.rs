@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 
 use capabilities::CapabilityQuery;
 use clipboard::{ClipboardAck, ClipboardFormat, ClipboardUpdate};
-use notifications::{NotificationAck, NotificationDispatcher, NotificationPost};
+use notifications::Body as NotificationBody;
 use protocol::CapabilityId;
 use transfer::{receive_file, send_file, ReceivedFile};
 
@@ -53,10 +53,11 @@ pub type OnReceived<T> = Arc<dyn Fn(&str, T) + Send + Sync>;
 pub struct SessionCapabilityHandlers {
     pub save_folder: SaveFolder,
     pub incoming: IncomingFiles,
-    pub notification_dispatcher: Arc<NotificationDispatcher>,
     pub on_file_received: Option<OnReceived<ReceivedFile>>,
     pub on_clipboard_received: Option<OnReceived<ClipboardUpdate>>,
-    pub on_notification_received: Option<OnReceived<NotificationPost>>,
+    /// Called with notifications the peer shows here, and with replies to and dismissals of
+    /// the ones this device sent it.
+    pub on_notification: Option<OnReceived<NotificationBody>>,
     /// How this device introduces itself to peers.
     pub this_device: ThisDevice,
     /// Called with what a peer says about itself each time a session starts.
@@ -75,10 +76,9 @@ impl SessionCapabilityHandlers {
         Self {
             save_folder: SaveFolder::new(save_folder),
             incoming: IncomingFiles::default(),
-            notification_dispatcher: Arc::new(NotificationDispatcher::new()),
             on_file_received: None,
             on_clipboard_received: None,
-            on_notification_received: None,
+            on_notification: None,
             this_device: ThisDevice::default(),
             on_device_info: None,
             on_device_status: None,
@@ -306,40 +306,38 @@ pub fn spawn_capabilities_dispatcher(
                         }
                     }
                     CapabilityId::NOTIFICATIONS => {
-                        debug!("Handling incoming notification stream from {peer_fp}");
-                        let is_permitted =
-                            permitted(&handlers, &peer_fp, CapabilityId::NOTIFICATIONS, None).await;
-
-                        let query =
-                            CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, is_permitted);
-
-                        let on_received = handlers.on_notification_received.clone();
-                        let result = handlers
-                            .notification_dispatcher
-                            .receive_post(
-                                &mut stream.send_stream,
-                                &mut stream.recv_stream,
-                                &query,
-                                |_post| Ok(()),
-                            )
-                            .await;
-
-                        match result {
-                            Ok(post) => {
-                                if let Some(store) = &handlers.permission_store {
+                        let body = match notifications::read(&mut stream.recv_stream).await {
+                            Ok(body) => body,
+                            Err(e) => {
+                                error!("Couldn't read a notification from {peer_fp}: {e}");
+                                return;
+                            }
+                        };
+                        // Showing the peer's notifications needs permission. Replies and
+                        // dismissals only act on notifications this device sent it.
+                        let allowed = match &body {
+                            NotificationBody::Post(_) => {
+                                let allowed = permitted(
+                                    &handlers,
+                                    &peer_fp,
+                                    CapabilityId::NOTIFICATIONS,
+                                    None,
+                                )
+                                .await;
+                                if let (true, Some(store)) = (allowed, &handlers.permission_store) {
                                     store.consume_if_allow_once(
                                         &peer_fp,
                                         CapabilityId::NOTIFICATIONS,
                                     );
                                 }
-                                if let Some(cb) = on_received {
-                                    cb(&peer_fp, post);
-                                }
+                                allowed
                             }
-                            Err(e) => {
-                                error!("Failed to process notification post from {peer_fp}: {e}");
-                            }
+                            NotificationBody::Action(_) | NotificationBody::Dismiss(_) => true,
+                        };
+                        if let (true, Some(cb)) = (allowed, &handlers.on_notification) {
+                            cb(&peer_fp, body);
                         }
+                        let _ = notifications::acknowledge(&mut stream.send_stream, allowed).await;
                     }
                     unknown => {
                         debug!("Received unsupported capability stream {unknown:?} from {peer_fp}");
@@ -387,17 +385,14 @@ impl SessionMultiplexer {
 
     pub async fn send_notification_to_peer(
         &self,
-        dispatcher: &NotificationDispatcher,
-        post: NotificationPost,
+        body: NotificationBody,
         query: &CapabilityQuery,
-    ) -> Result<NotificationAck, notifications::NotificationError> {
+    ) -> Result<(), notifications::NotificationError> {
         let (mut send, mut recv) = self
             .open_stream(CapabilityId::NOTIFICATIONS)
             .await
             .map_err(notifications::NotificationError::Transport)?;
 
-        dispatcher
-            .send_post(&mut send, &mut recv, post, query)
-            .await
+        notifications::send(&mut send, &mut recv, body, query).await
     }
 }

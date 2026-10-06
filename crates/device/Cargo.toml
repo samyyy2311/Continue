@@ -13,6 +13,7 @@ history = { path = "../history" }
 identity = { path = "../identity" }
 pairing = { path = "../pairing" }
 permissions = { path = "../permissions" }
+notifications = { path = "../notifications" }
 protocol = { path = "../protocol" }
 sessions = { path = "../sessions" }
 transfer = { path = "../transfer" }

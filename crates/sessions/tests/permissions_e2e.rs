@@ -164,3 +164,42 @@ async fn text_is_asked_about_and_delivered_once_allowed() {
     assert_eq!(asked[0].detail, None);
     assert_eq!(*received.lock().unwrap(), vec![b"Gate B12".to_vec()]);
 }
+
+#[tokio::test]
+async fn showing_a_notification_needs_permission_but_a_reply_to_one_does_not() {
+    let store = PermissionStore::in_memory().unwrap();
+    store
+        .set_persisted_grant(PHONE, CapabilityId::NOTIFICATIONS, 1, PersistedGrant::Deny)
+        .unwrap();
+    let (mut handlers, _) = handlers_with(&store, None);
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let record = heard.clone();
+    handlers.on_notification = Some(Arc::new(move |_peer, body| {
+        record.lock().unwrap().push(body);
+    }));
+    let link = link(handlers).await;
+    let query = CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, true);
+
+    let post = notifications::Body::Post(notifications::NotificationPost {
+        notification_id: "chat-1".to_string(),
+        title: "Alice".to_string(),
+        ..Default::default()
+    });
+    let reply = notifications::Body::Action(notifications::NotificationActionInvoke {
+        notification_id: "chat-1".to_string(),
+        action_id: "reply".to_string(),
+        reply_text: "On my way".to_string(),
+    });
+
+    assert!(link
+        .phone
+        .send_notification_to_peer(post, &query)
+        .await
+        .is_err());
+    assert!(link
+        .phone
+        .send_notification_to_peer(reply.clone(), &query)
+        .await
+        .is_ok());
+    assert_eq!(heard.lock().unwrap().as_slice(), [reply]);
+}

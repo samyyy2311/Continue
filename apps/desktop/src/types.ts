@@ -111,7 +111,20 @@ export type PermissionAnswer = "allow" | "alwaysAllow" | "decline";
 export const PERMISSIONS: Record<number, { label: string; description: string }> = {
   1: { label: "Files", description: "Send files to this computer" },
   2: { label: "Text", description: "Send copied text and links" },
+  3: { label: "Notifications", description: "Show its notifications here" },
 };
+
+/** A notification from the phone, to read and act on here. */
+export interface PhoneNotification {
+  peerId: string;
+  id: string;
+  appName: string;
+  title: string;
+  text: string;
+  /** Unix time in milliseconds. */
+  postedAt: number;
+  buttons: { id: string; label: string; isReply: boolean }[];
+}
 
 export const GRANT_OPTIONS: { value: Grant; label: string }[] = [
   { value: "Allow", label: "Allow" },

@@ -73,6 +73,9 @@ pub enum SendError {
 
     #[error(transparent)]
     Clipboard(#[from] clipboard::ClipboardError),
+
+    #[error(transparent)]
+    Notification(#[from] notifications::NotificationError),
 }
 
 /// Cheap to clone; every clone is the same device.
@@ -260,6 +263,18 @@ impl Device {
             location,
         });
         result
+    }
+
+    /// Sends a notification, or a reply to or dismissal of one.
+    pub async fn send_notification(
+        &self,
+        peer: &str,
+        body: notifications::Body,
+    ) -> Result<(), SendError> {
+        let mux = self.sessions.get(peer).ok_or(SendError::NotConnected)?;
+        let query = CapabilityQuery::negotiated(CapabilityId::NOTIFICATIONS, true);
+        mux.send_notification_to_peer(body, &query).await?;
+        Ok(())
     }
 
     /// Sends text to the peer's clipboard and saves it to history.

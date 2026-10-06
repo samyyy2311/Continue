@@ -231,6 +231,20 @@ static QUESTIONS: Questions = Questions {
 static RECEIVED: Inbox<ReceivedFfi> = Inbox::new();
 const RECEIVED_LIMIT: usize = 100;
 
+/// What a computer did with one of this phone's notifications.
+pub enum NotificationEventFfi {
+    Action {
+        notification_id: String,
+        action_id: String,
+        reply_text: String,
+    },
+    Dismiss {
+        notification_id: String,
+    },
+}
+
+static NOTIFICATION_EVENTS: Inbox<NotificationEventFfi> = Inbox::new();
+
 /// Saves received files and text to history and hands them to the app through
 /// `next_received`.
 fn deliver_received(
@@ -273,6 +287,21 @@ fn deliver_received(
             },
             RECEIVED_LIMIT,
         );
+    }));
+    handlers.on_notification = Some(Arc::new(|_peer, body| {
+        let event = match body {
+            notifications::Body::Action(action) => NotificationEventFfi::Action {
+                notification_id: action.notification_id,
+                action_id: action.action_id,
+                reply_text: action.reply_text,
+            },
+            notifications::Body::Dismiss(dismiss) => NotificationEventFfi::Dismiss {
+                notification_id: dismiss.notification_id,
+            },
+            // The phone shows its own notifications, not a computer's.
+            notifications::Body::Post(_) => return,
+        };
+        NOTIFICATION_EVENTS.push(event, RECEIVED_LIMIT);
     }));
     handlers
 }
@@ -667,6 +696,73 @@ pub fn send_file(peer_fingerprint: String, file_path: String) -> Result<u64, Con
             None::<fn(u64, u64)>,
         ))
         .map_err(internal)
+}
+
+pub struct NotificationActionFfi {
+    pub action_id: String,
+    pub label: String,
+    pub is_reply: bool,
+}
+
+pub struct NotificationFfi {
+    pub notification_id: String,
+    pub package_name: String,
+    pub app_name: String,
+    pub title: String,
+    pub body: String,
+    pub timestamp: u64,
+    pub actions: Vec<NotificationActionFfi>,
+}
+
+/// Sends `body` to every connected computer in the background, so the caller never waits
+/// on the network.
+fn forward(body: notifications::Body) -> Result<(), ContinueFfiError> {
+    let (runtime, device) = device()?;
+    runtime.spawn(async move {
+        for peer in device.sessions.connected() {
+            if let Err(error) = device.send_notification(&peer, body.clone()).await {
+                tracing::warn!("Couldn't forward a notification to {peer}: {error}");
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Shows one of this phone's notifications on connected computers.
+pub fn forward_notification(notification: NotificationFfi) -> Result<(), ContinueFfiError> {
+    forward(notifications::Body::Post(notifications::NotificationPost {
+        notification_id: notification.notification_id,
+        package_name: notification.package_name,
+        app_name: notification.app_name,
+        title: notification.title,
+        body: notification.body,
+        timestamp: notification.timestamp,
+        actions: notification
+            .actions
+            .into_iter()
+            .map(|action| notifications::NotificationAction {
+                action_id: action.action_id,
+                label: action.label,
+                is_reply: action.is_reply,
+            })
+            .collect(),
+    }))
+}
+
+/// Takes a notification that went away on the phone off connected computers too.
+pub fn forward_notification_removed(notification_id: String) -> Result<(), ContinueFfiError> {
+    forward(notifications::Body::Dismiss(
+        notifications::NotificationDismiss {
+            notification_id,
+            package_name: String::new(),
+        },
+    ))
+}
+
+/// Waits up to `timeout_ms` for a computer to reply to or dismiss one of this phone's
+/// notifications.
+pub fn next_notification_event(timeout_ms: u32) -> Option<NotificationEventFfi> {
+    NOTIFICATION_EVENTS.next(Duration::from_millis(timeout_ms.into()))
 }
 
 pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(), ContinueFfiError> {
