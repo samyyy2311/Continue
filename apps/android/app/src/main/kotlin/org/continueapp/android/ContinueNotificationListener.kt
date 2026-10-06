@@ -71,20 +71,22 @@ class ContinueNotificationListener : NotificationListenerService() {
     private fun carryOut(event: NotificationEvent) {
         when (event) {
             is NotificationEvent.Dismissed -> cancelNotification(event.notificationId)
-            is NotificationEvent.Pressed -> {
-                val action = buttons[event.notificationId]?.getOrNull(event.buttonId.toIntOrNull() ?: -1) ?: return
-                val inputs = action.remoteInputs
-                val fillIn = Intent()
-                if (!inputs.isNullOrEmpty() && event.replyText.isNotBlank()) {
-                    val results = Bundle().apply { inputs.forEach { putCharSequence(it.resultKey, event.replyText) } }
-                    RemoteInput.addResultsToIntent(inputs, fillIn, results)
-                }
-                try {
-                    action.actionIntent.send(this, 0, fillIn)
-                } catch (_: PendingIntent.CanceledException) {
-                    // The app withdrew the button since; there's nothing left to press.
-                }
-            }
+            is NotificationEvent.Pressed -> press(event)
+        }
+    }
+
+    private fun press(event: NotificationEvent.Pressed) {
+        val action = buttons[event.notificationId]?.getOrNull(event.buttonId.toIntOrNull() ?: -1) ?: return
+        val inputs = action.remoteInputs
+        val fillIn = Intent()
+        if (!inputs.isNullOrEmpty() && event.replyText.isNotBlank()) {
+            val results = Bundle().apply { inputs.forEach { putCharSequence(it.resultKey, event.replyText) } }
+            RemoteInput.addResultsToIntent(inputs, fillIn, results)
+        }
+        try {
+            action.actionIntent.send(this, 0, fillIn)
+        } catch (_: PendingIntent.CanceledException) {
+            // The app withdrew the button since; there's nothing left to press.
         }
     }
 
