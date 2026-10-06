@@ -32,7 +32,7 @@ function NotificationRow(props: { notification: PhoneNotification; onError: (mes
     <li className="list-item notification">
       <div className="list-text">
         <span className="list-sub">
-          {notification.appName} · {formatRelativeTime(notification.postedAt)}
+          {notification.appName}, {formatRelativeTime(notification.postedAt)}
         </span>
         <span className="list-title">{notification.title}</span>
         {notification.text && <span className="list-sub wrap">{notification.text}</span>}

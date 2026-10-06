@@ -1,23 +1,20 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-import { Battery, BatteryCharging, BatteryLow, Check } from "lucide-react";
-import type { ReactNode } from "react";
+import { BatteryCharging, BatteryFull, BatteryLow, BatteryMedium, Check } from "lucide-react";
 import type { TrustedPeer } from "./types.ts";
-
-export function DeviceGlyph(props: { icon: ReactNode; active?: boolean; size?: "md" | "lg" }) {
-  const { icon, active = false, size = "md" } = props;
-  return (
-    <span className={`glyph glyph-${size} ${active ? "active" : ""}`} aria-hidden="true">
-      {icon}
-    </span>
-  );
-}
 
 /** "Connected" or "Not connected", with the battery once a connected device reports it. */
 export function ConnectionStatus({ peer }: { peer: TrustedPeer }) {
   const { isConnected, battery } = peer;
-  const BatteryIcon = battery?.charging ? BatteryCharging : battery && battery.percent <= 20 ? BatteryLow : Battery;
+  const percent = battery?.percent ?? 0;
+  const BatteryIcon = battery?.charging
+    ? BatteryCharging
+    : percent <= 20
+      ? BatteryLow
+      : percent <= 60
+        ? BatteryMedium
+        : BatteryFull;
   return (
     <span className={`status ${isConnected ? "online" : ""}`}>
       {isConnected ? "Connected" : "Not connected"}

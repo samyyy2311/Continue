@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { useEffect, useState } from "react";
-import { Check, Copy, Loader, QrCode, Smartphone, X } from "lucide-react";
+import { Check, Copy, Loader, X } from "lucide-react";
 import { renderSVG } from "uqr";
 import {
   cancelPairing,
@@ -16,6 +16,13 @@ import type { TrustedPeer } from "./types.ts";
 
 type Mode = "show" | "enter";
 
+const MODES: { value: Mode; label: string }[] = [
+  { value: "show", label: "Show code" },
+  { value: "enter", label: "Enter code" },
+];
+
+// Starting and cancelling a code run one at a time, so closing and reopening quickly can't
+// cancel the new code.
 let pairingQueue: Promise<unknown> = Promise.resolve();
 function queuePairingCall<T>(call: () => Promise<T>): Promise<T> {
   const result = pairingQueue.then(call, call);
@@ -23,10 +30,7 @@ function queuePairingCall<T>(call: () => Promise<T>): Promise<T> {
   return result;
 }
 
-type ShowState =
-  | { status: "starting" }
-  | { status: "waiting"; code: string }
-  | { status: "failed"; message: string };
+type ShowState = { status: "starting" } | { status: "waiting"; code: string } | { status: "failed"; message: string };
 
 interface PairDialogProps {
   onPaired: (peer: TrustedPeer) => void;
@@ -55,35 +59,29 @@ export function PairDialog({ onPaired, onClose }: PairDialogProps) {
       >
         <header className="dialog-header">
           <div>
-            <h2 id="pair-dialog-title" className="dialog-title">Pair a device</h2>
-            <p className="dialog-subtitle">Both devices need to be on the same Wi-Fi.</p>
+            <h2 id="pair-dialog-title" className="dialog-title">
+              Pair a device
+            </h2>
+            <p className="dialog-subtitle">Both need to be on the same Wi-Fi.</p>
           </div>
-          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close dialog">
-            <X size={18} />
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+            <X size={20} />
           </button>
         </header>
 
-        <div className="segmented-tabs" role="tablist" aria-label="Pairing method">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "show"}
-            className={`tab-btn ${mode === "show" ? "active" : ""}`}
-            onClick={() => setMode("show")}
-          >
-            <QrCode size={15} />
-            Show code
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "enter"}
-            className={`tab-btn ${mode === "enter" ? "active" : ""}`}
-            onClick={() => setMode("enter")}
-          >
-            <Smartphone size={15} />
-            Enter code
-          </button>
+        <div className="chips" role="tablist" aria-label="How to pair">
+          {MODES.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="tab"
+              aria-selected={mode === option.value}
+              className="chip"
+              onClick={() => setMode(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
 
         {mode === "show" ? <ShowCode onPaired={onPaired} /> : <EnterCode onPaired={onPaired} />}
@@ -125,74 +123,55 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
 
   if (state.status === "failed") {
     return (
-      <div className="dialog-body error-view">
-        <p className="error-banner" role="alert">{state.message}</p>
-        <button type="button" className="btn btn-primary" onClick={() => setAttempt((n) => n + 1)}>
-          Try Again
-        </button>
+      <div className="section">
+        <p className="error-banner" role="alert">
+          {state.message}
+        </p>
+        <div>
+          <button type="button" className="btn btn-filled" onClick={() => setAttempt((n) => n + 1)}>
+            Try again
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="pair-show">
-      <div className="pair-instructions">
-        <ol className="step-list">
-          <li>
-            <span className="step-number">1</span>
-            <span>Open <strong>Continue</strong> on your phone</span>
-          </li>
-          <li>
-            <span className="step-number">2</span>
-            <span>Tap <strong>Scan code</strong></span>
-          </li>
-          <li>
-            <span className="step-number">3</span>
-            <span>Point the camera at this code</span>
-          </li>
+      <div className="section">
+        <ol className="steps">
+          <li>Open Continue on your phone</li>
+          <li>Tap Pair</li>
+          <li>Point the camera at this code</li>
         </ol>
-
-        <div className="pair-actions">
+        <p className="waiting" role="status">
+          {state.status === "waiting" ? "Waiting for your phone" : "Getting a code ready"}
+        </p>
+        <div>
           <button
             type="button"
-            className="btn btn-secondary btn-sm"
+            className="btn btn-tonal btn-small"
             disabled={state.status !== "waiting"}
             onClick={() => state.status === "waiting" && copyCode(state.code)}
           >
-            {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
-            {copied ? "Copied" : "Copy code as text"}
+            {copied ? <Check size={16} /> : <Copy size={16} />}
+            {copied ? "Copied" : "Copy as text"}
           </button>
         </div>
+      </div>
 
-        <div className="pair-status-bar" role="status">
-          {state.status === "waiting" ? (
-            <span className="waiting">
-              <span className="waiting-dot" />
-              Waiting for your phone
-            </span>
-          ) : (
-            <span className="text-muted">
-              <Loader size={14} className="spin inline-icon" /> Getting a code ready
-            </span>
-          )}
+      {state.status === "waiting" ? (
+        <div
+          className="qr"
+          role="img"
+          aria-label="Pairing code"
+          dangerouslySetInnerHTML={{ __html: renderSVG(state.code, { border: 1 }) }}
+        />
+      ) : (
+        <div className="qr">
+          <Loader size={24} className="spin" />
         </div>
-      </div>
-
-      <div className="qr-container">
-        {state.status === "waiting" ? (
-          <div
-            className="qr-wrapper"
-            role="img"
-            aria-label="Pairing QR code"
-            dangerouslySetInnerHTML={{ __html: renderSVG(state.code, { border: 2 }) }}
-          />
-        ) : (
-          <div className="qr-loading">
-            <Loader size={24} className="spin text-accent" />
-            <span>Getting a code ready</span>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -208,8 +187,7 @@ function EnterCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
     setPending(true);
     setError("");
     try {
-      const peer = await pairFromCode(code.trim());
-      onPaired(peer);
+      onPaired(await pairFromCode(code.trim()));
     } catch (err) {
       setError(errorMessage(err));
       setPending(false);
@@ -217,26 +195,26 @@ function EnterCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
   };
 
   return (
-    <form className="enter-code-form" onSubmit={submit}>
-      <p className="field-desc">
-        Got a code from your other device? Paste it here.
-      </p>
-      <label className="field-block">
-        <span className="field-label">Pairing code</span>
-        <textarea
-          className="input-textarea font-mono"
-          rows={4}
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="Paste the code"
-          spellCheck={false}
-          autoFocus
-        />
-      </label>
-      {error && <p className="error-banner" role="alert">{error}</p>}
-      <div className="form-actions">
-        <button type="submit" className="btn btn-primary" disabled={pending || !code.trim()}>
-          {pending && <Loader size={14} className="spin inline-icon" />}
+    <form className="section" onSubmit={submit}>
+      <p className="supporting">Got a code from your other device? Paste it here.</p>
+      <textarea
+        className="input-textarea font-mono"
+        rows={4}
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        placeholder="Pairing code"
+        aria-label="Pairing code"
+        spellCheck={false}
+        autoFocus
+      />
+      {error && (
+        <p className="error-banner" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="dialog-actions">
+        <button type="submit" className="btn btn-filled" disabled={pending || !code.trim()}>
+          {pending && <Loader size={16} className="spin" />}
           {pending ? "Pairing" : "Pair"}
         </button>
       </div>
