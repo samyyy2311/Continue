@@ -80,7 +80,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     // MaterialExpressiveTheme is internal in the stable 1.4 line and only public in 1.5 alphas.
-    implementation("androidx.compose.material3:material3:1.5.0-alpha08")
+    implementation("androidx.compose.material3:material3:1.5.0-alpha29")
     implementation("androidx.compose.material:material-icons-extended")
 
     implementation("androidx.camera:camera-camera2:1.3.4")
