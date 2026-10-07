@@ -60,6 +60,24 @@ pub const MAX_FRAME_CLIPBOARD_BYTES: usize = 1024 * 1024;
 /// Notification messages.
 pub const MAX_FRAME_NOTIFICATION_BYTES: usize = 64 * 1024;
 
+/// Media capture control messages.
+pub const MAX_FRAME_MEDIA_CAPTURE_BYTES: usize = 64 * 1024;
+
+/// Media control messages (commands, metadata, artwork).
+pub const MAX_FRAME_MEDIA_CONTROL_BYTES: usize = 256 * 1024;
+
+/// Handoff continuity messages (URI, state, document context).
+pub const MAX_FRAME_HANDOFF_BYTES: usize = 64 * 1024;
+
+/// Maximum UTF-8 byte length for a handoff target URI.
+pub const MAX_HANDOFF_URI_BYTES: usize = 4 * 1024;
+
+/// Maximum UTF-8 byte length for a handoff title.
+pub const MAX_HANDOFF_TITLE_BYTES: usize = 512;
+
+/// Telemetry messages (battery, radio state).
+pub const MAX_FRAME_TELEMETRY_BYTES: usize = 16 * 1024;
+
 // File transfer
 
 /// Maximum UTF-8 byte length of a transfer filename.

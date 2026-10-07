@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+enum HandoffType {
+  HANDOFF_TYPE_UNSPECIFIED = 0;
+  HANDOFF_TYPE_URL         = 1;
+  HANDOFF_TYPE_DOCUMENT    = 2;
+  HANDOFF_TYPE_MAP         = 3;
+}
+
+message HandoffItem {
+  string      handoff_id       = 1;
+  string      source_device_id = 2;
+  HandoffType handoff_type     = 3;
+  string      title            = 4;
+  string      uri              = 5;
+  float       scroll_ratio     = 6;
+  uint64      cursor_position  = 7;
+  uint64      timestamp_ms     = 8;
+  bytes       extra_payload    = 9;
+}
+
+message HandoffBroadcast {
+  HandoffItem item = 1;
+}
+
+message HandoffDismiss {
+  string handoff_id = 1;
+}
+
+message HandoffAck {
+  string handoff_id    = 1;
+  bool   success       = 2;
+  string error_message = 3;
+}
+
+message HandoffEnvelope {
+  oneof payload {
+    HandoffBroadcast broadcast = 1;
+    HandoffDismiss   dismiss   = 2;
+    HandoffAck       ack       = 3;
+  }
+}

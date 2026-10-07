@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+enum MediaPlaybackState {
+  MEDIA_PLAYBACK_STATE_UNSPECIFIED = 0;
+  MEDIA_PLAYBACK_STATE_PLAYING     = 1;
+  MEDIA_PLAYBACK_STATE_PAUSED      = 2;
+  MEDIA_PLAYBACK_STATE_STOPPED     = 3;
+  MEDIA_PLAYBACK_STATE_BUFFERING   = 4;
+}
+
+enum MediaPlaybackCommand {
+  MEDIA_PLAYBACK_COMMAND_UNSPECIFIED = 0;
+  MEDIA_PLAYBACK_COMMAND_PLAY        = 1;
+  MEDIA_PLAYBACK_COMMAND_PAUSE       = 2;
+  MEDIA_PLAYBACK_COMMAND_PLAY_PAUSE  = 3;
+  MEDIA_PLAYBACK_COMMAND_NEXT        = 4;
+  MEDIA_PLAYBACK_COMMAND_PREVIOUS    = 5;
+  MEDIA_PLAYBACK_COMMAND_STOP        = 6;
+  MEDIA_PLAYBACK_COMMAND_SEEK        = 7;
+  MEDIA_PLAYBACK_COMMAND_SET_VOLUME  = 8;
+}
+
+message MediaMetadata {
+  string             title             = 1;
+  string             artist            = 2;
+  string             album             = 3;
+  uint64             duration_ms       = 4;
+  uint64             position_ms       = 5;
+  MediaPlaybackState state             = 6;
+  float              volume            = 7;
+  bytes              artwork_thumbnail = 8;
+}
+
+message MediaCommandRequest {
+  string               command_id       = 1;
+  MediaPlaybackCommand command          = 2;
+  uint64               seek_position_ms = 3;
+  float                volume           = 4;
+}
+
+message MediaCommandResponse {
+  string command_id    = 1;
+  bool   success       = 2;
+  string error_message = 3;
+}
+
+message MediaStatusUpdate {
+  MediaMetadata metadata     = 1;
+  uint64        timestamp_ms = 2;
+}
+
+message MediaControlEnvelope {
+  oneof payload {
+    MediaCommandRequest command_request = 1;
+    MediaStatusUpdate   status_update   = 2;
+  }
+}

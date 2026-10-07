@@ -17,6 +17,10 @@ fn main() {
         proto_dir.join("transfer.proto"),
         proto_dir.join("clipboard.proto"),
         proto_dir.join("notification.proto"),
+        proto_dir.join("media_capture.proto"),
+        proto_dir.join("media_control.proto"),
+        proto_dir.join("handoff.proto"),
+        proto_dir.join("telemetry.proto"),
     ];
 
     for file in &proto_files {

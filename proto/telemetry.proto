@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+enum ChargingType {
+  CHARGING_TYPE_NONE     = 0;
+  CHARGING_TYPE_AC       = 1;
+  CHARGING_TYPE_USB      = 2;
+  CHARGING_TYPE_WIRELESS = 3;
+}
+
+message BatteryState {
+  uint32       level_percent = 1;
+  bool         is_charging   = 2;
+  ChargingType charging_type = 3;
+  bool         is_low_power  = 4;
+}
+
+message RadioState {
+  bool   wifi_connected        = 1;
+  string wifi_ssid             = 2;
+  int32  wifi_rssi_dbm         = 3;
+  bool   cellular_connected    = 4;
+  uint32 cellular_signal_level = 5;
+  string cellular_operator     = 6;
+}
+
+message DeviceTelemetry {
+  string       device_id    = 1;
+  uint64       timestamp_ms = 2;
+  BatteryState battery      = 3;
+  RadioState   radio        = 4;
+}
+
+message TelemetryAck {
+  bool success = 1;
+}
+
+message TelemetryEnvelope {
+  oneof payload {
+    DeviceTelemetry telemetry = 1;
+    TelemetryAck    ack       = 2;
+  }
+}

@@ -43,4 +43,13 @@ pub enum PairingError {
 
     #[error("Protocol framing error: {0}")]
     Protocol(#[from] protocol::ProtocolError),
+
+    #[error("ADB pairing failed: {0}")]
+    AdbPairingFailed(String),
+
+    #[error("ADB pairing PIN mismatch or authentication failed")]
+    AdbPinMismatch,
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
 }

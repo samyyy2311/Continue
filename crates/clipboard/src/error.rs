@@ -23,6 +23,9 @@ pub enum ClipboardError {
     #[error("Rejected by peer: {0}")]
     Rejected(String),
 
+    #[error("Clipboard content excluded from synchronization")]
+    SensitiveExcluded,
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }

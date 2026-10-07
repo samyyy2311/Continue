@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,6 +24,7 @@ fn current_timestamp() -> u64 {
 pub struct PermissionStore {
     conn: Arc<Mutex<Connection>>,
     allow_once_grants: Arc<Mutex<HashSet<(String, u32)>>>,
+    lockdown: Arc<AtomicBool>,
 }
 
 impl PermissionStore {
@@ -30,6 +32,7 @@ impl PermissionStore {
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
             allow_once_grants: Arc::new(Mutex::new(HashSet::new())),
+            lockdown: Arc::new(AtomicBool::new(false)),
         };
         store.init_schema()?;
         Ok(store)
@@ -142,18 +145,35 @@ impl PermissionStore {
         set.retain(|(peer, _)| peer != peer_fingerprint);
     }
 
+    /// Enables or disables global lockdown mode.
+    /// When active, all permission queries evaluate to `Deny` regardless of stored grants.
+    pub fn set_lockdown(&self, active: bool) {
+        self.lockdown.store(active, Ordering::SeqCst);
+    }
+
+    /// Returns true if global lockdown mode is currently active.
+    pub fn is_locked_down(&self) -> bool {
+        self.lockdown.load(Ordering::SeqCst)
+    }
+
     /// Uses up a one-use grant, if there is one.
     pub fn consume_if_allow_once(&self, peer_fingerprint: &str, capability: CapabilityId) -> bool {
+        if self.is_locked_down() {
+            return false;
+        }
         let mut set = self.allow_once_grants.lock().unwrap();
         set.remove(&(peer_fingerprint.to_string(), capability.raw()))
     }
 
-    /// What the peer may do now: a one-use grant first, then the saved grant, else `Ask`.
+    /// What the peer may do now: Deny if lockdown is active, a one-use grant first, then the saved grant, else `Ask`.
     pub fn query_state(
         &self,
         peer_fingerprint: &str,
         capability: CapabilityId,
     ) -> Result<PermissionState, PermissionError> {
+        if self.is_locked_down() {
+            return Ok(PermissionState::Deny);
+        }
         let allowed_once = self
             .allow_once_grants
             .lock()
@@ -204,5 +224,60 @@ mod tests {
             store.query_state(peer, cap).unwrap(),
             PermissionState::Allow
         );
+    }
+
+    #[test]
+    fn lockdown_overrides_grants_and_resets() {
+        let store = PermissionStore::in_memory().unwrap();
+        let peer = "device-fingerprint-xyz";
+        let cap = CapabilityId::FILE_TRANSFER;
+
+        store
+            .set_persisted_grant(peer, cap, 1, PersistedGrant::Allow)
+            .unwrap();
+        assert_eq!(
+            store.query_state(peer, cap).unwrap(),
+            PermissionState::Allow
+        );
+
+        store.grant_allow_once(peer, CapabilityId::CLIPBOARD);
+        assert_eq!(
+            store.query_state(peer, CapabilityId::CLIPBOARD).unwrap(),
+            PermissionState::AllowOnce
+        );
+
+        store.set_lockdown(true);
+        assert!(store.is_locked_down());
+
+        assert_eq!(
+            store.query_state(peer, cap).unwrap(),
+            PermissionState::Deny
+        );
+        assert_eq!(
+            store.query_state(peer, CapabilityId::CLIPBOARD).unwrap(),
+            PermissionState::Deny
+        );
+        assert!(!store.consume_if_allow_once(peer, CapabilityId::CLIPBOARD));
+
+        // Shared across clones
+        let store_clone = store.clone();
+        assert!(store_clone.is_locked_down());
+        assert_eq!(
+            store_clone.query_state(peer, cap).unwrap(),
+            PermissionState::Deny
+        );
+
+        // Deactivating lockdown restores configured grants
+        store.set_lockdown(false);
+        assert!(!store.is_locked_down());
+        assert_eq!(
+            store.query_state(peer, cap).unwrap(),
+            PermissionState::Allow
+        );
+        assert_eq!(
+            store.query_state(peer, CapabilityId::CLIPBOARD).unwrap(),
+            PermissionState::AllowOnce
+        );
+        assert!(store.consume_if_allow_once(peer, CapabilityId::CLIPBOARD));
     }
 }

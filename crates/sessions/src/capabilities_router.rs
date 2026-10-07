@@ -14,8 +14,11 @@ use protocol::CapabilityId;
 use transfer::{receive_file, send_file, ReceivedFile};
 
 use crate::device::{PeerDevice, ThisDevice};
+use crate::handoff::HandoffDispatcher;
 use crate::incoming::{IncomingFiles, SaveFolder};
+use crate::media_control::MediaControlDispatcher;
 use crate::multiplexer::{OnPeerUpdate, PeerUpdate, SessionMultiplexer};
+use crate::telemetry::TelemetryDispatcher;
 
 /// How long a question waits for the user before it counts as declined.
 pub const PROMPT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -47,17 +50,30 @@ pub type PermissionPrompt =
 
 /// Called with the sender's fingerprint and what it sent.
 pub type OnReceived<T> = Arc<dyn Fn(&str, T) + Send + Sync>;
+pub type MediaCommandHandler = Arc<
+    dyn Fn(&str, protocol::v1::MediaCommandRequest) -> protocol::v1::MediaCommandResponse
+        + Send
+        + Sync,
+>;
 
 /// Callbacks and configuration for active capabilities over a multiplexed session.
 #[derive(Clone)]
 pub struct SessionCapabilityHandlers {
     pub save_folder: SaveFolder,
     pub incoming: IncomingFiles,
+    pub media_control_dispatcher: Arc<MediaControlDispatcher>,
+    pub handoff_dispatcher: Arc<HandoffDispatcher>,
+    pub telemetry_dispatcher: Arc<TelemetryDispatcher>,
     pub on_file_received: Option<OnReceived<ReceivedFile>>,
     pub on_clipboard_received: Option<OnReceived<ClipboardUpdate>>,
     /// Called with notifications the peer shows here, and with replies to and dismissals of
     /// the ones this device sent it.
     pub on_notification: Option<OnReceived<NotificationBody>>,
+    pub on_media_status_received: Option<OnReceived<protocol::v1::MediaStatusUpdate>>,
+    pub on_media_command_received: Option<MediaCommandHandler>,
+    pub on_handoff_received: Option<OnReceived<protocol::v1::HandoffItem>>,
+    pub on_handoff_dismissed: Option<OnReceived<String>>,
+    pub on_telemetry_received: Option<OnReceived<protocol::v1::DeviceTelemetry>>,
     /// How this device introduces itself to peers.
     pub this_device: ThisDevice,
     /// Called with what a peer says about itself each time a session starts.
@@ -76,9 +92,17 @@ impl SessionCapabilityHandlers {
         Self {
             save_folder: SaveFolder::new(save_folder),
             incoming: IncomingFiles::default(),
+            media_control_dispatcher: Arc::new(MediaControlDispatcher::new()),
+            handoff_dispatcher: Arc::new(HandoffDispatcher::new()),
+            telemetry_dispatcher: Arc::new(TelemetryDispatcher::new()),
             on_file_received: None,
             on_clipboard_received: None,
             on_notification: None,
+            on_media_status_received: None,
+            on_media_command_received: None,
+            on_handoff_received: None,
+            on_handoff_dismissed: None,
+            on_telemetry_received: None,
             this_device: ThisDevice::default(),
             on_device_info: None,
             on_device_status: None,
@@ -339,6 +363,114 @@ pub fn spawn_capabilities_dispatcher(
                         }
                         let _ = notifications::acknowledge(&mut stream.send_stream, allowed).await;
                     }
+                    CapabilityId::MEDIA_CONTROL => {
+                        debug!("Handling incoming media control stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::MEDIA_CONTROL, None).await;
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::MEDIA_CONTROL, is_permitted);
+
+                        let on_status = handlers.on_media_status_received.clone();
+                        let on_command = handlers.on_media_command_received.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .media_control_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |cmd| {
+                                    if let Some(ref cb) = on_command {
+                                        cb(&peer, cmd)
+                                    } else {
+                                        protocol::v1::MediaCommandResponse {
+                                            command_id: cmd.command_id,
+                                            success: false,
+                                            error_message: "Media command not handled".into(),
+                                        }
+                                    }
+                                },
+                                |stat| {
+                                    if let Some(ref cb) = on_status {
+                                        cb(&peer, stat);
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process media control stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::HANDOFF => {
+                        debug!("Handling incoming handoff stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::HANDOFF, None).await;
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::HANDOFF, is_permitted);
+
+                        let on_received = handlers.on_handoff_received.clone();
+                        let on_dismissed = handlers.on_handoff_dismissed.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .handoff_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |item| {
+                                    if let Some(ref cb) = on_received {
+                                        cb(&peer, item);
+                                    }
+                                    Ok(())
+                                },
+                                |dismiss_id| {
+                                    if let Some(ref cb) = on_dismissed {
+                                        cb(&peer, dismiss_id);
+                                    }
+                                    Ok(())
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process handoff stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::TELEMETRY => {
+                        debug!("Handling incoming telemetry stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::TELEMETRY, None).await;
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::TELEMETRY, is_permitted);
+
+                        let on_received = handlers.on_telemetry_received.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .telemetry_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |telemetry| {
+                                    if let Some(ref cb) = on_received {
+                                        cb(&peer, telemetry);
+                                    }
+                                    Ok(())
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process telemetry stream from {peer_fp}: {e}");
+                        }
+                    }
                     unknown => {
                         debug!("Received unsupported capability stream {unknown:?} from {peer_fp}");
                     }
@@ -395,4 +527,37 @@ impl SessionMultiplexer {
 
         notifications::send(&mut send, &mut recv, body, query).await
     }
+
+    pub async fn send_media_command_to_peer(
+        &self,
+        command: protocol::v1::MediaCommandRequest,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::MediaCommandResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::MEDIA_CONTROL)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = MediaControlDispatcher::new();
+        dispatcher
+            .send_command(&mut send, &mut recv, command, query)
+            .await
+    }
+
+    pub async fn publish_media_status_to_peer(
+        &self,
+        update: protocol::v1::MediaStatusUpdate,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::MediaCommandResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::MEDIA_CONTROL)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = MediaControlDispatcher::new();
+        dispatcher
+            .publish_status(&mut send, &mut recv, update, query)
+            .await
+    }
 }
+

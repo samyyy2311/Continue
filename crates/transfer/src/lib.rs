@@ -3,13 +3,26 @@
 
 //! Streaming file transfer, one QUIC stream per file.
 
+pub mod capture;
 pub mod error;
+pub mod localsend_bridge;
 mod partial;
+pub mod queue;
 pub mod receiver;
 pub mod sanitizer;
 pub mod sender;
 
+pub use capture::{
+    format_as_clipboard_dibv5, request_camera_capture, respond_camera_capture, CameraCaptureSource,
+    CapturedMedia,
+};
 pub use error::TransferError;
+pub use localsend_bridge::{
+    LocalSendActiveSession, LocalSendBridgeSessionManager, LocalSendFileMetadata,
+    LocalSendPrepareRequest, LocalSendPrepareResponse, LocalSendSanitizedFile, LocalSendSenderInfo,
+};
+pub use queue::{OfflineTransferQueue, QueuedPayload, QueuedTransfer};
 pub use receiver::{receive_file, ReceivedFile};
 pub use sanitizer::sanitize_filename;
 pub use sender::{compute_file_sha256, send_file};
+

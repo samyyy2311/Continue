@@ -15,6 +15,10 @@ impl CapabilityId {
     pub const FILE_TRANSFER: Self = Self(1);
     pub const CLIPBOARD: Self = Self(2);
     pub const NOTIFICATIONS: Self = Self(3);
+    pub const MEDIA_CAPTURE: Self = Self(4);
+    pub const MEDIA_CONTROL: Self = Self(5);
+    pub const HANDOFF: Self = Self(6);
+    pub const TELEMETRY: Self = Self(7);
 
     pub const fn new(id: u32) -> Self {
         Self(id)
@@ -30,6 +34,10 @@ impl CapabilityId {
             Self::FILE_TRANSFER => Some("file_transfer"),
             Self::CLIPBOARD => Some("clipboard"),
             Self::NOTIFICATIONS => Some("notifications"),
+            Self::MEDIA_CAPTURE => Some("media_capture"),
+            Self::MEDIA_CONTROL => Some("media_control"),
+            Self::HANDOFF => Some("handoff"),
+            Self::TELEMETRY => Some("telemetry"),
             _ => None,
         }
     }
