@@ -17,22 +17,27 @@ pub async fn write_msg<M: Message>(
     Ok(())
 }
 
-/// Reads one length-prefixed protobuf message. The limit is checked against
-/// the declared length before the payload is buffered, so a peer cannot force large
-/// allocations.
+/// Reads one length-prefixed protobuf message, and nothing past it, so a stream can carry many.
+/// The limit is checked against the declared length before the payload is buffered, so a peer
+/// cannot force large allocations.
 pub async fn read_msg<M: Message + Default>(
     stream: &mut quinn::RecvStream,
     max_bytes: usize,
 ) -> Result<M, TransportError> {
-    let mut buf = BytesMut::with_capacity(4096);
-    let mut chunk = [0u8; 4096];
-    loop {
-        if let Some(msg) = protocol::decode_frame_from_buf::<M>(&mut buf, max_bytes)? {
-            return Ok(msg);
+    let mut header = [0u8; protocol::FRAME_HEADER_LEN];
+    stream.read_exact(&mut header).await?;
+    let len = u32::from_be_bytes(header) as usize;
+    if len > max_bytes {
+        return Err(protocol::FrameError::FrameTooLarge {
+            size: len,
+            limit: max_bytes,
         }
-        match stream.read(&mut chunk).await? {
-            Some(n) if n > 0 => buf.extend_from_slice(&chunk[..n]),
-            _ => return Err(TransportError::ConnectionClosed),
-        }
+        .into());
     }
+    let mut frame = BytesMut::zeroed(protocol::FRAME_HEADER_LEN + len);
+    frame[..protocol::FRAME_HEADER_LEN].copy_from_slice(&header);
+    stream
+        .read_exact(&mut frame[protocol::FRAME_HEADER_LEN..])
+        .await?;
+    Ok(protocol::decode_frame(&frame, max_bytes)?)
 }
