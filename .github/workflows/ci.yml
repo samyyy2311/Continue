@@ -208,8 +208,20 @@ jobs:
         with:
           version: 9
 
+      # From the release itself, checked against its hash; the Chocolatey feed fails now and then
+      # while reporting success.
       - name: Install protoc
-        run: choco install protoc --no-progress -y
+        shell: pwsh
+        env:
+          PROTOC_VERSION: '36.2'
+          PROTOC_SHA256: f0c128dc0d8492eceece83bb459a4c0e316764b929ffbf1aa416357fd644edd3
+        run: |
+          $zip = "$env:RUNNER_TEMP\protoc.zip"
+          Invoke-WebRequest "https://github.com/protocolbuffers/protobuf/releases/download/v$env:PROTOC_VERSION/protoc-$env:PROTOC_VERSION-win64.zip" -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $env:PROTOC_SHA256) { throw "protoc download doesn't match its hash" }
+          Expand-Archive $zip "$env:RUNNER_TEMP\protoc"
+          "$env:RUNNER_TEMP\protoc\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          & "$env:RUNNER_TEMP\protoc\bin\protoc.exe" --version
 
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
