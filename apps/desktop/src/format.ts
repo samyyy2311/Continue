@@ -38,6 +38,18 @@ export function dayLabel(timestamp: number, now = Date.now()): string {
   return new Date(timestamp).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
 
+/** Splits newest-first items into days, keeping the order. */
+export function byDay<T>(items: T[], timestamp: (item: T) => number): [string, T[]][] {
+  const days: [string, T[]][] = [];
+  for (const item of items) {
+    const day = dayLabel(timestamp(item));
+    const last = days[days.length - 1];
+    if (last?.[0] === day) last[1].push(item);
+    else days.push([day, [item]]);
+  }
+  return days;
+}
+
 /** The web link, if the text is nothing but one. */
 export function linkIn(text: string): string | null {
   const trimmed = text.trim();
@@ -48,6 +60,19 @@ export function linkIn(text: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** The code in a text that says it's one, such as "Your verification code is 482913". */
+export function oneTimeCode(text: string): string | null {
+  if (!/\b(code|otp|pin|passcode|verification|verify)\b/i.test(text)) return null;
+  return text.match(/(?<![\d-])\d{4,8}(?![\d-])/)?.[0] ?? null;
+}
+
+/** Every web link in a text, without the punctuation that ends a sentence. */
+export function linksIn(text: string): string[] {
+  return (text.match(/https?:\/\/\S+/g) ?? [])
+    .map((link) => link.replace(/[.,!?)\]]+$/, ""))
+    .filter((link) => linkIn(link) !== null);
 }
 
 export type FileCategory = "image" | "video" | "audio" | "archive" | "code" | "document" | "other";
@@ -66,7 +91,9 @@ export function getFileCategory(name: string): FileCategory {
   if (["zip", "rar", "7z", "tar", "gz", "apk", "dmg"].includes(ext)) {
     return "archive";
   }
-  if (["rs", "ts", "tsx", "js", "jsx", "html", "css", "py", "json", "c", "cpp", "go", "toml", "yaml", "yml"].includes(ext)) {
+  if (
+    ["rs", "ts", "tsx", "js", "jsx", "html", "css", "py", "json", "c", "cpp", "go", "toml", "yaml", "yml"].includes(ext)
+  ) {
     return "code";
   }
   if (["pdf", "doc", "docx", "txt", "md", "rtf", "xls", "xlsx", "csv"].includes(ext)) {
@@ -74,4 +101,3 @@ export function getFileCategory(name: string): FileCategory {
   }
   return "other";
 }
-

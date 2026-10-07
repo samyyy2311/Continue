@@ -1,29 +1,28 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   Bell,
+  BellRing,
   Check,
   CheckCheck,
   CircleAlert,
-  ClipboardPaste,
+  Clipboard,
   Code,
   Copy,
-  File,
-  FileArchive,
-  FileAudio,
-  FileCode,
-  FileImage,
-  FileText,
-  FileVideo,
+  Pin,
+  PinOff,
+  FileUp,
   FolderOpen,
   History,
   Home,
   Info,
   Laptop,
   Loader,
+  MessageSquareText,
+  MonitorSmartphone,
   Plus,
   Search,
   Send,
@@ -31,6 +30,7 @@ import {
   Trash2,
   Type,
   Upload,
+  Video,
 } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { isTauri } from "@tauri-apps/api/core";
@@ -39,13 +39,14 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
-import { ButtonGroup, ConnectionStatus, ProgressBar, Switch } from "./components.tsx";
+import { ButtonGroup, ConnectionStatus, getFileIcon, ProgressBar, Switch } from "./components.tsx";
 import {
   cancelIncoming,
   clearHistory,
   connectToPeer,
   disconnectPeer,
   reconnectPeer,
+  ringPhone,
   errorMessage,
   getAutostart,
   getDeviceIdentity,
@@ -67,9 +68,29 @@ import {
   removeTrustedPeer,
   sendClipboardText,
   sendFileToPeer,
-  setPermission,
+  setAllowed,
+  takeFilesToSend,
+  onFilesToSend,
+  thumbnail,
+  getWaiting,
+  sendLater,
+  cancelWaiting,
+  onWaitingSent,
+  getPhoneSide,
+  setPhoneSide,
+  onPointerUnavailable,
+  getSnippets,
+  pinSnippet,
+  unpinSnippet,
+  onSnippetsChanged,
+  openDropFolder,
+  getLockWhenAway,
+  setLockWhenAway,
+  onRing,
+  stopRinging,
 } from "./api.ts";
 import {
+  byDay,
   dayLabel,
   fileNameFromPath,
   formatBytes,
@@ -77,8 +98,16 @@ import {
   getFileCategory,
   linkIn,
 } from "./format.ts";
+import { CallBanner } from "./Calls.tsx";
+import { Messages } from "./Messages.tsx";
+import { Mirror } from "./Mirror.tsx";
+import { Webcam } from "./Webcam.tsx";
 import { NotificationList } from "./Notifications.tsx";
+import { NowPlaying } from "./NowPlaying.tsx";
+import { PhoneFiles } from "./PhoneFiles.tsx";
+import { PhoneSearch } from "./PhoneSearch.tsx";
 import { PairDialog } from "./PairDialog.tsx";
+import { Photos } from "./Photos.tsx";
 import { TopBar } from "./TopBar.tsx";
 import {
   ACCENT_PALETTE,
@@ -86,13 +115,9 @@ import {
   type Activity,
   type DeviceIdentity,
   type HistoryEntry,
-  GRANT_OPTIONS,
-  type Grant,
   type HistoryFilter,
   type IncomingTransfer,
   isMac,
-  MOD_KEY,
-  MOD_SHIFT_KEY,
   type PeerPermission,
   type PhoneNotification,
   PERMISSIONS,
@@ -100,10 +125,13 @@ import {
   type Toast,
   type TrustedPeer,
   type View,
+  type WaitingItem,
+  type PhoneSide,
+  type Snippet,
 } from "./types.ts";
 
-/** In top bar order; Ctrl/Cmd plus 1 to 4 opens each. */
-const VIEW_ORDER: View[] = ["transfer", "history", "devices", "settings"];
+/** Top bar order, which is also the Ctrl/Cmd+number shortcut order. */
+const VIEW_ORDER: View[] = ["transfer", "messages", "files", "notifications", "history", "devices", "settings"];
 
 const ACCENT_KEY = "continue.accent";
 const THEME_KEY = "continue.theme";
@@ -161,6 +189,20 @@ function showIncoming(list: Activity[], file: IncomingTransfer): Activity[] {
   return list.map((item) => (item.id === row.id ? { ...row, timestamp: existing.timestamp } : item));
 }
 
+function fromWaiting(item: WaitingItem): Activity {
+  const file = item.kind === "file";
+  return {
+    id: `w-${item.id}`,
+    kind: item.kind,
+    label: file ? fileNameFromPath(item.content) : item.content,
+    path: file ? item.content : undefined,
+    peerId: item.peerId,
+    peerName: item.peerName,
+    status: "waiting",
+    timestamp: Date.now(),
+  };
+}
+
 function fromHistory(entry: HistoryEntry): Activity {
   return {
     id: `h-${entry.id}`,
@@ -185,30 +227,14 @@ function pastedName(file: File) {
   return `Pasted image ${stamp}.png`;
 }
 
-function getFileIcon(name: string) {
-  const category = getFileCategory(name);
-  switch (category) {
-    case "image":
-      return <FileImage size={18} />;
-    case "video":
-      return <FileVideo size={18} />;
-    case "audio":
-      return <FileAudio size={18} />;
-    case "archive":
-      return <FileArchive size={18} />;
-    case "code":
-      return <FileCode size={18} />;
-    case "document":
-      return <FileText size={18} />;
-    default:
-      return <File size={18} />;
-  }
-}
-
 export default function App() {
   const [view, setView] = useState<View>("transfer");
   const [accent, setAccent] = useState<AccentName>(() =>
-    readChoice(ACCENT_KEY, ACCENT_PALETTE.map((a) => a.id), "cobalt"),
+    readChoice(
+      ACCENT_KEY,
+      ACCENT_PALETTE.map((a) => a.id),
+      "cobalt",
+    ),
   );
   const [theme, setTheme] = useState<Theme>(() => readChoice(THEME_KEY, ["system", "light", "dark"], "system"));
   const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
@@ -218,6 +244,8 @@ export default function App() {
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(() => readStored(PEER_KEY));
   const [showPairDialog, setShowPairDialog] = useState(false);
   const [activity, setActivity] = useState<Activity[]>([]);
+  const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [ringing, setRinging] = useState(false);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [dragCount, setDragCount] = useState<number | null>(null);
@@ -254,7 +282,9 @@ export default function App() {
     setNotifications((prev) => prev.filter((n) => connected.has(n.peerId)));
   }, [peers]);
 
-  const [clipboardSync, setClipboardSync] = useState(() => readChoice(CLIPBOARD_SYNC_KEY, ["on", "off"], "on") === "on");
+  const [clipboardSync, setClipboardSync] = useState(
+    () => readChoice(CLIPBOARD_SYNC_KEY, ["on", "off"], "on") === "on",
+  );
   useEffect(() => {
     writeStored(CLIPBOARD_SYNC_KEY, clipboardSync ? "on" : "off");
     if (isTauri()) setClipboardSyncEnabled(clipboardSync).catch(() => {});
@@ -286,13 +316,13 @@ export default function App() {
       return;
     }
     let active = true;
-    Promise.all([getDeviceIdentity(), getTrustedPeers(), getHistory()])
-      .then(([loadedIdentity, loadedPeers, history]) => {
+    Promise.all([getDeviceIdentity(), getTrustedPeers(), getHistory(), getWaiting()])
+      .then(([loadedIdentity, loadedPeers, history, waiting]) => {
         if (!active) return;
         setIdentity(loadedIdentity);
         setPeers(loadedPeers);
         // Anything sent or coming in since the window opened stays on top.
-        setActivity((live) => [...live, ...history.map(fromHistory)]);
+        setActivity((live) => [...live, ...waiting.map(fromWaiting), ...history.map(fromHistory)]);
       })
       .catch((error) => active && setLoadError(errorMessage(error)));
     return () => {
@@ -405,6 +435,23 @@ export default function App() {
           );
         }
 
+        const unWaiting = await onWaitingSent((id, sent) =>
+          setActivity((prev) =>
+            prev.map((a) => (a.id === `w-${id}` ? { ...a, status: sent ? "sent" : "failed", timestamp: Date.now() } : a)),
+          ),
+        );
+        keep(unWaiting);
+        const unRing = await onRing(setRinging);
+        keep(unRing);
+        const loadSnippets = () => void getSnippets().then(setSnippets).catch(() => {});
+        loadSnippets();
+        const unSnippets = await onSnippetsChanged(loadSnippets);
+        keep(unSnippets);
+        const unPointer = await onPointerUnavailable(() =>
+          showError("To use your mouse on the phone, turn on Continue under Accessibility in the phone's settings."),
+        );
+        keep(unPointer);
+
         const unSynced = await listen<{ peerId: string; peerName: string; text: string; failed: boolean }>(
           "clipboard-synced",
           ({ payload }) =>
@@ -502,7 +549,21 @@ export default function App() {
     }
   };
 
+  const sendWhenConnected = async (peer: TrustedPeer, kind: Activity["kind"], content: string) => {
+    try {
+      const id = await sendLater(peer.fingerprint, kind === "text", content);
+      const item = { id, peerId: peer.fingerprint, peerName: peer.displayName, kind, content };
+      setActivity((prev) => [fromWaiting(item), ...prev]);
+      showToast(`Sends when ${peer.displayName} connects`);
+      return true;
+    } catch (error) {
+      showError(errorMessage(error));
+      return false;
+    }
+  };
+
   const sendFile = (peer: TrustedPeer, path: string) => {
+    if (!peer.isConnected) return sendWhenConnected(peer, "file", path);
     return trackTransfer(
       { kind: "file", label: fileNameFromPath(path), path, peerId: peer.fingerprint, peerName: peer.displayName },
       (update) => sendFileToPeer(peer.fingerprint, path, (progress) => update(progress)),
@@ -510,21 +571,15 @@ export default function App() {
   };
 
   const sendText = (peer: TrustedPeer, text: string) => {
+    if (!peer.isConnected) return sendWhenConnected(peer, "text", text);
     return trackTransfer({ kind: "text", label: text, peerId: peer.fingerprint, peerName: peer.displayName }, () =>
       sendClipboardText(peer.fingerprint, text),
     );
   };
 
-  /** The selected device if it's ready to send to; otherwise says why not. */
+  /** The selected device, or says to pair one. Sends to it wait if it isn't connected. */
   const readyPeer = () => {
-    if (!selectedPeer) {
-      showError("Pair your phone first.");
-      return null;
-    }
-    if (!selectedPeer.isConnected) {
-      showError(`Connect to ${selectedPeer.displayName} first.`);
-      return null;
-    }
+    if (!selectedPeer) showError("Pair your phone first.");
     return selectedPeer;
   };
 
@@ -540,10 +595,6 @@ export default function App() {
     const peer = peers?.find((p) => p.fingerprint === item.peerId);
     if (!peer) {
       showError(`${item.peerName} isn't paired any more.`);
-      return;
-    }
-    if (!peer.isConnected) {
-      showError(`Connect to ${item.peerName} first.`);
       return;
     }
     setActivity((prev) => prev.filter((a) => a.id !== item.id));
@@ -565,6 +616,21 @@ export default function App() {
 
   const sendFilesRef = useRef(sendFiles);
   sendFilesRef.current = sendFiles;
+
+  // Files from Explorer's Send to menu wait until the phone is connected.
+  const phoneReady = !!selectedPeer?.isConnected;
+  useEffect(() => {
+    if (!isTauri() || !phoneReady) return;
+    const send = () =>
+      void takeFilesToSend().then((paths) => {
+        if (paths.length === 0) return;
+        setView("transfer");
+        sendFilesRef.current(paths);
+      });
+    send();
+    const unlisten = onFilesToSend(send);
+    return () => void unlisten.then((stop) => stop());
+  }, [phoneReady]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -612,8 +678,8 @@ export default function App() {
         showError("There's nothing copied to send.");
         return;
       }
-      await sendText(peer, text.trim());
-      showToast(`Sent what you copied to ${peer.displayName}`);
+      const sent = await sendText(peer, text.trim());
+      if (sent && peer.isConnected) showToast(`Sent what you copied to ${peer.displayName}`);
     } catch {
       showError("Couldn't read what you copied. Paste it into the text box instead.");
     }
@@ -654,6 +720,18 @@ export default function App() {
     open: (path, reveal) => openReceived(path, reveal).catch((error) => showError(errorMessage(error))),
     openLink: (url) => openLink(url).catch((error) => showError(errorMessage(error))),
     cancelIncoming: (transferId) => cancelIncoming(transferId).catch((error) => showError(errorMessage(error))),
+    pin: (text) =>
+      pinSnippet(text)
+        .then((pinned) => setSnippets((prev) => [pinned, ...prev.filter((s) => s.id !== pinned.id)]))
+        .catch((error) => showError(errorMessage(error))),
+    unpin: (id) =>
+      unpinSnippet(id)
+        .then(() => setSnippets((prev) => prev.filter((s) => s.id !== id)))
+        .catch((error) => showError(errorMessage(error))),
+    cancelWaiting: (item) =>
+      cancelWaiting(Number(item.id.slice(2)))
+        .then(() => setActivity((prev) => prev.filter((a) => a.id !== item.id)))
+        .catch((error) => showError(errorMessage(error))),
   };
 
   const chooseFilesRef = useRef(chooseFiles);
@@ -734,8 +812,12 @@ export default function App() {
 
   const activeTransfers = activity.filter(isMoving);
   const recentActivity = activity.filter((a) => !isMoving(a)).slice(0, 5);
+  const phoneNotifications = notifications.filter((n) => n.peerId === selectedPeer?.fingerprint);
   const tabs = [
     { id: "transfer", label: "Home", icon: <Home size={18} />, badge: activeTransfers.length },
+    { id: "messages", label: "Messages", icon: <MessageSquareText size={18} /> },
+    { id: "files", label: "Files", icon: <FolderOpen size={18} /> },
+    { id: "notifications", label: "Notifications", icon: <Bell size={18} />, badge: phoneNotifications.length },
     { id: "history", label: "Activity", icon: <History size={18} /> },
     { id: "devices", label: "Devices", icon: <Smartphone size={18} /> },
   ] as const;
@@ -743,14 +825,13 @@ export default function App() {
   return (
     <div className="shell">
       <TopBar tabs={[...tabs]} view={view} onView={setView} maximized={maximized} />
+      <CallBanner onError={showError} />
 
       <main className="pane">
         <div className="pane-scroll" key={view}>
           {view === "transfer" && (
             <HomeView
               peer={selectedPeer}
-              peers={peers}
-              onSelectPeer={setSelectedPeerId}
               onOpenPair={() => setShowPairDialog(true)}
               onChooseFiles={chooseFiles}
               onSendClipboard={handleSendClipboard}
@@ -763,11 +844,67 @@ export default function App() {
               isConnecting={connecting === selectedPeer?.fingerprint}
               activeTransfers={activeTransfers}
               recentActivity={recentActivity}
-              notifications={notifications.filter((n) => n.peerId === selectedPeer?.fingerprint)}
-              onError={showError}
               rowActions={rowActions}
               onNavigateHistory={() => setView("history")}
+              notificationCount={phoneNotifications.length}
+              onOpenNotifications={() => setView("notifications")}
+              clipboardSync={clipboardSync}
+              onError={showError}
             />
+          )}
+
+          {view === "messages" && (
+            <div className="page page-wide">
+              <header className="page-head">
+                <h1 className="display">Messages</h1>
+              </header>
+              {selectedPeer?.isConnected ? (
+                <Messages key={selectedPeer.fingerprint} peer={selectedPeer.fingerprint} onError={showError} />
+              ) : (
+                <p className="supporting">Connect your phone to read and send its texts here.</p>
+              )}
+            </div>
+          )}
+
+          {view === "files" && (
+            <div className="page">
+              <header className="page-head">
+                <h1 className="display">Files</h1>
+              </header>
+              {selectedPeer?.isConnected ? (
+                <PhoneFiles key={selectedPeer.fingerprint} peer={selectedPeer.fingerprint} onError={showError} />
+              ) : (
+                <p className="supporting">Connect your phone to browse its files here.</p>
+              )}
+            </div>
+          )}
+
+          {view === "search" && (
+            <div className="page">
+              <header className="page-head">
+                <h1 className="display">Search</h1>
+              </header>
+              {selectedPeer?.isConnected ? (
+                <PhoneSearch key={selectedPeer.fingerprint} peer={selectedPeer.fingerprint} onError={showError} />
+              ) : (
+                <p className="supporting">Connect your phone to search its files, texts and contacts.</p>
+              )}
+            </div>
+          )}
+
+          {view === "notifications" && (
+            <div className="page">
+              <header className="page-head">
+                <h1 className="display">Notifications</h1>
+              </header>
+              {phoneNotifications.length > 0 ? (
+                <NotificationList notifications={phoneNotifications} onError={showError} />
+              ) : (
+                <p className="supporting">
+                  Notifications from your phone show up here. Turn them on in the phone app, under Settings.
+                </p>
+              )}
+            </div>
           )}
 
           {view === "devices" && (
@@ -788,7 +925,7 @@ export default function App() {
           )}
 
           {view === "history" && (
-            <HistoryView activity={activity} rowActions={rowActions} onClear={handleClearHistory} />
+            <HistoryView activity={activity} snippets={snippets} rowActions={rowActions} onClear={handleClearHistory} />
           )}
 
           {view === "settings" && (
@@ -812,12 +949,26 @@ export default function App() {
           <div className="drop-target">
             <Upload size={40} strokeWidth={1.5} className="text-accent" />
             <p className="headline">
-              {selectedPeer?.isConnected ? `Drop to send to ${selectedPeer.displayName}` : "Connect your phone first"}
+              {!selectedPeer
+                ? "Pair your phone first"
+                : selectedPeer.isConnected
+                  ? `Drop to send to ${selectedPeer.displayName}`
+                  : `Drop to send when ${selectedPeer.displayName} connects`}
             </p>
-            {selectedPeer?.isConnected && dragCount > 0 && (
+            {selectedPeer && dragCount > 0 && (
               <p className="supporting">{dragCount === 1 ? "1 file" : `${dragCount} files`}</p>
             )}
           </div>
+        </div>
+      )}
+
+      {ringing && (
+        <div className="ring-banner" role="alert">
+          <BellRing size={22} />
+          <span className="title">Your phone is looking for this computer</span>
+          <button type="button" className="btn btn-filled" onClick={() => void stopRinging()}>
+            Stop
+          </button>
         </div>
       )}
 
@@ -840,6 +991,9 @@ interface RowActions {
   open: (path: string, reveal: boolean) => void;
   openLink: (url: string) => void;
   cancelIncoming: (transferId: string) => void;
+  cancelWaiting: (item: Activity) => void;
+  pin: (text: string) => void;
+  unpin: (id: string) => void;
 }
 
 /** Under a day heading (`underDay`), older rows show the time rather than repeat the day. */
@@ -855,9 +1009,14 @@ function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: bo
   const progress = moving && item.totalBytes ? (item.bytesSent ?? 0) / item.totalBytes : null;
   const incoming = item.status === "received" || item.status === "receiving";
   const who = incoming ? `From ${item.peerName}` : `To ${item.peerName}`;
+  const preview = useThumbnail(openable && getFileCategory(item.label) === "image" ? openable : undefined);
   return (
     <li className={`list-item ${item.status}`}>
-      <span className="list-leading">{item.kind === "file" ? getFileIcon(item.label) : <Type size={18} />}</span>
+      {preview ? (
+        <img className="list-thumb" src={preview} alt="" />
+      ) : (
+        <span className="list-leading">{item.kind === "file" ? getFileIcon(item.label) : <Type size={18} />}</span>
+      )}
       <div className="list-text">
         <span className="list-title" title={item.label}>
           {item.label}
@@ -888,6 +1047,14 @@ function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: bo
             Cancel
           </button>
         )}
+        {item.status === "waiting" && (
+          <>
+            <span className="status-text">Sends when connected</span>
+            <button type="button" className="btn btn-text btn-small" onClick={() => actions.cancelWaiting(item)}>
+              Cancel
+            </button>
+          </>
+        )}
         {item.status === "failed" && (
           <>
             <span className="status-text error" title={item.error}>
@@ -910,9 +1077,19 @@ function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: bo
         )}
         {item.status === "sent" && <CheckCheck size={18} className="delivered" aria-label="Delivered" />}
         {item.kind === "text" && item.status !== "sending" && (
-          <button type="button" className="icon-btn" title="Copy" onClick={() => actions.copy(item.label)}>
-            <Copy size={18} />
-          </button>
+          <>
+            <button
+              type="button"
+              className="icon-btn"
+              title="Pin on every device"
+              onClick={() => actions.pin(item.label)}
+            >
+              <Pin size={18} />
+            </button>
+            <button type="button" className="icon-btn" title="Copy" onClick={() => actions.copy(item.label)}>
+              <Copy size={18} />
+            </button>
+          </>
         )}
         {link && (
           <button type="button" className="btn btn-tonal btn-small" onClick={() => actions.openLink(link)}>
@@ -926,8 +1103,6 @@ function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: bo
 
 interface HomeViewProps {
   peer: TrustedPeer | null;
-  peers: TrustedPeer[];
-  onSelectPeer: (id: string) => void;
   onOpenPair: () => void;
   onChooseFiles: () => void;
   onSendClipboard: () => void;
@@ -942,23 +1117,29 @@ interface HomeViewProps {
   recentActivity: Activity[];
   rowActions: RowActions;
   onNavigateHistory: () => void;
-  notifications: PhoneNotification[];
+  notificationCount: number;
+  onOpenNotifications: () => void;
+  clipboardSync: boolean;
   onError: (message: string) => void;
 }
 
 function HomeView(props: HomeViewProps) {
-  const { peer, peers, onSelectPeer, onOpenPair, onChooseFiles, onSendClipboard, textInput } = props;
+  const { peer, onOpenPair, onChooseFiles, onSendClipboard, textInput } = props;
   const { onTextInputChange, onSendText, onConnect, onReconnect, onDisconnect, isConnecting } = props;
-  const { activeTransfers, recentActivity, rowActions, onNavigateHistory, notifications, onError } = props;
+  const { activeTransfers, recentActivity, rowActions, onNavigateHistory } = props;
+  const { notificationCount, onOpenNotifications, clipboardSync, onError } = props;
+  const [writing, setWriting] = useState(false);
+  const [mirroring, setMirroring] = useState(false);
+  const closeMirror = useCallback(() => setMirroring(false), []);
+  const [filming, setFilming] = useState(false);
+  const closeWebcam = useCallback(() => setFilming(false), []);
 
   if (!peer) {
     return (
       <div className="empty">
         <PhoneFrame active={false} />
         <h1 className="display">Pair your phone</h1>
-        <p className="supporting">
-          Scan a code once, then send files and text between your phone and this computer over your own network.
-        </p>
+        <p className="supporting">Scan a code once, then send files and text between your phone and this computer.</p>
         <button type="button" className="btn btn-filled btn-large" onClick={onOpenPair}>
           <Plus size={20} />
           Pair a device
@@ -968,22 +1149,23 @@ function HomeView(props: HomeViewProps) {
   }
 
   const online = peer.isConnected;
-  const recent = [...activeTransfers, ...recentActivity];
+  const recent = [...activeTransfers, ...recentActivity].slice(0, 5);
 
   return (
     <div className="home">
-      <aside className="panel device-panel">
-        <PhoneFrame active={online} />
-        <div className="device-panel-text">
-          <h1 className="headline">{peer.displayName}</h1>
-          <ConnectionStatus peer={peer} />
-        </div>
-        <div className="device-actions">
-          {online ? (
-            <button type="button" className="btn btn-tonal" onClick={onDisconnect}>
+      <aside className="device-panel">
+        <PhoneFrame active={online} peer={peer} />
+        <h1 className="headline">{peer.displayName}</h1>
+        <ConnectionStatus peer={peer} />
+        {online ? (
+          <>
+            <RingButton peer={peer.fingerprint} onError={onError} />
+            <button type="button" className="btn btn-text btn-small home-disconnect" onClick={onDisconnect}>
               Disconnect
             </button>
-          ) : (
+          </>
+        ) : (
+          <div className="device-actions">
             <ManualConnect
               key={peer.fingerprint}
               initialAddress={peer.endpoint}
@@ -991,124 +1173,178 @@ function HomeView(props: HomeViewProps) {
               onConnect={onConnect}
               onReconnect={onReconnect}
             />
-          )}
-        </div>
-        {peers.length > 1 && (
-          <div className="chips" role="radiogroup" aria-label="Device">
-            {peers.map((p) => (
-              <button
-                key={p.fingerprint}
-                type="button"
-                role="radio"
-                aria-checked={p.fingerprint === peer.fingerprint}
-                className="chip"
-                onClick={() => onSelectPeer(p.fingerprint)}
-              >
-                {p.displayName}
-              </button>
-            ))}
           </div>
         )}
-        <button type="button" className="btn btn-text device-panel-pair" onClick={onOpenPair}>
-          <Plus size={18} />
-          Pair another device
-        </button>
       </aside>
 
       <div className="home-main">
-        <section className="panel">
-          <h2 className="panel-title">
-            <Send size={18} />
-            Send to {peer.displayName}
-          </h2>
-          <div className={`drop-area ${online ? "" : "disabled"}`}>
-            <Upload size={24} strokeWidth={1.75} className="text-accent" />
-            <div className="drop-area-text">
-              <span className="list-title">{online ? "Drop files here" : "Not connected"}</span>
-              <span className="list-sub">
-                {online ? "Or paste them anywhere in this window." : "Connect to send files and text."}
-              </span>
-            </div>
-            {online && (
-              <div className="drop-area-actions">
-                <button type="button" className="btn btn-filled" onClick={onChooseFiles} title={`${MOD_KEY}O`}>
-                  Choose files
-                </button>
-                <button type="button" className="btn btn-tonal" onClick={onSendClipboard} title={`${MOD_SHIFT_KEY}V`}>
-                  <ClipboardPaste size={18} />
-                  Send clipboard
-                </button>
-              </div>
-            )}
-          </div>
+        <div className="tiles">
+          <FeatureTile
+            icon={<FileUp />}
+            label="Send files"
+            state={online ? "Or drop them here" : "Sends when it connects"}
+            onClick={onChooseFiles}
+          />
+          <FeatureTile
+            icon={<MessageSquareText />}
+            label="Send text"
+            state={online ? "A note or a link" : "Sends when it connects"}
+            onClick={() => setWriting(!writing)}
+          />
+          <FeatureTile
+            icon={<Clipboard />}
+            label="Clipboard"
+            state={clipboardSync ? "Sync on" : "Sync off"}
+            onClick={onSendClipboard}
+          />
+          <FeatureTile
+            icon={<MonitorSmartphone />}
+            label="Phone screen"
+            state="See and control it"
+            disabled={!online}
+            onClick={() => setMirroring(true)}
+          />
+          <FeatureTile
+            icon={<Video />}
+            label="Webcam"
+            state="Use the phone's camera"
+            disabled={!online}
+            onClick={() => setFilming(true)}
+          />
+          <FeatureTile
+            icon={<Bell />}
+            label="Notifications"
+            state={notificationCount ? `${notificationCount} new` : "None"}
+            onClick={onOpenNotifications}
+          />
+        </div>
+
+        {writing && (
           <form
-            className={`composer ${online ? "" : "disabled"}`}
+            className="composer"
             onSubmit={(e) => {
               e.preventDefault();
               onSendText();
             }}
           >
             <input
+              autoFocus
               value={textInput}
               onChange={(e) => onTextInputChange(e.target.value)}
-              placeholder={online ? "Type a note or paste a link" : "Connect to send text"}
+              onKeyDown={(e) => e.key === "Escape" && setWriting(false)}
+              placeholder="Type a note or paste a link"
               aria-label="Text to send"
-              disabled={!online}
             />
-            <button type="submit" className="composer-send" disabled={!online || !textInput.trim()} aria-label="Send">
+            <button type="submit" className="composer-send" disabled={!textInput.trim()} aria-label="Send">
               <ArrowUp size={20} />
             </button>
           </form>
+        )}
+
+        {online && <NowPlaying key={`media-${peer.fingerprint}`} peer={peer.fingerprint} onError={onError} />}
+        {online && <Photos key={peer.fingerprint} peer={peer.fingerprint} onError={onError} />}
+        {online && mirroring && <Mirror peer={peer.fingerprint} onClose={closeMirror} onError={onError} />}
+        {online && filming && <Webcam peer={peer.fingerprint} onClose={closeWebcam} onError={onError} />}
+
+        <section className="section">
+          <div className="section-head">
+            <h2 className="label">Recent</h2>
+            {recent.length > 0 && (
+              <button type="button" className="btn btn-text btn-small" onClick={onNavigateHistory}>
+                See all
+              </button>
+            )}
+          </div>
+          {recent.length > 0 ? (
+            <ul className="list">
+              {recent.map((item) => (
+                <ActivityRow key={item.id} item={item} actions={rowActions} />
+              ))}
+            </ul>
+          ) : (
+            <p className="supporting">Files and text you send or receive show up here.</p>
+          )}
         </section>
-
-        <div className="home-grid">
-          <section className="panel">
-            <h2 className="panel-title">
-              <Bell size={18} />
-              Notifications
-            </h2>
-            {online && notifications.length > 0 ? (
-              <NotificationList notifications={notifications} onError={onError} />
-            ) : (
-              <p className="panel-empty">Notifications from your phone show up here.</p>
-            )}
-          </section>
-
-          <section className="panel">
-            <div className="panel-head">
-              <h2 className="panel-title">
-                <History size={18} />
-                Recent
-              </h2>
-              {recent.length > 0 && (
-                <button type="button" className="btn btn-text btn-small" onClick={onNavigateHistory}>
-                  See all
-                </button>
-              )}
-            </div>
-            {recent.length > 0 ? (
-              <ul className="list">
-                {recent.map((item) => (
-                  <ActivityRow key={item.id} item={item} actions={rowActions} />
-                ))}
-              </ul>
-            ) : (
-              <p className="panel-empty">Files and text you send or receive show up here.</p>
-            )}
-          </section>
-        </div>
       </div>
     </div>
   );
 }
 
-/** A phone drawn as an outline, lit in the accent colour while it's connected. */
-function PhoneFrame({ active }: { active: boolean }) {
+function FeatureTile(props: {
+  icon: React.ReactElement;
+  label: string;
+  state: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  const { icon, label, state, disabled, onClick } = props;
   return (
-    <div className={`phone-frame ${active ? "active" : ""}`} aria-hidden="true">
-      <span className="phone-screen" />
+    <button type="button" className="tile" disabled={disabled} onClick={onClick}>
+      <span className="tile-icon">{icon}</span>
+      <span className="tile-label">{label}</span>
+      <span className="tile-state">{state}</span>
+    </button>
+  );
+}
+
+function PhoneFrame({ active, peer }: { active: boolean; peer?: TrustedPeer }) {
+  const screen = peer?.wallpaper
+    ? { background: `center / cover url(${peer.wallpaper})` }
+    : peer?.wallpaperColor
+      ? { background: peer.wallpaperColor }
+      : undefined;
+  return (
+    <div className={`phone ${active ? "active" : ""}`} aria-hidden="true">
+      <span className="phone-screen" style={active ? screen : undefined}>
+        <span className="phone-camera" />
+      </span>
     </div>
   );
+}
+
+const thumbnails = new Map<string, Promise<string | null>>();
+
+/** The phone stops by itself after 30 seconds, so the button does too. */
+const RING_FOR_MS = 30_000;
+
+function RingButton({ peer, onError }: { peer: string; onError: (message: string) => void }) {
+  const [ringing, setRinging] = useState(false);
+  useEffect(() => {
+    if (!ringing) return;
+    const timer = window.setTimeout(() => setRinging(false), RING_FOR_MS);
+    return () => window.clearTimeout(timer);
+  }, [ringing]);
+  const toggle = () => {
+    ringPhone(peer, !ringing).then(
+      () => setRinging(!ringing),
+      (error) => onError(errorMessage(error)),
+    );
+  };
+  return (
+    <button type="button" className="btn btn-tonal btn-small" onClick={toggle}>
+      <BellRing size={16} />
+      {ringing ? "Stop ringing" : "Ring phone"}
+    </button>
+  );
+}
+
+/** Cached per path. */
+function useThumbnail(path: string | undefined) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    if (!path || !isTauri()) return;
+    if (!thumbnails.has(path))
+      thumbnails.set(
+        path,
+        thumbnail(path).catch(() => null),
+      );
+    let active = true;
+    void thumbnails.get(path)?.then((url) => active && setSrc(url));
+    return () => {
+      active = false;
+    };
+  }, [path]);
+  return src;
 }
 
 interface DevicesViewProps {
@@ -1182,14 +1418,12 @@ function DeviceCard(props: {
     return () => window.clearTimeout(timer);
   }, [confirmingForget]);
 
-  const updateGrant = async (permission: PeerPermission, grant: Grant) => {
-    const apply = () =>
-      setPermissions((prev) =>
-        prev ? prev.map((p) => (p.capabilityId === permission.capabilityId ? { ...p, grant } : p)) : null,
-      );
+  const updateAllowed = async (permission: PeerPermission, allowed: boolean) => {
     try {
-      await setPermission(peer.fingerprint, permission.capabilityId, grant);
-      apply();
+      await setAllowed(peer.fingerprint, permission.capabilityId, allowed);
+      setPermissions((prev) =>
+        prev ? prev.map((p) => (p.capabilityId === permission.capabilityId ? { ...p, allowed } : p)) : null,
+      );
     } catch (err) {
       onError(errorMessage(err));
     }
@@ -1225,6 +1459,11 @@ function DeviceCard(props: {
         </div>
       </div>
 
+      <p className="supporting wrap">
+        Pairing words: <strong>{peer.words}</strong>. {peer.displayName} shows the same four under this computer
+        in its Devices page; if they differ, forget this device and pair again.
+      </p>
+
       <h3 className="label">What {peer.displayName} can do here</h3>
       <ul className="list">
         {permissions ? (
@@ -1234,14 +1473,15 @@ function DeviceCard(props: {
             return (
               <li key={perm.capabilityId} className="list-item">
                 <div className="list-text">
-                  <span className="list-title">{meta.label}</span>
+                  <span className="list-title" id={`allow-${perm.capabilityId}`}>
+                    {meta.label}
+                  </span>
                   <span className="list-sub">{meta.description}</span>
                 </div>
-                <ButtonGroup
-                  label={meta.label}
-                  options={GRANT_OPTIONS}
-                  value={perm.grant}
-                  onChange={(grant) => updateGrant(perm, grant)}
+                <Switch
+                  labelledBy={`allow-${perm.capabilityId}`}
+                  checked={perm.allowed}
+                  onChange={(allowed) => updateAllowed(perm, allowed)}
                 />
               </li>
             );
@@ -1249,7 +1489,7 @@ function DeviceCard(props: {
         ) : (
           <li className="list-item">
             <Loader size={18} className="spin" />
-            <span className="list-sub">Loading permissions</span>
+            <span className="list-sub">Loading</span>
           </li>
         )}
       </ul>
@@ -1270,8 +1510,46 @@ function DeviceCard(props: {
 
 interface HistoryViewProps {
   activity: Activity[];
+  snippets: Snippet[];
   rowActions: RowActions;
   onClear: () => void;
+}
+
+/** Pinned clips, on every paired device. Pin text from its row in Activity. */
+function PinnedList(props: { snippets: Snippet[]; search: string; actions: RowActions }) {
+  const { snippets, search, actions } = props;
+  const shown = snippets.filter((snippet) => !search || snippet.text.toLowerCase().includes(search));
+  if (shown.length === 0) {
+    return (
+      <p className="supporting">
+        {search ? "No pinned text matches." : "Pin text from Activity to keep it on every device."}
+      </p>
+    );
+  }
+  return (
+    <ul className="list">
+      {shown.map((snippet) => (
+        <li key={snippet.id} className="list-item">
+          <span className="list-leading">
+            <Pin size={18} />
+          </span>
+          <div className="list-text">
+            <span className="list-title" title={snippet.text}>
+              {snippet.text}
+            </span>
+          </div>
+          <div className="list-trailing">
+            <button type="button" className="icon-btn" title="Unpin" onClick={() => actions.unpin(snippet.id)}>
+              <PinOff size={18} />
+            </button>
+            <button type="button" className="icon-btn" title="Copy" onClick={() => actions.copy(snippet.text)}>
+              <Copy size={18} />
+            </button>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 const HISTORY_FILTERS = [
@@ -1279,28 +1557,20 @@ const HISTORY_FILTERS = [
   { value: "file", label: "Files" },
   { value: "text", label: "Text" },
   { value: "failed", label: "Failed" },
+  { value: "pinned", label: "Pinned" },
 ] as const;
 
-/** Splits newest-first activity into days, keeping the order. */
-function byDay(items: Activity[]): [string, Activity[]][] {
-  const days: [string, Activity[]][] = [];
-  for (const item of items) {
-    const day = dayLabel(item.timestamp);
-    const last = days[days.length - 1];
-    if (last?.[0] === day) last[1].push(item);
-    else days.push([day, [item]]);
-  }
-  return days;
-}
-
 function HistoryView(props: HistoryViewProps) {
-  const { activity, rowActions, onClear } = props;
+  const { activity, snippets, rowActions, onClear } = props;
   const [filter, setFilter] = useState<HistoryFilter>("all");
+  const [device, setDevice] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [confirmingClear, setConfirmingClear] = useState(false);
 
+  const devices = [...new Map(activity.map((item) => [item.peerId, item.peerName])).entries()];
   const needle = search.trim().toLowerCase();
   const filtered = activity.filter((item) => {
+    if (device && item.peerId !== device) return false;
     if (filter === "file" && item.kind !== "file") return false;
     if (filter === "text" && item.kind !== "text") return false;
     if (filter === "failed" && item.status !== "failed") return false;
@@ -1343,6 +1613,23 @@ function HistoryView(props: HistoryViewProps) {
             </button>
           ))}
         </div>
+        {devices.length > 1 && (
+          <div className="chips" role="radiogroup" aria-label="Device">
+            {[[null, "Every device"] as const, ...devices].map(([id, name]) => (
+              <button
+                key={id ?? "all"}
+                type="button"
+                role="radio"
+                aria-checked={device === id}
+                className="chip"
+                onClick={() => setDevice(id)}
+              >
+                {device === id && <Check size={16} />}
+                {name}
+              </button>
+            ))}
+          </div>
+        )}
         <label className="search">
           <Search size={20} />
           <input
@@ -1355,10 +1642,12 @@ function HistoryView(props: HistoryViewProps) {
         </label>
       </div>
 
-      {filtered.length === 0 ? (
+      {filter === "pinned" ? (
+        <PinnedList snippets={snippets} search={needle} actions={rowActions} />
+      ) : filtered.length === 0 ? (
         <p className="supporting">{search ? `Nothing matches "${search}".` : "Nothing sent or received yet."}</p>
       ) : (
-        byDay(filtered).map(([day, items]) => (
+        byDay(filtered, (item) => item.timestamp).map(([day, items]) => (
           <section key={day} className="day">
             <h2 className="day-label">{day}</h2>
             <ul className="list">
@@ -1385,6 +1674,12 @@ interface SettingsViewProps {
   onAccentChange: (accent: AccentName) => void;
 }
 
+const PHONE_SIDE_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "left", label: "Left" },
+  { value: "right", label: "Right" },
+] as const;
+
 const THEME_OPTIONS = [
   { value: "system", label: "Auto" },
   { value: "light", label: "Light" },
@@ -1397,9 +1692,17 @@ function SettingsView(props: SettingsViewProps) {
   const [appVersion, setAppVersion] = useState("");
   const [startAtLogin, setStartAtLogin] = useState(false);
   const [saveFolder, setSaveFolderShown] = useState("");
+  const [phoneSide, setPhoneSideShown] = useState<PhoneSide | null>(null);
+  const [lockWhenAway, setLockWhenAwayShown] = useState<boolean | null>(null);
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => setAppVersion(""));
+    getPhoneSide()
+      .then(setPhoneSideShown)
+      .catch(() => {});
+    getLockWhenAway()
+      .then(setLockWhenAwayShown)
+      .catch(() => {});
     getAutostart().then(setStartAtLogin).catch(() => {});
     getSaveFolder().then(setSaveFolderShown).catch(() => {});
   }, []);
@@ -1410,6 +1713,11 @@ function SettingsView(props: SettingsViewProps) {
     setSaveFolder(picked)
       .then(setSaveFolderShown)
       .catch((error) => onError(errorMessage(error)));
+  };
+
+  const changePhoneSide = (side: PhoneSide) => {
+    setPhoneSideShown(side);
+    setPhoneSide(side).catch((error) => onError(errorMessage(error)));
   };
 
   const changeStartAtLogin = (on: boolean) => {
@@ -1474,6 +1782,55 @@ function SettingsView(props: SettingsViewProps) {
         </li>
       </ul>
 
+      {phoneSide && (
+        <>
+          <h2 className="label">Mouse and keyboard</h2>
+          <ul className="list">
+            <li className="list-item">
+              <div className="list-text">
+                <span className="list-title">Phone sits on the</span>
+                <span className="list-sub wrap">
+                  Push the pointer past that edge of your screens to use it on the phone. Press Esc to bring it back.
+                </span>
+              </div>
+              <ButtonGroup
+                label="Phone sits on the"
+                options={PHONE_SIDE_OPTIONS}
+                value={phoneSide}
+                onChange={changePhoneSide}
+              />
+            </li>
+          </ul>
+        </>
+      )}
+
+      {lockWhenAway !== null && (
+        <>
+          <h2 className="label">Locking</h2>
+          <ul className="list">
+            <li className="list-item">
+              <div className="list-text">
+                <span className="list-title" id="lock-when-away-label">
+                  Lock when your phone moves away
+                </span>
+                <span className="list-sub wrap">
+                  Uses Bluetooth. Turn on &quot;Let your computer see you&apos;re nearby&quot; in the phone app&apos;s
+                  settings too.
+                </span>
+              </div>
+              <Switch
+                labelledBy="lock-when-away-label"
+                checked={lockWhenAway}
+                onChange={(on) => {
+                  setLockWhenAwayShown(on);
+                  setLockWhenAway(on).catch((error) => onError(errorMessage(error)));
+                }}
+              />
+            </li>
+          </ul>
+        </>
+      )}
+
       <h2 className="label">Received files</h2>
       <ul className="list">
         <li className="list-item">
@@ -1497,6 +1854,25 @@ function SettingsView(props: SettingsViewProps) {
               Change
             </button>
           </div>
+        </li>
+      </ul>
+
+      <h2 className="label">Drop folder</h2>
+      <ul className="list">
+        <li className="list-item">
+          <div className="list-text">
+            <span className="list-title">Continue Drop, in Documents</span>
+            <span className="list-sub wrap">
+              Put files here and they go to your phone, or wait until it connects. Sent ones move into Sent.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-tonal btn-small"
+            onClick={() => openDropFolder().catch((error) => onError(errorMessage(error)))}
+          >
+            Open
+          </button>
         </li>
       </ul>
 

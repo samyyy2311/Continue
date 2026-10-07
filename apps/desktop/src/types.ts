@@ -8,18 +8,31 @@ export interface DeviceIdentity {
 export interface TrustedPeer {
   fingerprint: string;
   displayName: string;
+  /** The same four words show on the device, to check it's the one that was paired. */
+  words: string;
   pairedAt: number;
   isConnected: boolean;
   endpoint?: string;
-  /** Only while connected, once the device has reported it. */
-  battery: { percent: number; charging: boolean } | null;
+  /** Only while connected, once the device has reported it. Signal bars run 0–4; null without that network. */
+  status: {
+    percent: number;
+    charging: boolean;
+    cellBars: number | null;
+    wifiBars: number | null;
+    carrier: string;
+    /** "5G", "LTE", "3G" or "2G"; empty when unknown. */
+    network: string;
+  } | null;
+  /** The main colour of the phone's wallpaper, as #rrggbb, once it has said. */
+  wallpaperColor: string | null;
+  /** JPEG data URL, when the phone could read its wallpaper. */
+  wallpaper: string | null;
 }
 
-export type Grant = "Allow" | "Ask" | "Deny" | "AllowOnce";
-
+/** True unless turned off for this device. */
 export interface PeerPermission {
   capabilityId: number;
-  grant: Grant;
+  allowed: boolean;
 }
 
 export type AccentName = "cobalt" | "teal" | "recordRed" | "coral" | "amber" | "emerald" | "magenta" | "silver";
@@ -46,9 +59,36 @@ export const ACCENT_PALETTE: AccentColor[] = [
   { id: "silver", label: "Mono", base: "var(--text)", onBase: "var(--bg)" },
 ];
 
-export type View = "transfer" | "devices" | "history" | "settings";
+export type View = "transfer" | "messages" | "files" | "notifications" | "history" | "devices" | "search" | "settings";
+
+export interface Contact {
+  name: string;
+  number: string;
+  favorite: boolean;
+  /** JPEG data URL. */
+  photo: string | null;
+}
+
+/** Something on the phone that matched a search. */
+export interface SearchResult {
+  kind: "file" | "text" | "contact";
+  title: string;
+  /** The folder, the text itself, or the phone number. */
+  detail: string;
+  /** A file's path in the phone's shared folder, or a text's conversation id. */
+  reference: string;
+  /** Unix milliseconds; 0 for contacts. */
+  at: number;
+}
+export type PhoneSide = "off" | "left" | "right";
 export type Theme = "system" | "light" | "dark";
-export type HistoryFilter = "all" | "file" | "text" | "failed";
+export type HistoryFilter = "all" | "file" | "text" | "failed" | "pinned";
+
+/** A pinned clip, kept on every paired device. */
+export interface Snippet {
+  id: string;
+  text: string;
+}
 
 export interface Toast {
   message: string;
@@ -61,7 +101,7 @@ export interface Activity {
   label: string;
   peerId: string;
   peerName: string;
-  status: "sending" | "sent" | "failed" | "receiving" | "received";
+  status: "waiting" | "sending" | "sent" | "failed" | "receiving" | "received";
   timestamp: number;
   path?: string;
   bytesSent?: number;
@@ -69,6 +109,16 @@ export interface Activity {
   error?: string;
   /** For a file coming in, the id that cancels it. */
   transferId?: string;
+}
+
+/** Text or a file kept for a device that isn't connected, until it is. */
+export interface WaitingItem {
+  id: number;
+  peerId: string;
+  peerName: string;
+  kind: "file" | "text";
+  /** The text, or the file's path. */
+  content: string;
 }
 
 /** A file on its way in. */
@@ -96,28 +146,78 @@ export interface HistoryEntry {
   location: string | null;
 }
 
-/** Something a device set to Ask wants to send. */
-export interface PermissionQuestion {
-  id: number;
-  peerName: string;
-  kind: "file" | "text" | "notification";
-  /** The file name, for files. */
-  detail: string | null;
-}
-
-export type PermissionAnswer = "allow" | "alwaysAllow" | "decline";
-
 /** By capability id. */
 export const PERMISSIONS: Record<number, { label: string; description: string }> = {
   1: { label: "Files", description: "Send files to this computer" },
   2: { label: "Text", description: "Send copied text and links" },
   3: { label: "Notifications", description: "Show its notifications here" },
+  4: { label: "New photos", description: "Show photos as you take them" },
+  7: { label: "Calls", description: "Show calls as they ring" },
+  10: { label: "Media", description: "Show what's playing" },
+  12: { label: "Touchpad", description: "Move this computer's pointer and type here" },
+  13: { label: "Control this computer", description: "Lock it, type into it and open links" },
 };
+
+export interface NowPlaying {
+  peerId: string;
+  /** Empty when nothing is playing. */
+  title: string;
+  artist: string;
+  app: string;
+  playing: boolean;
+  durationMs: number;
+  positionMs: number;
+  /** JPEG data URL. */
+  art: string | null;
+}
+
+export type MediaCommand = "PLAY_PAUSE" | "NEXT" | "PREVIOUS" | "VOLUME_UP" | "VOLUME_DOWN";
+
+export interface PhoneCall {
+  peerId: string;
+  state: "ringing" | "talking" | "ended";
+  number: string;
+  /** Empty when not in contacts. */
+  name: string;
+}
+
+export interface PhoneFile {
+  name: string;
+  folder: boolean;
+  size: number;
+  modified: number;
+}
+
+export interface Conversation {
+  id: string;
+  address: string;
+  /** Empty when not in contacts. */
+  name: string;
+  snippet: string;
+  at: number;
+  unread: boolean;
+}
+
+export interface TextMessage {
+  id: string;
+  body: string;
+  at: number;
+  outgoing: boolean;
+}
+
+export interface Photo {
+  id: string;
+  name: string;
+  takenAt: number;
+  /** JPEG data URL. */
+  thumbnail: string;
+}
 
 /** A notification from the phone, to read and act on here. */
 export interface PhoneNotification {
   peerId: string;
   id: string;
+  packageName: string;
   appName: string;
   title: string;
   text: string;
@@ -126,15 +226,7 @@ export interface PhoneNotification {
   buttons: { id: string; label: string; isReply: boolean }[];
 }
 
-export const GRANT_OPTIONS: { value: Grant; label: string }[] = [
-  { value: "Allow", label: "Allow" },
-  { value: "Ask", label: "Ask" },
-  { value: "Deny", label: "Block" },
-];
-
-export const isMac =
-  typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/.test(navigator.platform);
+export const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/.test(navigator.platform);
 
 export const MOD_KEY = isMac ? "⌘" : "Ctrl+";
 export const MOD_SHIFT_KEY = isMac ? "⌘⇧" : "Ctrl+Shift+";
-
