@@ -19,7 +19,7 @@ sessions = { path = "../sessions" }
 transfer = { path = "../transfer" }
 transport = { path = "../transport" }
 quinn = { workspace = true }
-tokio = { workspace = true, features = ["rt", "sync"] }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

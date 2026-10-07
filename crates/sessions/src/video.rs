@@ -38,18 +38,33 @@ pub struct VideoFeed(Arc<Mutex<Feed>>);
 #[derive(Default)]
 struct Feed {
     frames: Option<mpsc::Sender<VideoFrame>>,
+    /// Which session the frames go to, so one that ends late can't close the next one's.
+    session: u64,
     /// After a dropped frame, the ones that follow can't be decoded until the next key frame.
     waiting_for_key: bool,
 }
 
 impl VideoFeed {
-    fn open(&self) -> mpsc::Receiver<VideoFrame> {
+    fn open(&self) -> (u64, mpsc::Receiver<VideoFrame>) {
         let (frames, receiver) = mpsc::channel(FRAME_QUEUE);
-        *self.0.lock().unwrap() = Feed {
+        let mut feed = self.0.lock().unwrap();
+        let session = feed.session + 1;
+        *feed = Feed {
             frames: Some(frames),
+            session,
             waiting_for_key: false,
         };
-        receiver
+        (session, receiver)
+    }
+
+    /// False if a newer session has taken over the feed.
+    fn end_session(&self, session: u64) -> bool {
+        let mut feed = self.0.lock().unwrap();
+        let current = feed.session == session;
+        if current {
+            feed.frames = None;
+        }
+        current
     }
 
     /// Hands over a frame. False when nobody is watching or the frame was dropped because the
@@ -96,27 +111,54 @@ where
 {
     let request: R = read_msg(&mut stream.recv_stream, MAX_FRAME_VIDEO_BYTES).await?;
     // Opened first, so the first key frame isn't missed.
-    let mut frames = feed.open();
-    let start = match source.clone() {
-        Some(source) => off_runtime(move || source.start(request)).await,
+    let (session, mut frames) = feed.open();
+    let started = match source {
+        Some(source) => {
+            let starting = source.clone();
+            off_runtime(move || starting.start(request))
+                .await
+                .map(|start| (source, start))
+        }
         None => None,
     };
-    let reply = start.unwrap_or_default();
-    write_msg(&mut stream.send_stream, &reply, MAX_FRAME_VIDEO_BYTES).await?;
-    let (Some(source), Some(_)) = (source, start) else {
-        feed.end();
-        return Ok(());
+    let Some((source, start)) = started else {
+        feed.end_session(session);
+        let reply = VideoStart::default();
+        return write_msg(&mut stream.send_stream, &reply, MAX_FRAME_VIDEO_BYTES).await;
     };
+    let result = stream_video(&start, &mut frames, source.clone(), stream).await;
+    if feed.end_session(session) {
+        tokio::task::spawn_blocking(move || source.stop());
+    }
+    result
+}
 
-    // Controls arrive on their own task, so a frame being written never holds one up.
+async fn stream_video<R, C>(
+    start: &VideoStart,
+    frames: &mut mpsc::Receiver<VideoFrame>,
+    source: Arc<dyn VideoSource<R, C>>,
+    mut stream: IncomingCapabilityStream,
+) -> Result<(), TransportError>
+where
+    R: 'static,
+    C: Message + Default + Send + 'static,
+{
+    write_msg(&mut stream.send_stream, start, MAX_FRAME_VIDEO_BYTES).await?;
+
+    // Controls arrive on their own task, so a frame being written never holds one up, and one
+    // worker applies them in the order they were sent.
+    let (queue, queued) = std::sync::mpsc::channel::<C>();
+    tokio::task::spawn_blocking(move || {
+        for control in queued {
+            source.control(control);
+        }
+    });
     let watching = Arc::new(Notify::new());
     let gone = watching.clone();
-    let controls = source.clone();
     let mut recv = stream.recv_stream;
     tokio::spawn(async move {
         while let Ok(control) = read_msg::<C>(&mut recv, MAX_FRAME_VIDEO_BYTES).await {
-            let controls = controls.clone();
-            tokio::task::spawn_blocking(move || controls.control(control));
+            let _ = queue.send(control);
         }
         gone.notify_one();
     });
@@ -130,8 +172,6 @@ where
             () = watching.notified() => break,
         }
     }
-    feed.end();
-    tokio::task::spawn_blocking(move || source.stop());
     let _ = stream.send_stream.finish();
     Ok(())
 }

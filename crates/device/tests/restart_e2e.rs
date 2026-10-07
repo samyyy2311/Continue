@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use device::{Device, Stores};
@@ -22,6 +22,13 @@ use tokio::runtime::Runtime;
 
 /// Long enough for a dial and a QUIC handshake on loopback, with room for a slow CI machine.
 const WAIT: Duration = Duration::from_secs(20);
+
+/// Every app here listens on 127.0.0.1, where only one can have the default port that paired
+/// devices dial, so the tests take turns.
+fn one_at_a_time() -> MutexGuard<'static, ()> {
+    static NETWORK: Mutex<()> = Mutex::new(());
+    NETWORK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn data_dir(name: &str) -> PathBuf {
     static NEXT: AtomicU32 = AtomicU32::new(0);
@@ -93,7 +100,9 @@ impl App {
     }
 }
 
-/// The computer shows a code and the phone scans it, as in the apps.
+/// The computer shows a code and the phone scans it, as in the apps. The phone accepts last:
+/// both listen on 127.0.0.1 here, so only the computer has the default port the phone dials
+/// once it accepts, and the computer must already trust it by then.
 fn pair(computer: &App, phone: &App) {
     let server = computer.runtime.block_on(async {
         computer
@@ -101,9 +110,9 @@ fn pair(computer: &App, phone: &App) {
             .start_pairing(0, |port| format!("127.0.0.1:{port}"))
             .unwrap()
     });
-    let computer_peer = phone
+    let on_phone = phone
         .runtime
-        .block_on(phone.device.pair_with_code(&server.code))
+        .block_on(phone.device.pair_nearby(&server.code))
         .unwrap();
     let phone_peer = computer
         .runtime
@@ -111,6 +120,7 @@ fn pair(computer: &App, phone: &App) {
         .unwrap()
         .accept()
         .unwrap();
+    let computer_peer = on_phone.accept().unwrap();
 
     assert_eq!(phone_peer.fingerprint, phone.fingerprint());
     assert_eq!(computer_peer.fingerprint, computer.fingerprint());
@@ -126,6 +136,7 @@ fn eventually(what: &str, mut condition: impl FnMut() -> bool) {
 
 #[test]
 fn paired_devices_reconnect_after_both_restart_and_the_phone_can_send_a_file() {
+    let _turn = one_at_a_time();
     let (computer_dir, phone_dir) = (data_dir("computer"), data_dir("phone"));
 
     let computer = App::start(&computer_dir, "Work laptop");
@@ -189,6 +200,7 @@ fn paired_devices_reconnect_after_both_restart_and_the_phone_can_send_a_file() {
 
 #[test]
 fn what_waits_for_a_device_survives_a_restart_and_stays_while_it_is_away() {
+    let _turn = one_at_a_time();
     let dir = data_dir("waiting");
     let computer = App::start(&dir, "Work laptop");
     let first = computer
@@ -222,6 +234,7 @@ fn what_waits_for_a_device_survives_a_restart_and_stays_while_it_is_away() {
 
 #[test]
 fn a_nearby_pairing_shows_the_same_code_on_both_and_trusts_only_once_accepted() {
+    let _turn = one_at_a_time();
     let (computer, phone) = (
         App::start(&data_dir("computer"), "Work laptop"),
         App::start(&data_dir("phone"), "Phone"),
