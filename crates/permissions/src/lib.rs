@@ -3,8 +3,6 @@
 
 pub mod error;
 pub mod store;
-pub mod types;
 
 pub use error::PermissionError;
 pub use store::PermissionStore;
-pub use types::{PermissionState, PersistedGrant};
