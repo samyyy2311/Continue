@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
+  Bell,
   Check,
   CheckCheck,
   CircleAlert,
@@ -26,7 +27,6 @@ import {
   Plus,
   Search,
   Send,
-  Settings,
   Smartphone,
   Trash2,
   Type,
@@ -36,6 +36,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import { ButtonGroup, ConnectionStatus, ProgressBar, Switch } from "./components.tsx";
@@ -78,6 +79,7 @@ import {
 } from "./format.ts";
 import { NotificationList } from "./Notifications.tsx";
 import { PairDialog } from "./PairDialog.tsx";
+import { TopBar } from "./TopBar.tsx";
 import {
   ACCENT_PALETTE,
   type AccentName,
@@ -100,8 +102,8 @@ import {
   type View,
 } from "./types.ts";
 
-/** In rail order; Ctrl/Cmd plus 1 to 4 opens each. */
-const VIEW_ORDER: View[] = ["transfer", "devices", "history", "settings"];
+/** In top bar order; Ctrl/Cmd plus 1 to 4 opens each. */
+const VIEW_ORDER: View[] = ["transfer", "history", "devices", "settings"];
 
 const ACCENT_KEY = "continue.accent";
 const THEME_KEY = "continue.theme";
@@ -221,6 +223,7 @@ export default function App() {
   const [dragCount, setDragCount] = useState<number | null>(null);
   const [textInput, setTextInput] = useState("");
   const [notifications, setNotifications] = useState<PhoneNotification[]>([]);
+  const [maximized, setMaximized] = useState(false);
 
   const selectedPeer = peers?.find((p) => p.fingerprint === selectedPeerId) ?? peers?.[0] ?? null;
 
@@ -551,6 +554,15 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (!isTauri()) return;
+    const win = getCurrentWindow();
+    const check = () => void win.isMaximized().then(setMaximized);
+    check();
+    const unlisten = win.onResized(check);
+    return () => void unlisten.then((fn) => fn());
+  }, []);
+
   const sendFilesRef = useRef(sendFiles);
   sendFilesRef.current = sendFiles;
 
@@ -722,36 +734,15 @@ export default function App() {
 
   const activeTransfers = activity.filter(isMoving);
   const recentActivity = activity.filter((a) => !isMoving(a)).slice(0, 5);
-  const destinations = [
-    { id: "transfer", label: "Home", icon: <Home size={22} />, badge: activeTransfers.length || null },
-    { id: "devices", label: "Devices", icon: <Smartphone size={22} />, badge: null },
-    { id: "history", label: "Activity", icon: <History size={22} />, badge: null },
-    { id: "settings", label: "Settings", icon: <Settings size={22} />, badge: null },
+  const tabs = [
+    { id: "transfer", label: "Home", icon: <Home size={18} />, badge: activeTransfers.length },
+    { id: "history", label: "Activity", icon: <History size={18} /> },
+    { id: "devices", label: "Devices", icon: <Smartphone size={18} /> },
   ] as const;
 
   return (
     <div className="shell">
-      <nav className="rail" aria-label="Main">
-        <img src="/icon.svg" alt="Continue" className="rail-logo" />
-        <div className="rail-items">
-          {destinations.map((item, index) => (
-            <button
-              key={item.id}
-              type="button"
-              className="rail-item"
-              aria-current={view === item.id ? "page" : undefined}
-              onClick={() => setView(item.id)}
-              title={`${item.label} (${MOD_KEY}${index + 1})`}
-            >
-              <span className="rail-indicator">
-                {item.icon}
-                {item.badge !== null && <span className="rail-badge">{item.badge}</span>}
-              </span>
-              <span className="rail-label">{item.label}</span>
-            </button>
-          ))}
-        </div>
-      </nav>
+      <TopBar tabs={[...tabs]} view={view} onView={setView} maximized={maximized} />
 
       <main className="pane">
         <div className="pane-scroll" key={view}>
@@ -963,7 +954,7 @@ function HomeView(props: HomeViewProps) {
   if (!peer) {
     return (
       <div className="empty">
-        <Smartphone size={56} strokeWidth={1.25} className="device-icon" />
+        <PhoneFrame active={false} />
         <h1 className="display">Pair your phone</h1>
         <p className="supporting">
           Scan a code once, then send files and text between your phone and this computer over your own network.
@@ -977,19 +968,16 @@ function HomeView(props: HomeViewProps) {
   }
 
   const online = peer.isConnected;
-  const busy = activeTransfers.length + recentActivity.length > 0;
+  const recent = [...activeTransfers, ...recentActivity];
 
   return (
     <div className="home">
-      <aside className="home-device">
-        <Smartphone size={56} strokeWidth={1.25} className={`device-icon ${online ? "online" : ""}`} />
-        <h1 className="display">{peer.displayName}</h1>
-        <ConnectionStatus peer={peer} />
-        <p className="supporting">
-          {online
-            ? "Drop or paste files anywhere in this window to send them."
-            : "It connects on its own when both are on the same Wi-Fi."}
-        </p>
+      <aside className="panel device-panel">
+        <PhoneFrame active={online} />
+        <div className="device-panel-text">
+          <h1 className="headline">{peer.displayName}</h1>
+          <ConnectionStatus peer={peer} />
+        </div>
         <div className="device-actions">
           {online ? (
             <button type="button" className="btn btn-tonal" onClick={onDisconnect}>
@@ -1021,27 +1009,38 @@ function HomeView(props: HomeViewProps) {
             ))}
           </div>
         )}
+        <button type="button" className="btn btn-text device-panel-pair" onClick={onOpenPair}>
+          <Plus size={18} />
+          Pair another device
+        </button>
       </aside>
 
       <div className="home-main">
-        <section className="section">
-          {online && (
-            <div className="send-actions">
-              <button type="button" className="btn btn-filled btn-large" onClick={onChooseFiles} title={`${MOD_KEY}O`}>
-                <Upload size={20} />
-                Send files
-              </button>
-              <button
-                type="button"
-                className="btn btn-tonal btn-large"
-                onClick={onSendClipboard}
-                title={`${MOD_SHIFT_KEY}V`}
-              >
-                <ClipboardPaste size={20} />
-                Send clipboard
-              </button>
+        <section className="panel">
+          <h2 className="panel-title">
+            <Send size={18} />
+            Send to {peer.displayName}
+          </h2>
+          <div className={`drop-area ${online ? "" : "disabled"}`}>
+            <Upload size={24} strokeWidth={1.75} className="text-accent" />
+            <div className="drop-area-text">
+              <span className="list-title">{online ? "Drop files here" : "Not connected"}</span>
+              <span className="list-sub">
+                {online ? "Or paste them anywhere in this window." : "Connect to send files and text."}
+              </span>
             </div>
-          )}
+            {online && (
+              <div className="drop-area-actions">
+                <button type="button" className="btn btn-filled" onClick={onChooseFiles} title={`${MOD_KEY}O`}>
+                  Choose files
+                </button>
+                <button type="button" className="btn btn-tonal" onClick={onSendClipboard} title={`${MOD_SHIFT_KEY}V`}>
+                  <ClipboardPaste size={18} />
+                  Send clipboard
+                </button>
+              </div>
+            )}
+          </div>
           <form
             className={`composer ${online ? "" : "disabled"}`}
             onSubmit={(e) => {
@@ -1052,39 +1051,62 @@ function HomeView(props: HomeViewProps) {
             <input
               value={textInput}
               onChange={(e) => onTextInputChange(e.target.value)}
-              placeholder={online ? `Send text to ${peer.displayName}` : "Connect to send text"}
+              placeholder={online ? "Type a note or paste a link" : "Connect to send text"}
               aria-label="Text to send"
               disabled={!online}
             />
             <button type="submit" className="composer-send" disabled={!online || !textInput.trim()} aria-label="Send">
-              <ArrowUp size={22} />
+              <ArrowUp size={20} />
             </button>
           </form>
         </section>
 
-        {online && notifications.length > 0 && (
-          <section className="section">
-            <h2 className="title">Notifications</h2>
-            <NotificationList notifications={notifications} onError={onError} />
+        <div className="home-grid">
+          <section className="panel">
+            <h2 className="panel-title">
+              <Bell size={18} />
+              Notifications
+            </h2>
+            {online && notifications.length > 0 ? (
+              <NotificationList notifications={notifications} onError={onError} />
+            ) : (
+              <p className="panel-empty">Notifications from your phone show up here.</p>
+            )}
           </section>
-        )}
 
-        {busy && (
-          <section className="section">
-            <div className="section-head">
-              <h2 className="title">Recent</h2>
-              <button type="button" className="btn btn-text" onClick={onNavigateHistory}>
-                See all
-              </button>
+          <section className="panel">
+            <div className="panel-head">
+              <h2 className="panel-title">
+                <History size={18} />
+                Recent
+              </h2>
+              {recent.length > 0 && (
+                <button type="button" className="btn btn-text btn-small" onClick={onNavigateHistory}>
+                  See all
+                </button>
+              )}
             </div>
-            <ul className="list">
-              {[...activeTransfers, ...recentActivity].map((item) => (
-                <ActivityRow key={item.id} item={item} actions={rowActions} />
-              ))}
-            </ul>
+            {recent.length > 0 ? (
+              <ul className="list">
+                {recent.map((item) => (
+                  <ActivityRow key={item.id} item={item} actions={rowActions} />
+                ))}
+              </ul>
+            ) : (
+              <p className="panel-empty">Files and text you send or receive show up here.</p>
+            )}
           </section>
-        )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+/** A phone drawn as an outline, lit in the accent colour while it's connected. */
+function PhoneFrame({ active }: { active: boolean }) {
+  return (
+    <div className={`phone-frame ${active ? "active" : ""}`} aria-hidden="true">
+      <span className="phone-screen" />
     </div>
   );
 }
