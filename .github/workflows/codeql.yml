@@ -1,0 +1,76 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '23 4 * * 1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+          - language: rust
+            build-mode: none
+          - language: java-kotlin
+            build-mode: manual
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+
+      - name: Set up JDK 17
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Install Rust toolchain
+        if: matrix.language == 'java-kotlin'
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Install protoc
+        if: matrix.language == 'java-kotlin'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Set up Android SDK
+        if: matrix.language == 'java-kotlin'
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+
+      # The Kotlin sources only need the generated bindings, not the native libraries.
+      - name: Compile Kotlin
+        if: matrix.language == 'java-kotlin'
+        run: ./gradlew :core-bridge:compileDebugKotlin :app:compileDebugKotlin -x buildRustCore --no-daemon
+        working-directory: apps/android
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
+        with:
+          category: /language:${{ matrix.language }}
