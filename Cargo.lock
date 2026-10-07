@@ -1232,6 +1232,7 @@ dependencies = [
  "quinn",
  "rand 0.8.8",
  "rusqlite",
+ "sha2",
  "thiserror 1.0.69",
  "transport",
  "x25519-dalek",
