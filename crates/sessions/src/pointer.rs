@@ -61,16 +61,18 @@ pub(crate) async fn serve_pointer(
             worker.input(input);
         }
     });
+    // Reading on its own task, so writing a PointerLeft never cancels a read halfway through.
+    let mut recv = stream.recv_stream;
+    let mut reading = tokio::spawn(async move {
+        while let Ok(input) = read_msg::<PointerInput>(&mut recv, MAX_FRAME_POINTER_BYTES).await {
+            let _ = inputs.send(input);
+        }
+    });
     let result = async {
         loop {
             tokio::select! {
-                input = read_msg(&mut stream.recv_stream, MAX_FRAME_POINTER_BYTES) => match input {
-                    Ok(input) => {
-                        let _ = inputs.send(input);
-                    }
-                    // The computer took its pointer back.
-                    Err(_) => return Ok(()),
-                },
+                // The computer took its pointer back.
+                _ = &mut reading => return Ok(()),
                 Some(y) = left.recv() => {
                     write_msg(&mut stream.send_stream, &PointerLeft { y }, MAX_FRAME_POINTER_BYTES)
                         .await?;
@@ -79,7 +81,7 @@ pub(crate) async fn serve_pointer(
         }
     }
     .await;
-    drop(inputs);
+    reading.abort();
     let _ = working.await;
     let _ = tokio::task::spawn_blocking(move || target.stop()).await;
     let _ = stream.send_stream.finish();

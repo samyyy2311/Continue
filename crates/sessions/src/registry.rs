@@ -250,19 +250,7 @@ impl SessionRegistry {
                 Ok(())
             }
             Err(error) => {
-                let failed = {
-                    let mut peers = self.peers();
-                    match peers.get_mut(peer) {
-                        Some(entry) if entry.session.state == SessionState::Connecting => {
-                            entry.session.state = SessionState::Disconnected;
-                            true
-                        }
-                        _ => false,
-                    }
-                };
-                if failed {
-                    self.notify(peer, SessionState::Disconnected);
-                }
+                self.connect_failed(peer);
                 Err(error)
             }
         }
@@ -316,6 +304,20 @@ impl SessionRegistry {
         None
     }
 
+    /// Moves a peer that was being connected back to disconnected.
+    fn connect_failed(&self, peer: &str) {
+        let failed = match self.peers().get_mut(peer) {
+            Some(entry) if entry.session.state == SessionState::Connecting => {
+                entry.session.state = SessionState::Disconnected;
+                true
+            }
+            _ => false,
+        };
+        if failed {
+            self.notify(peer, SessionState::Disconnected);
+        }
+    }
+
     fn wants_discovered(&self, peer: &str) -> bool {
         !self.is_paused()
             && self.get(peer).is_none()
@@ -359,6 +361,7 @@ impl SessionRegistry {
     ) -> bool {
         if self.is_paused() {
             connection.close(close_code(DisconnectReason::Normal), b"paused");
+            self.connect_failed(peer);
             return false;
         }
         let mux = Arc::new(SessionMultiplexer::new(peer.to_string(), connection));

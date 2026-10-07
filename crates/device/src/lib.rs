@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use capabilities::CapabilityQuery;
 use history::{Direction, Kind};
@@ -230,6 +230,9 @@ impl Device {
         )
         .complete_handshake(&qr, &mut send, &mut recv)
         .await?;
+        // Dropping the connection would discard the last message if it hadn't arrived yet.
+        let _ = send.finish();
+        let _ = tokio::time::timeout(Duration::from_secs(5), send.stopped()).await;
         // The pairing connection closes here; once accepted, the session dials this address.
         Ok(PendingPair {
             device: self.clone(),
