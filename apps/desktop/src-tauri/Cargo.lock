@@ -485,7 +485,7 @@ version = "0.1.0"
 dependencies = [
  "limits",
  "protocol",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -649,7 +649,7 @@ dependencies = [
  "protocol",
  "quinn",
  "sha2",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "tokio",
  "transport",
 ]
@@ -722,6 +722,7 @@ dependencies = [
  "history",
  "identity",
  "keyring",
+ "notifications",
  "pairing",
  "parking_lot",
  "percent-encoding",
@@ -859,7 +860,7 @@ dependencies = [
  "rand 0.8.8",
  "sha2",
  "subtle",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "x25519-dalek",
  "zeroize",
 ]
@@ -1074,12 +1075,13 @@ dependencies = [
  "discovery",
  "history",
  "identity",
+ "notifications",
  "pairing",
  "permissions",
  "protocol",
  "quinn",
  "sessions",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "transfer",
@@ -1135,7 +1137,7 @@ dependencies = [
  "limits",
  "mdns-sd",
  "rand 0.8.8",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
 ]
@@ -1960,7 +1962,7 @@ name = "history"
 version = "0.1.0"
 dependencies = [
  "rusqlite",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2206,7 +2208,7 @@ dependencies = [
  "ed25519-dalek",
  "limits",
  "sha2",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "tracing",
  "zeroize",
 ]
@@ -2858,7 +2860,7 @@ dependencies = [
  "limits",
  "protocol",
  "quinn",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "tokio",
  "transport",
 ]
@@ -3309,7 +3311,7 @@ dependencies = [
  "protocol",
  "quinn",
  "rusqlite",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "transport",
  "x25519-dalek",
  "zeroize",
@@ -3392,7 +3394,7 @@ dependencies = [
  "protocol",
  "rusqlite",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3747,7 +3749,7 @@ dependencies = [
  "bytes",
  "prost",
  "prost-build",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -4540,7 +4542,7 @@ dependencies = [
  "protocol",
  "quinn",
  "rand 0.8.8",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "transfer",
@@ -5644,7 +5646,7 @@ dependencies = [
  "protocol",
  "quinn",
  "sha2",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "tokio",
  "transport",
 ]
@@ -5661,7 +5663,7 @@ dependencies = [
  "rcgen",
  "rustls",
  "sha2",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
