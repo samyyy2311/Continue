@@ -9,38 +9,14 @@ use std::sync::{Arc, Mutex};
 use capabilities::CapabilityQuery;
 use clipboard::ClipboardFormat;
 use common::{link, scratch_dir, send_sized, Link, PHONE};
-use permissions::{PermissionState, PermissionStore, PersistedGrant};
+use permissions::PermissionStore;
 use protocol::CapabilityId;
-use sessions::{
-    PermissionDecision, PermissionPrompt, PermissionRequest, SessionCapabilityHandlers,
-};
-use tokio::sync::oneshot;
+use sessions::SessionCapabilityHandlers;
 
-/// A prompt that records each question and answers it straight away.
-fn answering(
-    decision: PermissionDecision,
-) -> (PermissionPrompt, Arc<Mutex<Vec<PermissionRequest>>>) {
-    let asked = Arc::new(Mutex::new(Vec::new()));
-    let record = asked.clone();
-    let prompt: PermissionPrompt = Arc::new(move |request| {
-        record.lock().unwrap().push(request);
-        let (answer, receiver) = oneshot::channel();
-        let _ = answer.send(decision);
-        receiver
-    });
-    (prompt, asked)
-}
-
-fn handlers_with(
-    store: &PermissionStore,
-    prompt: Option<PermissionPrompt>,
-) -> (SessionCapabilityHandlers, PathBuf) {
+fn handlers_with(store: &PermissionStore) -> (SessionCapabilityHandlers, PathBuf) {
     let downloads = scratch_dir();
-    let mut handlers =
+    let handlers =
         SessionCapabilityHandlers::new(&downloads).with_permission_store(Arc::new(store.clone()));
-    if let Some(prompt) = prompt {
-        handlers = handlers.with_permission_prompt(prompt);
-    }
     (handlers, downloads)
 }
 
@@ -58,97 +34,9 @@ async fn send_text(link: &Link, text: &str) -> bool {
 }
 
 #[tokio::test]
-async fn ask_shows_the_file_name_and_allowing_once_asks_again_next_time() {
+async fn a_paired_device_may_send_without_being_asked() {
     let store = PermissionStore::in_memory().unwrap();
-    let (prompt, asked) = answering(PermissionDecision::Allow);
-    let (handlers, downloads) = handlers_with(&store, Some(prompt));
-    let link = link(handlers).await;
-
-    assert!(send_file(&link, "first.jpg").await);
-    assert!(send_file(&link, "second.jpg").await);
-
-    let asked: Vec<_> = asked
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|q| (q.peer.clone(), q.capability, q.detail.clone()))
-        .collect();
-    assert_eq!(
-        asked,
-        [
-            (
-                PHONE.to_string(),
-                CapabilityId::FILE_TRANSFER,
-                Some("first.jpg".to_string())
-            ),
-            (
-                PHONE.to_string(),
-                CapabilityId::FILE_TRANSFER,
-                Some("second.jpg".to_string())
-            ),
-        ]
-    );
-    assert!(downloads.join("first.jpg").exists());
-}
-
-#[tokio::test]
-async fn always_allow_is_saved_and_not_asked_again() {
-    let store = PermissionStore::in_memory().unwrap();
-    let (prompt, asked) = answering(PermissionDecision::AlwaysAllow);
-    let (handlers, _) = handlers_with(&store, Some(prompt));
-    let link = link(handlers).await;
-
-    assert!(send_file(&link, "one.pdf").await);
-    assert!(send_file(&link, "two.pdf").await);
-
-    assert_eq!(asked.lock().unwrap().len(), 1);
-    assert_eq!(
-        store
-            .query_state(PHONE, CapabilityId::FILE_TRANSFER)
-            .unwrap(),
-        PermissionState::Allow
-    );
-}
-
-#[tokio::test]
-async fn declining_refuses_the_file_and_writes_nothing() {
-    let store = PermissionStore::in_memory().unwrap();
-    let (prompt, _) = answering(PermissionDecision::Decline);
-    let (handlers, downloads) = handlers_with(&store, Some(prompt));
-    let link = link(handlers).await;
-
-    assert!(!send_file(&link, "unwanted.zip").await);
-    assert_eq!(std::fs::read_dir(downloads).unwrap().count(), 0);
-}
-
-#[tokio::test]
-async fn blocked_devices_are_refused_without_asking() {
-    let store = PermissionStore::in_memory().unwrap();
-    store
-        .set_persisted_grant(PHONE, CapabilityId::CLIPBOARD, 1, PersistedGrant::Deny)
-        .unwrap();
-    let (prompt, asked) = answering(PermissionDecision::Allow);
-    let (handlers, _) = handlers_with(&store, Some(prompt));
-    let link = link(handlers).await;
-
-    assert!(!send_text(&link, "hello").await);
-    assert!(asked.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn ask_without_a_way_to_ask_refuses() {
-    let store = PermissionStore::in_memory().unwrap();
-    let (handlers, _) = handlers_with(&store, None);
-    let link = link(handlers).await;
-
-    assert!(!send_text(&link, "hello").await);
-}
-
-#[tokio::test]
-async fn text_is_asked_about_and_delivered_once_allowed() {
-    let store = PermissionStore::in_memory().unwrap();
-    let (prompt, asked) = answering(PermissionDecision::Allow);
-    let (mut handlers, _) = handlers_with(&store, Some(prompt));
+    let (mut handlers, downloads) = handlers_with(&store);
     let received = Arc::new(Mutex::new(Vec::new()));
     let sink = received.clone();
     handlers.on_clipboard_received = Some(Arc::new(move |_peer, update| {
@@ -156,22 +44,33 @@ async fn text_is_asked_about_and_delivered_once_allowed() {
     }));
     let link = link(handlers).await;
 
+    assert!(send_file(&link, "boarding pass.pdf").await);
+    assert!(downloads.join("boarding pass.pdf").exists());
     assert!(send_text(&link, "Gate B12").await);
-
-    let asked = asked.lock().unwrap();
-    assert_eq!(asked.len(), 1);
-    assert_eq!(asked[0].capability, CapabilityId::CLIPBOARD);
-    assert_eq!(asked[0].detail, None);
     assert_eq!(*received.lock().unwrap(), vec![b"Gate B12".to_vec()]);
 }
 
 #[tokio::test]
-async fn showing_a_notification_needs_permission_but_a_reply_to_one_does_not() {
+async fn a_feature_turned_off_for_a_device_is_refused_and_writes_nothing() {
     let store = PermissionStore::in_memory().unwrap();
     store
-        .set_persisted_grant(PHONE, CapabilityId::NOTIFICATIONS, 1, PersistedGrant::Deny)
+        .set_allowed(PHONE, CapabilityId::FILE_TRANSFER, false)
         .unwrap();
-    let (mut handlers, _) = handlers_with(&store, None);
+    let (handlers, downloads) = handlers_with(&store);
+    let link = link(handlers).await;
+
+    assert!(!send_file(&link, "unwanted.zip").await);
+    assert_eq!(std::fs::read_dir(downloads).unwrap().count(), 0);
+    assert!(send_text(&link, "still fine").await);
+}
+
+#[tokio::test]
+async fn showing_notifications_can_be_turned_off_but_replies_and_mutes_still_work() {
+    let store = PermissionStore::in_memory().unwrap();
+    store
+        .set_allowed(PHONE, CapabilityId::NOTIFICATIONS, false)
+        .unwrap();
+    let (mut handlers, _) = handlers_with(&store);
     let heard = Arc::new(Mutex::new(Vec::new()));
     let record = heard.clone();
     handlers.on_notification = Some(Arc::new(move |_peer, body| {
@@ -196,10 +95,15 @@ async fn showing_a_notification_needs_permission_but_a_reply_to_one_does_not() {
         .send_notification_to_peer(post, &query)
         .await
         .is_err());
-    assert!(link
-        .phone
-        .send_notification_to_peer(reply.clone(), &query)
-        .await
-        .is_ok());
-    assert_eq!(heard.lock().unwrap().as_slice(), [reply]);
+    let mute = notifications::Body::Mute(notifications::NotificationMute {
+        package_name: "com.chat".to_string(),
+    });
+    for body in [reply.clone(), mute.clone()] {
+        assert!(link
+            .phone
+            .send_notification_to_peer(body, &query)
+            .await
+            .is_ok());
+    }
+    assert_eq!(heard.lock().unwrap().as_slice(), [reply, mute]);
 }

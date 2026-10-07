@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+import "video.proto";
+
+// Opened with a ScreenRequest; the computer then sends ScreenInput. Replies as in video.proto.
+message ScreenRequest {
+  // The longest side the frames may have, in pixels.
+  uint32 max_size = 1;
+}
+
+// Positions are fractions of the screen, from 0 at the top left to 1 at the bottom right.
+message ScreenInput {
+  oneof body {
+    // A finger going down, moving and lifting, sent as it happens so dragging follows along.
+    Touch touch = 1;
+    // A quick flick, for the mouse wheel.
+    Swipe swipe = 2;
+    ScreenButton button = 3;
+    // Typed into the field that has focus.
+    string text = 4;
+    ScreenKey key = 5;
+  }
+}
+
+message Touch {
+  enum Action {
+    DOWN = 0;
+    MOVE = 1;
+    UP = 2;
+  }
+  Action action = 1;
+  float x = 2;
+  float y = 3;
+}
+
+message Swipe {
+  float from_x = 1;
+  float from_y = 2;
+  float to_x = 3;
+  float to_y = 4;
+  uint32 duration_ms = 5;
+}
+
+enum ScreenButton {
+  BACK = 0;
+  HOME = 1;
+  RECENTS = 2;
+}
+
+enum ScreenKey {
+  BACKSPACE = 0;
+  ENTER = 1;
+}

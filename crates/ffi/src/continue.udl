@@ -5,6 +5,46 @@ namespace continue {
     // Where the device keys are kept, set before `init_core`. Without it they stay in files.
     void set_key_store(SecretStoreFfi store);
 
+    // The set_* callbacks below must be set before `init_core`.
+    void set_photo_library(PhotoLibraryFfi library);
+
+    void set_message_store(MessageStoreFfi store);
+
+    void set_shared_folder(string path);
+
+    void set_call_control(CallControlFfi control);
+
+    void set_media_control(MediaControlFfi control);
+
+    void set_phone_search(PhoneSearchFfi search);
+
+    void set_ringer(RingerFfi ringer);
+
+    void set_pointer_target(PointerTargetFfi target);
+
+    // The phone as a touchpad for a computer. False when it can't take input.
+    [Throws=ContinueFfiError]
+    boolean touchpad_start(string peer_fingerprint);
+
+    // False once the computer has gone.
+    boolean touchpad_input(PointerInputFfi input);
+
+    void touchpad_stop();
+
+    void pointer_left(f32 y);
+
+    void set_screen_source(ScreenSourceFfi source);
+
+    void set_camera_source(CameraSourceFfi source);
+
+    // False if nobody is watching or the frame was dropped; the next frame should be a key frame.
+    boolean push_video_frame(VideoKindFfi kind, bytes data, boolean key, u32 rotation);
+
+    // 16-bit stereo PCM at 48 kHz, what's playing while the screen is shared.
+    boolean push_audio(VideoKindFfi kind, bytes pcm);
+
+    void end_video(VideoKindFfi kind);
+
     [Throws=ContinueFfiError]
     void init_core(string db_path);
 
@@ -12,7 +52,24 @@ namespace continue {
     void set_device_name(string name);
 
     [Throws=ContinueFfiError]
-    void set_device_status(u32 battery_percent, boolean charging);
+    void set_device_status(DeviceStatusFfi status);
+
+    [Throws=ContinueFfiError]
+    void set_look(u32 wallpaper_color, bytes? wallpaper);
+
+    bytes? peer_wallpaper(string peer_fingerprint);
+
+    [Throws=ContinueFfiError]
+    void announce_photo(PhotoFfi photo);
+
+    [Throws=ContinueFfiError]
+    void announce_messages_changed();
+
+    [Throws=ContinueFfiError]
+    void announce_call(CallFfi call);
+
+    [Throws=ContinueFfiError]
+    void announce_now_playing(NowPlayingFfi playing);
 
     [Throws=ContinueFfiError]
     string get_device_fingerprint();
@@ -29,21 +86,30 @@ namespace continue {
     [Throws=ContinueFfiError]
     TrustedPeerFfi pair_from_qr(string qr_payload);
 
+    // Computers showing a pairing code on this network, gathered for wait_ms.
+    [Throws=ContinueFfiError]
+    sequence<NearbyComputerFfi> nearby_computers(u32 wait_ms);
+
+    // Pairs with a computer found nearby; returns six digits to compare with its screen.
+    [Throws=ContinueFfiError]
+    string pair_nearby(string code);
+
+    // The computer once accepted; null when turned down because the codes differed.
+    [Throws=ContinueFfiError]
+    TrustedPeerFfi? confirm_nearby_pairing(boolean accept);
+
     [Throws=ContinueFfiError]
     sequence<TrustedPeerFfi> list_trusted_peers();
 
     [Throws=ContinueFfiError]
     boolean remove_trusted_peer(string fingerprint);
 
+    // True unless turned off for this device.
     [Throws=ContinueFfiError]
-    string query_permission(string peer_fingerprint, u32 capability_id);
+    boolean is_allowed(string peer_fingerprint, u32 capability_id);
 
     [Throws=ContinueFfiError]
-    void set_permission(string peer_fingerprint, u32 capability_id, string grant);
-
-    PermissionRequestFfi? next_permission_request(u32 timeout_ms);
-
-    void answer_permission_request(u64 id, PermissionDecisionFfi decision);
+    void set_allowed(string peer_fingerprint, u32 capability_id, boolean allowed);
 
     ReceivedFfi? next_received(u32 timeout_ms);
 
@@ -73,7 +139,46 @@ namespace continue {
     void reconnect(string peer_fingerprint);
 
     [Throws=ContinueFfiError]
+    void set_paused(boolean paused);
+
+    [Throws=ContinueFfiError]
     u64 send_file(string peer_fingerprint, string file_path);
+
+    // What the phone broadcasts over Bluetooth right now so paired computers know it's near.
+    [Throws=ContinueFfiError]
+    bytes presence_token();
+
+    // The four words the computer shows for this pairing too.
+    [Throws=ContinueFfiError]
+    string pairing_words(string peer_fingerprint);
+
+    // Pinned text, newest first.
+    [Throws=ContinueFfiError]
+    sequence<SnippetFfi> snippets();
+
+    // Pins text on every paired computer too.
+    [Throws=ContinueFfiError]
+    SnippetFfi pin_snippet(string text);
+
+    [Throws=ContinueFfiError]
+    void unpin_snippet(string id);
+
+    // Rings the computer so it can be found, or stops it. False if it didn't.
+    [Throws=ContinueFfiError]
+    boolean ring_computer(string peer_fingerprint, boolean on);
+
+    // False if the computer didn't do it, such as with that switched off there.
+    [Throws=ContinueFfiError]
+    boolean act_on_computer(string peer_fingerprint, ComputerActionFfi action);
+
+    [Throws=ContinueFfiError]
+    void send_file_later(string peer_fingerprint, string file_path);
+
+    [Throws=ContinueFfiError]
+    void send_text_later(string peer_fingerprint, string text);
+
+    [Throws=ContinueFfiError]
+    void send_clipboard_image(string peer_fingerprint, bytes png);
 
     [Throws=ContinueFfiError]
     void send_clipboard_text(string peer_fingerprint, string text);
@@ -103,25 +208,130 @@ dictionary NotificationFfi {
     sequence<NotificationActionFfi> actions;
 };
 
+enum VideoKindFfi {
+    "Screen",
+    "Camera",
+};
+
+dictionary VideoStartFfi {
+    u32 width;
+    u32 height;
+    // Degrees to turn each frame clockwise to show it upright.
+    u32 rotation;
+};
+
+[Enum]
+interface CameraControlFfi {
+    Front(boolean front);
+    Framing(boolean on);
+};
+
+callback interface CameraSourceFfi {
+    // Null if the camera can't start.
+    VideoStartFfi? start(u32 max_size, boolean front);
+
+    void control(CameraControlFfi control);
+
+    void stop();
+};
+
+// Positions are fractions of the screen, from 0 at the top left to 1 at the bottom right.
+enum TouchActionFfi {
+    "Down",
+    "Move",
+    "Up",
+};
+
+[Enum]
+interface ScreenInputFfi {
+    Touch(TouchActionFfi action, f32 x, f32 y);
+    Swipe(f32 from_x, f32 from_y, f32 to_x, f32 to_y, u32 duration_ms);
+    Back();
+    Home();
+    Recents();
+    Text(string text);
+    Backspace();
+    Enter();
+};
+
+dictionary NearbyComputerFfi {
+    string name;
+    string code;
+};
+
+dictionary SnippetFfi {
+    string id;
+    string text;
+};
+
+enum SearchKindFfi {
+    "File",
+    "Text",
+    "Contact",
+};
+
+dictionary SearchResultFfi {
+    SearchKindFfi kind;
+    // The file's name, who the text is with, or the contact's name.
+    string title;
+    // The folder, the text itself, or the phone number.
+    string detail;
+    // A file's path in the shared folder, or a text's conversation id.
+    string reference;
+    // Unix milliseconds; 0 for contacts.
+    u64 at;
+};
+
+callback interface PhoneSearchFfi {
+    // Null when there's nothing it may look through.
+    sequence<SearchResultFfi>? search(string query, u32 limit);
+};
+
+[Enum]
+interface ComputerActionFfi {
+    Lock();
+    Sleep();
+    TypeText(string text);
+    // Only http and https links are opened.
+    OpenLink(string url);
+};
+
+[Enum]
+interface PointerInputFfi {
+    // In the computer's pixels.
+    Move(f32 dx, f32 dy);
+    Press(boolean down);
+    // The other button, for a menu.
+    PressSecondary(boolean down);
+    // Wheel notches; positive scrolls up.
+    Scroll(f32 notches);
+    Screen(ScreenInputFfi input);
+};
+
+callback interface PointerTargetFfi {
+    // Shows the pointer, coming in at `y` (0 top, 1 bottom) by the left or right edge. False
+    // if input can't be taken, such as with the control service off.
+    boolean start(f32 y, boolean from_left);
+
+    void input(PointerInputFfi input);
+
+    void stop();
+};
+
+callback interface ScreenSourceFfi {
+    // Null if the user declined.
+    VideoStartFfi? start(u32 max_size);
+
+    void input(ScreenInputFfi input);
+
+    void stop();
+};
+
 [Enum]
 interface NotificationEventFfi {
     Action(string notification_id, string action_id, string reply_text);
     Dismiss(string notification_id);
-};
-
-dictionary PermissionRequestFfi {
-    u64 id;
-    string peer_fingerprint;
-    string peer_name;
-    u32 capability_id;
-    string? detail;
-    u64 expires_at;
-};
-
-enum PermissionDecisionFfi {
-    "Allow",
-    "AlwaysAllow",
-    "Decline",
+    Mute(string package_name);
 };
 
 dictionary IncomingFileFfi {
@@ -132,6 +342,117 @@ dictionary IncomingFileFfi {
     u64 total;
 };
 
+dictionary DeviceStatusFfi {
+    u32 battery_percent;
+    boolean charging;
+    u32? cell_bars;
+    u32? wifi_bars;
+    string carrier;
+    string network;
+};
+
+dictionary PhotoFfi {
+    string id;
+    string name;
+    u64 taken_at;
+    bytes thumbnail;
+};
+
+callback interface PhotoLibraryFfi {
+    // Null when the app hasn't been given access to them.
+    sequence<PhotoFfi>? recent(u32 limit);
+
+    string? file(string id);
+};
+
+dictionary NowPlayingFfi {
+    // Empty when nothing is playing.
+    string title;
+    string artist;
+    string app;
+    boolean playing;
+    u64 duration_ms;
+    u64 position_ms;
+    bytes? art;
+};
+
+enum MediaCommandFfi {
+    "PlayPause",
+    "Next",
+    "Previous",
+    "VolumeUp",
+    "VolumeDown",
+};
+
+// Rings at full volume, even on silent, or stops.
+callback interface RingerFfi {
+    boolean ring(boolean on);
+};
+
+callback interface MediaControlFfi {
+    // False when nothing is playing to control.
+    boolean command(MediaCommandFfi command);
+};
+
+enum CallStateFfi {
+    "Ringing",
+    "Talking",
+    "Ended",
+};
+
+dictionary CallFfi {
+    CallStateFfi state;
+    string number;
+    string name;
+};
+
+callback interface CallControlFfi {
+    boolean answer();
+
+    boolean decline();
+
+    // Stops the ringtone and leaves the call ringing.
+    boolean silence();
+
+    boolean dial(string number);
+};
+
+dictionary ConversationFfi {
+    string id;
+    string address;
+    string name;
+    string snippet;
+    u64 at;
+    boolean unread;
+};
+
+dictionary TextMessageFfi {
+    string id;
+    string body;
+    u64 at;
+    boolean outgoing;
+};
+
+dictionary ContactFfi {
+    string name;
+    string number;
+    boolean favorite;
+    // A small JPEG; empty without a photo.
+    bytes photo;
+};
+
+callback interface MessageStoreFfi {
+    // Null when the app hasn't been given access to them.
+    sequence<ConversationFfi>? conversations(u32 limit);
+
+    sequence<TextMessageFfi>? conversation(string id, u32 limit);
+
+    boolean send(string address, string body);
+
+    // Favourites first, then by name. Null without access to contacts.
+    sequence<ContactFfi>? contacts(u32 limit);
+};
+
 dictionary ReceivedFfi {
     i64? history_id;
     string peer_fingerprint;
@@ -140,6 +461,8 @@ dictionary ReceivedFfi {
     string? file_name;
     u64 size;
     string? text;
+    // A PNG to put on the clipboard.
+    bytes? image;
 };
 
 dictionary HistoryEntryFfi {

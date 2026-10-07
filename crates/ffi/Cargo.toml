@@ -29,6 +29,7 @@ notifications = { path = "../notifications" }
 protocol = { path = "../protocol" }
 history = { path = "../history" }
 device = { path = "../device" }
+discovery = { path = "../discovery" }
 hex = { workspace = true }
 uniffi = { workspace = true }
 quinn = { workspace = true }

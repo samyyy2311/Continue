@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Opens a files stream; answered with a FilesReply. Paths are relative to the folder the
+// device shares, "/"-separated, and "" for the folder itself.
+message FilesMessage {
+  oneof body {
+    ListFolder list = 1;
+    // Asks for one file, which follows through file transfer.
+    GetFile get = 2;
+  }
+}
+
+message ListFolder {
+  string path = 1;
+}
+
+message GetFile {
+  string path = 1;
+}
+
+message FileEntry {
+  string name = 1;
+  bool folder = 2;
+  uint64 size = 3;
+  uint64 modified = 4; // Unix time in milliseconds
+}
+
+message FilesReply {
+  // False when the device can't share that folder or file.
+  bool available = 1;
+  // Folders first, then files, each by name.
+  repeated FileEntry entries = 2;
+}

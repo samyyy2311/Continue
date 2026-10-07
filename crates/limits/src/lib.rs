@@ -54,11 +54,26 @@ pub const MAX_FRAME_SESSION_BYTES: usize = 256 * 1024;
 /// Transfer metadata messages (not file payload bytes).
 pub const MAX_FRAME_TRANSFER_META_BYTES: usize = 64 * 1024;
 
-/// Clipboard content messages.
-pub const MAX_FRAME_CLIPBOARD_BYTES: usize = 1024 * 1024;
+/// Clipboard content messages; room for a PNG screenshot.
+pub const MAX_FRAME_CLIPBOARD_BYTES: usize = 16 * 1024 * 1024;
 
 /// Notification messages.
 pub const MAX_FRAME_NOTIFICATION_BYTES: usize = 64 * 1024;
+
+/// A list of photo thumbnails.
+pub const MAX_FRAME_PHOTOS_BYTES: usize = 1024 * 1024;
+
+/// A page of conversations or of one conversation's texts.
+pub const MAX_FRAME_MESSAGES_BYTES: usize = 4 * 1024 * 1024;
+
+/// One folder's listing.
+pub const MAX_FRAME_FILES_BYTES: usize = 1024 * 1024;
+
+/// A call's caller, or an answer to it.
+pub const MAX_FRAME_CALLS_BYTES: usize = 4 * 1024;
+
+/// One frame of a shared screen or camera; key frames are the largest.
+pub const MAX_FRAME_VIDEO_BYTES: usize = 4 * 1024 * 1024;
 
 // File transfer
 
@@ -104,3 +119,20 @@ pub const RETRY_JITTER_FACTOR: f64 = 0.25;
 
 /// Maximum UTF-8 byte length of a notification body.
 pub const MAX_NOTIFICATION_BODY_BYTES: usize = 4_096;
+
+/// What's playing, with a small cover image.
+pub const MAX_FRAME_MEDIA_BYTES: usize = 256 * 1024;
+
+pub const MAX_FRAME_RING_BYTES: usize = 64;
+
+/// One move, press or bit of typing.
+pub const MAX_FRAME_POINTER_BYTES: usize = 4 * 1024;
+
+/// Room for a link or a paragraph to type.
+pub const MAX_FRAME_ACTION_BYTES: usize = 64 * 1024;
+
+/// Every pinned clip at once.
+pub const MAX_FRAME_SNIPPETS_BYTES: usize = 4 * 1024 * 1024;
+
+/// A query, or a page of results with a line of text each.
+pub const MAX_FRAME_SEARCH_BYTES: usize = 256 * 1024;

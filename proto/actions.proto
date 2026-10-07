@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Sent by a phone to have the computer do something.
+message ComputerAction {
+  oneof body {
+    // Locks the computer, as Windows+L would.
+    bool lock = 1;
+    // Typed into whatever has focus on the computer.
+    string type_text = 2;
+    // Opened in the computer's browser. Only http and https links are opened.
+    string open_link = 3;
+    // Puts the computer to sleep.
+    bool sleep = 4;
+  }
+}
+
+message ComputerActionReply {
+  bool done = 1;
+}

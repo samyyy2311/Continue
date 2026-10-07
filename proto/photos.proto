@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Opens a photos stream; answered with a PhotosReply.
+message PhotosMessage {
+  oneof body {
+    ListPhotos list = 1;
+    // Asks the phone to send one photo, which it does through file transfer.
+    SendPhoto send = 2;
+    // The phone telling a computer about a photo just taken.
+    Photo taken = 3;
+  }
+}
+
+message ListPhotos {
+  uint32 limit = 1;
+}
+
+message SendPhoto {
+  string id = 1;
+}
+
+message Photo {
+  string id = 1;
+  string name = 2;
+  uint64 taken_at = 3; // Unix time in milliseconds
+  bytes thumbnail = 4; // a small JPEG
+}
+
+message PhotosReply {
+  // False without photo access, or when a computer won't show the photo just taken.
+  bool available = 1;
+  // Newest first; empty in answer to SendPhoto.
+  repeated Photo photos = 2;
+}

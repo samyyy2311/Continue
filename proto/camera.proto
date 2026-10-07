@@ -1,0 +1,21 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Opened with a CameraRequest; the computer then sends CameraControl. Replies as in video.proto.
+message CameraRequest {
+  // The longest side the frames may have, in pixels.
+  uint32 max_size = 1;
+  bool front = 2;
+}
+
+message CameraControl {
+  oneof body {
+    // Switches to the front camera, or the back one.
+    bool front = 1;
+    // Keeps the person in the middle of the picture by zooming in and following their face.
+    bool framing = 2;
+  }
+}

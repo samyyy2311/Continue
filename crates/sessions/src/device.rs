@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use protocol::v1::{DeviceInfo, DeviceStatus, Platform};
+use protocol::v1::{DeviceInfo, DeviceLook, DeviceStatus, Platform};
 
 use limits::MAX_DEVICE_NAME_BYTES as MAX_NAME_BYTES;
 
@@ -13,6 +13,7 @@ struct Own {
     name: String,
     platform: Platform,
     status: Option<DeviceStatus>,
+    look: Option<DeviceLook>,
 }
 
 /// How this device introduces itself. Shared, so a rename or a new battery reading reaches
@@ -26,6 +27,7 @@ impl ThisDevice {
             name: clean_name(&name.into()),
             platform,
             status: None,
+            look: None,
         })))
     }
 
@@ -38,14 +40,26 @@ impl ThisDevice {
     }
 
     pub(crate) fn status(&self) -> Option<DeviceStatus> {
-        self.0.read().unwrap().status
+        self.0.read().unwrap().status.clone()
     }
 
-    /// Records a battery reading. False if it's the one peers already have.
+    /// False if unchanged.
     pub(crate) fn set_status(&self, status: DeviceStatus) -> bool {
         let mut own = self.0.write().unwrap();
-        let changed = own.status != Some(status);
+        let changed = own.status.as_ref() != Some(&status);
         own.status = Some(status);
+        changed
+    }
+
+    pub(crate) fn look(&self) -> Option<DeviceLook> {
+        self.0.read().unwrap().look.clone()
+    }
+
+    /// False if unchanged.
+    pub(crate) fn set_look(&self, look: DeviceLook) -> bool {
+        let mut own = self.0.write().unwrap();
+        let changed = own.look.as_ref() != Some(&look);
+        own.look = Some(look);
         changed
     }
 

@@ -7,6 +7,5 @@ publish = false
 
 [dependencies]
 rusqlite = { workspace = true }
-serde = { workspace = true }
 protocol = { path = "../protocol" }
 thiserror = { workspace = true }

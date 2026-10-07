@@ -11,26 +11,33 @@ Four principles decide every feature below:
 
 - **Local first.** Devices talk directly over your own network. Nothing passes through a server, and nothing works less well because of it.
 - **No account.** Pairing a phone is scanning one code. There is no sign-in, no cloud profile and no telemetry.
-- **Private by default.** Every capability is off until you allow it per device, and you can see what each device did.
+- **Only your devices.** Nothing works with a device you haven't paired. Each capability can be switched off per device, and every connection paused at once.
 - **Open source.** Anyone can read how it works, audit the security and build it themselves.
 
 Continue ships as a desktop app (Windows, macOS, Linux) and an Android app, sharing one Rust core for security, networking and the protocol.
 
 ## Where Continue is today
 
-Phase 1 is done: paired devices stay paired across restarts, find and reconnect to each other on their own, show each other's real names, and send files and text both ways. Device keys are kept in the platform's secret store.
+Phases 1 and 2 are mostly done, and Phase 3 has started: the computer shows and controls the phone's screen and uses its camera.
 
 | Area | Works today | Missing |
 | --- | --- | --- |
-| Pairing | QR code or pasted code; signed, pinned and replay-protected | Nothing blocking |
+| Pairing | QR code or pasted code, or pick a computer nearby and compare six digits on both screens; signed, pinned and replay-protected; four words on both devices to check the right ones paired | Nothing blocking |
 | Identity | Device keys live in the Keychain, Windows Credential Manager, the Secret Service or the Android Keystore, and survive restarts | Nothing blocking; Linux without a keyring falls back to a file only the user can read |
-| Connecting | Each device listens for paired devices, finds them over mDNS and reconnects after a restart or dropped network | Nothing blocking |
+| Connecting | Each device listens for paired devices, finds them over mDNS and reconnects after a restart or dropped network; connections can be paused on either side | Nothing blocking |
 | Device names | Each side sends its name when it connects: the computer's name, and the phone's owner-set name or model | Nothing blocking |
-| Files | Both ways, with progress, cancel, a chosen save folder and open-when-done; a dropped connection picks up where it stopped | Nothing blocking |
-| Text | Clipboard sync both ways, automatic or manual | Images and clipboard history |
-| Notifications | Protocol and permission exist | The phone doesn't forward its notifications yet |
-| Permissions | Allow, Ask or Block per device, checked on every incoming file and text | Nothing blocking |
-| History | Everything sent and received, saved across restarts, with a clear button | Nothing blocking |
+| Files | Both ways, with progress, cancel, a chosen save folder and open-when-done; a dropped connection picks up where it stopped; sends to a device that isn't connected wait and go when it connects; a drop folder on each side; a page scanned on the phone arrives as a PDF | Edge detection when scanning |
+| Text and clipboard | Clipboard sync both ways, automatic on the computer; images too on Windows; a copy made while the other device is away goes when it's back; text pinned as snippets on every device | Nothing blocking |
+| Notifications | The phone's notifications on the computer, with reply, dismiss, their own buttons, mute per app, and one-click copy of one-time codes | Nothing blocking: Windows and macOS focus modes cover quiet hours |
+| Messages and calls | Read, search and send texts, start new ones, copy one-time codes, open links; contacts with photos and favourites; incoming calls with answer, decline and silence; call any number from the computer | Call audio stays on the phone; pictures in texts |
+| Photos and phone files | The phone's recent photos, new ones as they're taken, and a folder the phone shares; one search across the phone's files, texts and contacts, run on the phone | Albums |
+| Phone status | Battery, signal, Wi-Fi and carrier; low-battery and fully-charged alerts; the phone's wallpaper | Nothing blocking |
+| Screen and camera | The phone's screen in a window with its sound, controlled with mouse and keyboard; the phone's camera in a window, and on Windows 11 as a camera video call apps can pick | The camera in other apps on macOS and Linux |
+| Mouse and keyboard | On Windows, push the pointer past the screen edge the phone sits by to use the computer's mouse and keyboard on the phone, Esc brings it back; the phone as the computer's touchpad and keyboard | macOS and Linux |
+| Media and find my phone | What's playing, with play, pause and skip; ring the phone, even on silent, or ring the computer from the phone | Nothing blocking |
+| The phone driving the computer | Lock it, put it to sleep, type into it, and open a shared link on it | Unlocking it |
+| Access | Everything is on once paired, with an off switch per device for each capability | Nothing blocking |
+| History | Everything sent and received, saved across restarts, filterable by device, with a clear button | What a device looked at, such as texts read |
 
 The protocol runs over QUIC with TLS 1.3. Each device has an Ed25519 identity key and a separate transport key, and peers pin each other's transport key after pairing.
 
@@ -43,7 +50,7 @@ Phase 1 makes a paired phone stay paired, find the computer on its own and talk 
 3. **Finding each other.** Advertise over mDNS with a rotating random ID, so the network never sees a stable device identifier. A paired device proves itself during the pinned TLS handshake, so nobody types an IP address.
 4. **Reconnecting.** Reconnect with backoff when Wi-Fi drops, the laptop wakes from sleep or the phone changes networks.
 5. **Real device names.** Use the computer's name and the phone's model and owner-set name instead of placeholders.
-6. **Permission checks on incoming streams.** Every incoming file, clipboard or notification stream is checked against the per-device grant before anything is written or shown. Ask pops a prompt; Block refuses.
+6. **Access checks on incoming streams.** Every incoming file, clipboard or notification stream is checked against the device's switches before anything is written or shown; one that's switched off is refused.
 7. **Saved history.** Everything sent and received is stored locally, with a limit and a clear button.
 8. **Received files.** Save to a folder you choose (Downloads by default), with progress, cancel and open-when-done.
 
@@ -111,7 +118,7 @@ These features set Continue apart. Most follow from the product's name: pick up 
 
 ## Technical notes
 
-Each feature becomes a protocol capability with its own ID, permission and stream type, so it can be allowed or blocked per device.
+Each feature becomes a protocol capability with its own ID and stream type, so it can be switched off per device.
 
 | Capability | Android needs | Desktop needs |
 | --- | --- | --- |
@@ -130,7 +137,7 @@ Each feature becomes a protocol capability with its own ID, permission and strea
 - **Transport.** Large media (mirroring, webcam) uses QUIC datagrams or unreliable streams to avoid head-of-line delays. Control and files keep reliable streams.
 - **Background running.** The phone keeps the session alive in a foreground service with a quiet, persistent notification, as Android requires.
 - **Core in Rust.** Protocol, crypto, discovery, transfer and permissions live in shared Rust crates. Only OS integrations are written per platform, in Kotlin and in the desktop app's backend.
-- **Security.** Every new capability goes through the existing permission store and pinned TLS session. No feature opens a second network path.
+- **Security.** Every new capability goes through the per-device switches and the pinned TLS session. No feature opens a second network path.
 
 ## Design and settings
 

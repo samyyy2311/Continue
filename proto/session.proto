@@ -19,6 +19,8 @@ message SessionEnvelope {
     DeviceInfo device_info = 4;
     // Sent when the sender's battery changes, and when a session starts.
     DeviceStatus device_status = 5;
+    // Sent when the sender's wallpaper changes, and when a session starts.
+    DeviceLook device_look = 6;
   }
 }
 

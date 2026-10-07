@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -11,7 +12,7 @@ use tracing::{debug, info};
 
 use limits::CONNECTION_TIMEOUT_SECS;
 use protocol::v1::session_envelope::Body;
-use protocol::v1::{DeviceStatus, DisconnectReason};
+use protocol::v1::{DeviceLook, DeviceStatus, DisconnectReason};
 use transport::{connect_pinned, DialConfig, TransportCertificate, TransportError};
 
 use crate::backoff::ReconnectPolicy;
@@ -76,6 +77,7 @@ struct Inner {
     on_state_change: Option<StateListener>,
     peers: Mutex<HashMap<String, Entry>>,
     redial: tokio::sync::Notify,
+    paused: AtomicBool,
 }
 
 impl Entry {
@@ -110,6 +112,7 @@ impl SessionRegistry {
                 on_state_change,
                 peers: Mutex::new(HashMap::new()),
                 redial: tokio::sync::Notify::new(),
+                paused: AtomicBool::new(false),
             }),
         }
     }
@@ -121,6 +124,25 @@ impl SessionRegistry {
             entry.ended_on_purpose = false;
         }
         self.redial_now();
+    }
+
+    /// Pausing ends every session and turns away new ones, both ways, until resumed. Resuming
+    /// dials paired devices straight away.
+    pub async fn set_paused(&self, paused: bool) {
+        self.inner.paused.store(paused, Ordering::Relaxed);
+        if !paused {
+            for entry in self.peers().values_mut() {
+                entry.ended_on_purpose = false;
+            }
+            return self.redial_now();
+        }
+        for peer in self.connected() {
+            self.disconnect(&peer).await;
+        }
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.inner.paused.load(Ordering::Relaxed)
     }
 
     /// Asks `connect_paired_peers` to dial saved addresses now instead of at its next round,
@@ -141,19 +163,29 @@ impl SessionRegistry {
             .filter(|mux| mux.connection().close_reason().is_none())
     }
 
-    /// Sends this device's battery to every connected peer, unless they already have it.
-    /// Must be called inside the Tokio runtime the registry runs on.
+    /// Sends only on a change. Must run inside the registry's Tokio runtime.
     pub fn report_status(&self, status: DeviceStatus) {
-        if !self.inner.handlers.this_device.set_status(status) {
-            return;
+        if self.inner.handlers.this_device.set_status(status.clone()) {
+            self.send_to_connected(Body::DeviceStatus(status));
         }
+    }
+
+    /// Sends only on a change. Must run inside the registry's Tokio runtime.
+    pub fn report_look(&self, look: DeviceLook) {
+        if self.inner.handlers.this_device.set_look(look.clone()) {
+            self.send_to_connected(Body::DeviceLook(look));
+        }
+    }
+
+    fn send_to_connected(&self, body: Body) {
         let connected: Vec<_> = self
             .peers()
             .values()
             .filter_map(|entry| entry.session.active.clone())
             .collect();
         for mux in connected {
-            tokio::spawn(async move { mux.send_control(Body::DeviceStatus(status)).await });
+            let body = body.clone();
+            tokio::spawn(async move { mux.send_control(body).await });
         }
     }
 
@@ -218,19 +250,7 @@ impl SessionRegistry {
                 Ok(())
             }
             Err(error) => {
-                let failed = {
-                    let mut peers = self.peers();
-                    match peers.get_mut(peer) {
-                        Some(entry) if entry.session.state == SessionState::Connecting => {
-                            entry.session.state = SessionState::Disconnected;
-                            true
-                        }
-                        _ => false,
-                    }
-                };
-                if failed {
-                    self.notify(peer, SessionState::Disconnected);
-                }
+                self.connect_failed(peer);
                 Err(error)
             }
         }
@@ -284,8 +304,23 @@ impl SessionRegistry {
         None
     }
 
+    /// Moves a peer that was being connected back to disconnected.
+    fn connect_failed(&self, peer: &str) {
+        let failed = match self.peers().get_mut(peer) {
+            Some(entry) if entry.session.state == SessionState::Connecting => {
+                entry.session.state = SessionState::Disconnected;
+                true
+            }
+            _ => false,
+        };
+        if failed {
+            self.notify(peer, SessionState::Disconnected);
+        }
+    }
+
     fn wants_discovered(&self, peer: &str) -> bool {
-        self.get(peer).is_none()
+        !self.is_paused()
+            && self.get(peer).is_none()
             && self.peers().get(peer).is_none_or(|entry| {
                 !entry.ended_on_purpose && entry.session.state != SessionState::Connecting
             })
@@ -294,9 +329,11 @@ impl SessionRegistry {
     /// Whether a connection to `peer` that just succeeded should be kept: it is still paired
     /// and wasn't disconnected on purpose meanwhile.
     fn still_wanted(&self, peer: &str) -> bool {
-        self.peers()
-            .get(peer)
-            .is_some_and(|entry| !entry.ended_on_purpose)
+        !self.is_paused()
+            && self
+                .peers()
+                .get(peer)
+                .is_some_and(|entry| !entry.ended_on_purpose)
     }
 
     /// Claims the right to dial `peer`, or `None` if this device is already dialing it.
@@ -322,6 +359,11 @@ impl SessionRegistry {
         connection: quinn::Connection,
         direction: Direction,
     ) -> bool {
+        if self.is_paused() {
+            connection.close(close_code(DisconnectReason::Normal), b"paused");
+            self.connect_failed(peer);
+            return false;
+        }
         let mux = Arc::new(SessionMultiplexer::new(peer.to_string(), connection));
         {
             let mut peers = self.peers();
@@ -353,15 +395,19 @@ impl SessionRegistry {
         spawn_capabilities_dispatcher(mux.clone(), self.inner.handlers.clone(), STREAM_BUFFER);
         let introduction = {
             let this_device = &self.inner.handlers.this_device;
-            let (mux, info, status) = (
+            let (mux, info, status, look) = (
                 mux.clone(),
                 this_device.info(&self.inner.local_fingerprint),
                 this_device.status(),
+                this_device.look(),
             );
             async move {
                 mux.send_control(Body::DeviceInfo(info)).await;
                 if let Some(status) = status {
                     mux.send_control(Body::DeviceStatus(status)).await;
+                }
+                if let Some(look) = look {
+                    mux.send_control(Body::DeviceLook(look)).await;
                 }
             }
         };
@@ -449,7 +495,6 @@ impl SessionRegistry {
             entry.ended_on_purpose = true;
             mux
         };
-        self.clear_connection_grants(peer);
         self.notify(peer, SessionState::Closed);
         if let Some(mux) = mux {
             mux.disconnect(DisconnectReason::Normal, "Disconnected by user".to_string())
@@ -548,7 +593,6 @@ impl SessionRegistry {
         };
 
         info!("Connection to {peer} ended: {error}");
-        self.clear_connection_grants(peer);
         self.notify(peer, state);
         if let Some((delay, episode)) = reconnect {
             tokio::spawn(self.clone().reconnect(peer.to_string(), delay, episode));
@@ -627,12 +671,6 @@ impl SessionRegistry {
                     entry.session.known_addresses.clone(),
                 )
             })
-    }
-
-    fn clear_connection_grants(&self, peer: &str) {
-        if let Some(store) = &self.inner.handlers.permission_store {
-            store.clear_allow_once_for_peer(peer);
-        }
     }
 
     fn notify(&self, peer: &str, state: SessionState) {

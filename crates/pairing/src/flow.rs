@@ -10,7 +10,7 @@ use x25519_dalek::PublicKey as X25519PublicKey;
 use crypto::hkdf::derive_pairing_keys;
 use crypto::keys::EphemeralX25519;
 use crypto::pairing::{
-    build_full_transcript, build_initiator_transcript, build_responder_transcript,
+    build_full_transcript, build_initiator_transcript, build_responder_transcript, comparison_code,
     confirm_mac_initiator, confirm_mac_responder, verify_confirm_mac, InitiatorTranscriptInputs,
     ResponderTranscriptInputs,
 };
@@ -26,6 +26,27 @@ use crate::replay::ReplayCache;
 use crate::trust_store::{TrustStore, TrustedPeer};
 
 /// Saved only once both sides have proved they derived the same key.
+/// A finished handshake whose device isn't trusted yet: people can compare `code` on both
+/// screens first, then accept it.
+pub struct PendingPeer {
+    trust_store: TrustStore,
+    identity_pubkey: [u8; 32],
+    transport_spki_hash: [u8; 32],
+    /// Six digits the other device shows too.
+    pub code: String,
+}
+
+impl PendingPeer {
+    /// Trusts the device from now on.
+    pub fn accept(self) -> Result<TrustedPeer, PairingError> {
+        save_peer(
+            &self.trust_store,
+            self.identity_pubkey,
+            self.transport_spki_hash,
+        )
+    }
+}
+
 fn save_peer(
     trust_store: &TrustStore,
     identity_pubkey: [u8; 32],
@@ -118,7 +139,7 @@ impl InitiatorPairing {
         send_stream: &mut quinn::SendStream,
         recv_stream: &mut quinn::RecvStream,
         actual_recorded_peer_spki_hash: [u8; 32],
-    ) -> Result<TrustedPeer, PairingError> {
+    ) -> Result<PendingPeer, PairingError> {
         let local_eph = self
             .ephemeral_x25519
             .take()
@@ -203,7 +224,12 @@ impl InitiatorPairing {
         let expected_resp_mac = confirm_mac_responder(&confirmation_key, &full_transcript)?;
         verify_confirm_mac(&confirm_resp_mac, &expected_resp_mac)?;
 
-        save_peer(&self.trust_store, resp_pubkey_bytes, resp_claimed_spki)
+        Ok(PendingPeer {
+            trust_store: self.trust_store.clone(),
+            identity_pubkey: resp_pubkey_bytes,
+            transport_spki_hash: resp_claimed_spki,
+            code: comparison_code(&confirmation_key, &full_transcript)?,
+        })
     }
 }
 
@@ -233,7 +259,7 @@ impl ResponderPairing {
         qr: &QrPayload,
         send_stream: &mut quinn::SendStream,
         recv_stream: &mut quinn::RecvStream,
-    ) -> Result<TrustedPeer, PairingError> {
+    ) -> Result<PendingPeer, PairingError> {
         qr.verify_signature(1)?;
 
         let local_eph = EphemeralX25519::generate();
@@ -288,10 +314,11 @@ impl ResponderPairing {
         )
         .await?;
 
-        save_peer(
-            &self.trust_store,
-            qr.identity_pubkey,
-            qr.transport_spki_hash,
-        )
+        Ok(PendingPeer {
+            trust_store: self.trust_store.clone(),
+            identity_pubkey: qr.identity_pubkey,
+            transport_spki_hash: qr.transport_spki_hash,
+            code: comparison_code(&confirmation_key, &full_transcript)?,
+        })
     }
 }

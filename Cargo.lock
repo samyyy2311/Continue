@@ -677,6 +677,7 @@ version = "0.1.0"
 dependencies = [
  "crypto",
  "device",
+ "discovery",
  "hex",
  "history",
  "identity",
@@ -1231,6 +1232,7 @@ dependencies = [
  "quinn",
  "rand 0.8.8",
  "rusqlite",
+ "sha2",
  "thiserror 1.0.69",
  "transport",
  "x25519-dalek",
@@ -1305,7 +1307,6 @@ version = "0.1.0"
 dependencies = [
  "protocol",
  "rusqlite",
- "serde",
  "thiserror 1.0.69",
 ]
 
@@ -1928,6 +1929,7 @@ dependencies = [
  "notifications",
  "pairing",
  "permissions",
+ "prost",
  "protocol",
  "quinn",
  "rand 0.8.8",

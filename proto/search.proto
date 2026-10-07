@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Asks the phone to look through its own files, texts and contacts; answered with a
+// SearchReply. The search runs on the phone, so only what matches leaves it.
+message SearchRequest {
+  string query = 1;
+}
+
+message SearchResult {
+  enum Kind {
+    FILE = 0;
+    TEXT = 1;
+    CONTACT = 2;
+  }
+  Kind kind = 1;
+  // The file's name, who the text is with, or the contact's name.
+  string title = 2;
+  // The folder, the text itself, or the phone number.
+  string detail = 3;
+  // A file's path in the shared folder, to fetch it with GetFile; a text's conversation id.
+  string reference = 4;
+  // When the file changed or the text was sent, in Unix milliseconds; 0 for contacts.
+  uint64 at = 5;
+}
+
+message SearchReply {
+  // False when the phone has none of its files, texts or contacts to look through.
+  bool available = 1;
+  repeated SearchResult results = 2;
+}

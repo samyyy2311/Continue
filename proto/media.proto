@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Opens a media stream; answered with a MediaReply.
+message MediaMessage {
+  oneof body {
+    // The phone telling a computer what's playing, whenever it changes.
+    NowPlaying now_playing = 1;
+    // A computer controlling what's playing on the phone.
+    MediaCommand command = 2;
+  }
+}
+
+message NowPlaying {
+  // Empty when nothing is playing.
+  string title = 1;
+  string artist = 2;
+  string app = 3;
+  bool playing = 4;
+  uint64 duration_ms = 5;
+  uint64 position_ms = 6;
+  bytes art = 7; // a small JPEG, when the app provides one
+}
+
+message MediaCommand {
+  enum Kind {
+    PLAY_PAUSE = 0;
+    NEXT = 1;
+    PREVIOUS = 2;
+    VOLUME_UP = 3;
+    VOLUME_DOWN = 4;
+  }
+  Kind kind = 1;
+}
+
+message MediaReply {
+  bool done = 1;
+}

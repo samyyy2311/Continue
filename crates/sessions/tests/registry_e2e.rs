@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -10,11 +11,21 @@ use std::time::{Duration, Instant};
 use capabilities::CapabilityQuery;
 use clipboard::ClipboardFormat;
 use pairing::{TrustStore, TrustedPeer};
-use protocol::v1::DeviceStatus;
+use protocol::v1::{
+    call, call_action, calls_message, camera_control, computer_action, media_command,
+    media_message, messages_message, photos_message, pointer_input, screen_input, touch, Call,
+    CallAction, CameraControl, CameraRequest, Contact, Conversation, DeviceLook, DeviceStatus,
+    ListContacts, ListConversations, ListPhotos, MediaCommand, MessagesChanged, NowPlaying, Photo,
+    PointerInput, PointerMove, PointerStart, ReadConversation, ScreenInput, ScreenRequest,
+    SearchResult, SendPhoto, SendText, Snippet, TextMessage, Touch, VideoFrame, VideoStart,
+};
 use protocol::CapabilityId;
 use sessions::{
-    accept_peers, connect_paired_peers, listen_for_peers, Direction, IncomingEvent, IncomingFiles,
-    ReconnectPolicy, RegistryConfig, SessionCapabilityHandlers, SessionRegistry, SessionState,
+    accept_peers, connect_paired_peers, listen_for_peers, CallControl, ComputerActions, Direction,
+    IncomingEvent, IncomingFiles, MediaControl, MessageStore, PhoneSearch, PhotoLibrary,
+    PointerLeave, PointerTarget, ReconnectPolicy, RegistryConfig, Ringer,
+    SessionCapabilityHandlers, SessionRegistry, SessionState, SnippetStore, VideoFeed, VideoSource,
+    MAX_PHOTOS,
 };
 use tokio::net::UdpSocket;
 use transport::{
@@ -54,6 +65,256 @@ struct Node {
     progress: Arc<Mutex<Vec<u64>>>,
     /// Battery readings the peer reported.
     statuses: Arc<Mutex<Vec<DeviceStatus>>>,
+    /// How the peer said it looks.
+    looks: Arc<Mutex<Vec<DeviceLook>>>,
+    /// Photos the peer said it just took.
+    taken: Arc<Mutex<Vec<Photo>>>,
+    messages: Arc<OneConversation>,
+    phone: Arc<RingingPhone>,
+    screen: Arc<FakeVideo<ScreenInput>>,
+    camera: Arc<FakeVideo<CameraControl>>,
+    player: Arc<Player>,
+    bell: Arc<Bell>,
+    pad: Arc<Pad>,
+    desk: Arc<Desk>,
+    pinned: Arc<Pinned>,
+    now_playing: Arc<Mutex<Vec<NowPlaying>>>,
+    /// Calls the peer said were ringing, answered or over.
+    calls: Arc<Mutex<Vec<Call>>>,
+    /// How many times the peer said its messages changed.
+    changes: Arc<Mutex<u32>>,
+}
+
+/// One photo, kept at `path`.
+struct OnePhoto {
+    path: PathBuf,
+}
+
+impl PhotoLibrary for OnePhoto {
+    fn recent(&self, limit: u32) -> Option<Vec<Photo>> {
+        assert!(limit <= MAX_PHOTOS);
+        Some(vec![Photo {
+            id: "1".to_string(),
+            name: "beach.jpg".to_string(),
+            taken_at: 1,
+            thumbnail: vec![0xff, 0xd8],
+        }])
+    }
+
+    fn file(&self, id: &str) -> Option<PathBuf> {
+        (id == "1").then(|| self.path.clone())
+    }
+}
+
+/// One conversation, remembering what was sent.
+#[derive(Default)]
+struct OneConversation {
+    sent: Mutex<Vec<(String, String)>>,
+}
+
+impl MessageStore for OneConversation {
+    fn contacts(&self, _limit: u32) -> Option<Vec<Contact>> {
+        Some(vec![Contact {
+            name: "Asha".to_string(),
+            number: "+15550100".to_string(),
+            favorite: true,
+            photo: Vec::new(),
+        }])
+    }
+
+    fn conversations(&self, _limit: u32) -> Option<Vec<Conversation>> {
+        Some(vec![Conversation {
+            id: "7".to_string(),
+            address: "+15550100".to_string(),
+            name: "Asha".to_string(),
+            snippet: "See you at 6".to_string(),
+            at: 1,
+            unread: true,
+        }])
+    }
+
+    fn conversation(&self, id: &str, _limit: u32) -> Option<Vec<TextMessage>> {
+        (id == "7").then(|| {
+            vec![TextMessage {
+                id: "1".to_string(),
+                body: "See you at 6".to_string(),
+                at: 1,
+                outgoing: false,
+            }]
+        })
+    }
+
+    fn send(&self, address: &str, body: &str) -> bool {
+        self.sent
+            .lock()
+            .unwrap()
+            .push((address.to_string(), body.to_string()));
+        true
+    }
+}
+
+/// A phone whose ringing call can be answered once.
+#[derive(Default)]
+struct RingingPhone {
+    answered: AtomicBool,
+}
+
+impl CallControl for RingingPhone {
+    fn answer(&self) -> bool {
+        !self.answered.swap(true, Ordering::Relaxed)
+    }
+
+    fn decline(&self) -> bool {
+        false
+    }
+
+    fn silence(&self) -> bool {
+        false
+    }
+
+    fn dial(&self, _: &str) -> bool {
+        false
+    }
+}
+
+/// A screen or camera that sends two frames once shared, and remembers how it was steered.
+struct FakeVideo<C> {
+    feed: VideoFeed,
+    controls: Mutex<Vec<C>>,
+    stopped: AtomicBool,
+}
+
+impl<C> FakeVideo<C> {
+    fn new(feed: &VideoFeed) -> Arc<Self> {
+        Arc::new(Self {
+            feed: feed.clone(),
+            controls: Mutex::default(),
+            stopped: AtomicBool::new(false),
+        })
+    }
+}
+
+impl<R, C: Send> VideoSource<R, C> for FakeVideo<C> {
+    fn start(&self, _request: R) -> Option<VideoStart> {
+        for (data, key) in [
+            (vec![0, 0, 0, 1, 0x67], true),
+            (vec![0, 0, 0, 1, 0x41], false),
+        ] {
+            assert!(self.feed.push(VideoFrame {
+                data,
+                key,
+                ..Default::default()
+            }));
+        }
+        assert!(self.feed.push_audio(vec![1, 2, 3, 4]));
+        Some(VideoStart {
+            started: true,
+            width: 576,
+            height: 1280,
+            rotation: 0,
+        })
+    }
+
+    fn control(&self, control: C) {
+        self.controls.lock().unwrap().push(control);
+    }
+
+    fn stop(&self) {
+        self.stopped.store(true, Ordering::Relaxed);
+    }
+}
+
+#[derive(Default)]
+struct Bell(AtomicBool);
+
+impl Ringer for Bell {
+    fn ring(&self, on: bool) -> bool {
+        self.0.store(on, Ordering::Relaxed);
+        true
+    }
+}
+
+/// A phone with one text that mentions dinner.
+struct OneText;
+
+impl PhoneSearch for OneText {
+    fn search(&self, query: &str, _: u32) -> Option<Vec<SearchResult>> {
+        let text = SearchResult {
+            title: "Sam".to_string(),
+            detail: "Dinner at 8?".to_string(),
+            ..Default::default()
+        };
+        Some(
+            vec![text]
+                .into_iter()
+                .filter(|t| t.detail.to_lowercase().contains(query))
+                .collect(),
+        )
+    }
+}
+
+/// Keeps the snippets a peer sent.
+#[derive(Default)]
+struct Pinned(Mutex<Vec<Snippet>>);
+
+impl SnippetStore for Pinned {
+    fn merge(&self, _: &str, snippets: Vec<Snippet>) {
+        self.0.lock().unwrap().extend(snippets);
+    }
+}
+
+/// A computer that notes what the phone asked it to do.
+#[derive(Default)]
+struct Desk(Mutex<Vec<computer_action::Body>>);
+
+impl ComputerActions for Desk {
+    fn act(&self, action: computer_action::Body) -> bool {
+        self.0.lock().unwrap().push(action);
+        true
+    }
+}
+
+/// A phone's pointer: it goes back to the computer as soon as it moves left.
+#[derive(Default)]
+struct Pad {
+    inputs: Mutex<Vec<PointerInput>>,
+    leave: Mutex<Option<PointerLeave>>,
+    stopped: AtomicBool,
+}
+
+impl PointerTarget for Pad {
+    fn start(&self, _: PointerStart, leave: PointerLeave) -> bool {
+        *self.leave.lock().unwrap() = Some(leave);
+        true
+    }
+
+    fn input(&self, input: PointerInput) {
+        let left = matches!(
+            input.body,
+            Some(pointer_input::Body::Move(PointerMove { dx, .. })) if dx < 0.0
+        );
+        self.inputs.lock().unwrap().push(input);
+        if let (true, Some(leave)) = (left, &*self.leave.lock().unwrap()) {
+            leave(0.25);
+        }
+    }
+
+    fn stop(&self) {
+        self.stopped.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Remembers the media commands it was given.
+#[derive(Default)]
+struct Player {
+    commands: Mutex<Vec<media_command::Kind>>,
+}
+
+impl MediaControl for Player {
+    fn command(&self, command: media_command::Kind) -> bool {
+        self.commands.lock().unwrap().push(command);
+        true
+    }
 }
 
 /// A device that accepts sessions from `trusted` peers and registers them as inbound.
@@ -86,9 +347,56 @@ fn node(
     handlers.on_device_status = Some(Arc::new(move |_peer, status| {
         reported.lock().unwrap().push(status);
     }));
+    let looks = Arc::new(Mutex::new(Vec::new()));
+    let seen = looks.clone();
+    handlers.on_device_look = Some(Arc::new(move |_peer, look| {
+        seen.lock().unwrap().push(look);
+    }));
     let arrived = files.clone();
     handlers.on_file_received = Some(Arc::new(move |_peer, file| {
         arrived.lock().unwrap().push(file);
+    }));
+    let photo = std::env::temp_dir().join(format!("continue-photo-{}.jpg", rand::random::<u64>()));
+    std::fs::write(&photo, b"a photo").unwrap();
+    handlers.photo_library = Some(Arc::new(OnePhoto { path: photo }));
+    let messages = Arc::new(OneConversation::default());
+    handlers.message_store = Some(messages.clone());
+    let changes = Arc::new(Mutex::new(0));
+    let changed = changes.clone();
+    handlers.on_messages_changed = Some(Arc::new(move |_peer, ()| {
+        *changed.lock().unwrap() += 1;
+    }));
+    let screen = FakeVideo::new(&handlers.screen_feed);
+    handlers.screen_source = Some(screen.clone());
+    let camera = FakeVideo::new(&handlers.camera_feed);
+    handlers.camera_source = Some(camera.clone());
+    let bell = Arc::new(Bell::default());
+    handlers.ringer = Some(bell.clone());
+    let pad = Arc::new(Pad::default());
+    handlers.pointer_target = Some(pad.clone());
+    let desk = Arc::new(Desk::default());
+    handlers.computer_actions = Some(desk.clone());
+    let pinned = Arc::new(Pinned::default());
+    handlers.snippet_store = Some(pinned.clone());
+    handlers.phone_search = Some(Arc::new(OneText));
+    let player = Arc::new(Player::default());
+    handlers.media_control = Some(player.clone());
+    let now_playing = Arc::new(Mutex::new(Vec::new()));
+    let heard = now_playing.clone();
+    handlers.on_now_playing = Some(Arc::new(move |_peer, playing| {
+        heard.lock().unwrap().push(playing);
+    }));
+    let phone = Arc::new(RingingPhone::default());
+    handlers.call_control = Some(phone.clone());
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let rang = calls.clone();
+    handlers.on_call = Some(Arc::new(move |_peer, call| {
+        rang.lock().unwrap().push(call);
+    }));
+    let taken = Arc::new(Mutex::new(Vec::new()));
+    let shown = taken.clone();
+    handlers.on_photo_taken = Some(Arc::new(move |_peer, photo| {
+        shown.lock().unwrap().push(photo);
     }));
     let registry = SessionRegistry::new(
         fingerprint.to_string(),
@@ -132,6 +440,20 @@ fn node(
         files,
         progress,
         statuses,
+        looks,
+        taken,
+        messages,
+        changes,
+        phone,
+        calls,
+        screen,
+        camera,
+        player,
+        now_playing,
+        bell,
+        pad,
+        desk,
+        pinned,
     }
 }
 
@@ -386,6 +708,37 @@ async fn manual_disconnect_does_not_reconnect() {
         low.registry.state(HIGH) == SessionState::Closed && high.registry.get(LOW).is_none()
     })
     .await;
+}
+
+#[tokio::test]
+async fn a_paused_device_drops_its_sessions_and_turns_dials_away_until_resumed() {
+    let (low, high) = pair();
+    low.registry
+        .connect(HIGH, high.cert.spki_hash, high.listen_addr)
+        .await
+        .unwrap();
+    eventually("accepted", || high.registry.get(LOW).is_some()).await;
+
+    high.registry.set_paused(true).await;
+    eventually("dialer saw the disconnect", || {
+        low.registry.get(HIGH).is_none()
+    })
+    .await;
+    let _ = low
+        .registry
+        .connect(HIGH, high.cert.spki_hash, high.listen_addr)
+        .await;
+    holds("dials are turned away", Duration::from_millis(1000), || {
+        high.registry.get(LOW).is_none()
+    })
+    .await;
+
+    high.registry.set_paused(false).await;
+    low.registry
+        .connect(HIGH, high.cert.spki_hash, high.listen_addr)
+        .await
+        .unwrap();
+    eventually("accepted again", || high.registry.get(LOW).is_some()).await;
 }
 
 #[tokio::test]
@@ -782,6 +1135,7 @@ async fn battery_status_reaches_the_peer_on_connect_and_when_it_changes() {
     let at = |battery_percent, charging| DeviceStatus {
         battery_percent,
         charging,
+        ..Default::default()
     };
     low.registry.report_status(at(80, false));
 
@@ -805,4 +1159,422 @@ async fn battery_status_reaches_the_peer_on_connect_and_when_it_changes() {
         2,
         "an unchanged reading isn't sent again"
     );
+}
+
+#[tokio::test]
+async fn how_a_device_looks_reaches_the_peer_on_connect_and_when_it_changes() {
+    let (low, high) = pair();
+    let wallpaper = DeviceLook {
+        wallpaper_color: 0x2457d6,
+        wallpaper: vec![0xff, 0xd8, 0xff, 0xe0],
+    };
+    low.registry.report_look(wallpaper.clone());
+
+    low.registry
+        .connect(HIGH, high.cert.spki_hash, high.listen_addr)
+        .await
+        .unwrap();
+    eventually("the look set before connecting arrives", || {
+        high.looks.lock().unwrap().as_slice() == [wallpaper.clone()]
+    })
+    .await;
+
+    let changed = DeviceLook {
+        wallpaper_color: 0x1e7a45,
+        ..wallpaper.clone()
+    };
+    low.registry.report_look(wallpaper.clone());
+    low.registry.report_look(changed.clone());
+    eventually("a new wallpaper arrives", || {
+        high.looks.lock().unwrap().last() == Some(&changed)
+    })
+    .await;
+    assert_eq!(
+        high.looks.lock().unwrap().len(),
+        2,
+        "an unchanged look isn't sent again"
+    );
+}
+
+#[tokio::test]
+async fn a_computer_lists_the_phones_photos_and_gets_one_sent_over() {
+    let (low, high) = pair();
+    low.registry
+        .connect(HIGH, high.cert.spki_hash, high.listen_addr)
+        .await
+        .unwrap();
+    let mux = low.registry.get(HIGH).unwrap();
+
+    let listed = mux
+        .send_photos_message(photos_message::Body::List(ListPhotos { limit: 1000 }))
+        .await
+        .unwrap();
+    assert!(listed.available);
+    assert_eq!(listed.photos.len(), 1);
+
+    let missing = mux
+        .send_photos_message(photos_message::Body::Send(SendPhoto { id: "2".into() }))
+        .await
+        .unwrap();
+    assert!(!missing.available);
+
+    let sent = mux
+        .send_photos_message(photos_message::Body::Send(SendPhoto { id: "1".into() }))
+        .await
+        .unwrap();
+    assert!(sent.available);
+    eventually("the photo arrived", || low.files.lock().unwrap().len() == 1).await;
+    let arrived = low.files.lock().unwrap()[0].path.clone();
+    assert_eq!(std::fs::read(arrived).unwrap(), b"a photo");
+
+    let just_taken = listed.photos[0].clone();
+    let told = mux
+        .send_photos_message(photos_message::Body::Taken(just_taken.clone()))
+        .await
+        .unwrap();
+    assert!(told.available);
+    assert_eq!(high.taken.lock().unwrap().as_slice(), [just_taken]);
+}
+
+#[tokio::test]
+async fn a_computer_reads_the_phones_texts_and_replies() {
+    let (low, high) = pair();
+    low.registry
+        .connect(HIGH, high.cert.spki_hash, high.listen_addr)
+        .await
+        .unwrap();
+    let mux = low.registry.get(HIGH).unwrap();
+
+    let listed = mux
+        .send_messages_message(messages_message::Body::Conversations(ListConversations {
+            limit: 1000,
+        }))
+        .await
+        .unwrap();
+    assert!(listed.available);
+    assert_eq!(listed.conversations[0].name, "Asha");
+
+    let read = mux
+        .send_messages_message(messages_message::Body::Read(ReadConversation {
+            conversation_id: "7".into(),
+            limit: 1000,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(read.messages[0].body, "See you at 6");
+
+    let sent = mux
+        .send_messages_message(messages_message::Body::Send(SendText {
+            address: "+15550100".into(),
+            body: "On my way".into(),
+        }))
+        .await
+        .unwrap();
+    assert!(sent.sent);
+    assert_eq!(
+        high.messages.sent.lock().unwrap().as_slice(),
+        [("+15550100".to_string(), "On my way".to_string())]
+    );
+
+    let told = mux
+        .send_messages_message(messages_message::Body::Changed(MessagesChanged {}))
+        .await
+        .unwrap();
+    assert!(told.available);
+    assert_eq!(*high.changes.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn a_ringing_phone_shows_on_the_computer_which_answers_it() {
+    let (phone, computer) = pair();
+    phone
+        .registry
+        .connect(HIGH, computer.cert.spki_hash, computer.listen_addr)
+        .await
+        .unwrap();
+    let to_computer = phone.registry.get(HIGH).unwrap();
+    let ringing = Call {
+        state: call::State::Ringing.into(),
+        number: "+15550100".into(),
+        name: "Asha".into(),
+    };
+    let shown = to_computer
+        .send_calls_message(calls_message::Body::Call(ringing.clone()))
+        .await
+        .unwrap();
+    assert!(shown.done);
+    assert_eq!(computer.calls.lock().unwrap().as_slice(), [ringing]);
+
+    eventually("the computer has the session", || {
+        computer.registry.get(LOW).is_some()
+    })
+    .await;
+    let to_phone = computer.registry.get(LOW).unwrap();
+    let answer = |kind: call_action::Kind| {
+        calls_message::Body::Action(CallAction {
+            kind: kind.into(),
+            ..Default::default()
+        })
+    };
+    let answered = to_phone
+        .send_calls_message(answer(call_action::Kind::Answer))
+        .await
+        .unwrap();
+    assert!(answered.done);
+    assert!(phone.phone.answered.load(Ordering::Relaxed));
+    let again = to_phone
+        .send_calls_message(answer(call_action::Kind::Answer))
+        .await
+        .unwrap();
+    assert!(!again.done, "nothing left ringing");
+}
+
+#[tokio::test]
+async fn a_computer_watches_the_phones_screen_and_taps_on_it() {
+    let (computer, phone) = pair();
+    computer
+        .registry
+        .connect(HIGH, phone.cert.spki_hash, phone.listen_addr)
+        .await
+        .unwrap();
+    let to_phone = computer.registry.get(HIGH).unwrap();
+
+    let request = ScreenRequest { max_size: 1280 };
+    let (start, mut frames, mut control) = to_phone.watch_screen(request).await.unwrap().unwrap();
+    assert_eq!((start.width, start.height), (576, 1280));
+    let first = frames.next().await.unwrap();
+    let second = frames.next().await.unwrap();
+    assert!(first.key && !second.key, "frames arrive whole and in order");
+    assert_eq!(frames.next().await.unwrap().audio, [1, 2, 3, 4]);
+
+    let tap = ScreenInput {
+        body: Some(screen_input::Body::Touch(Touch {
+            action: touch::Action::Down.into(),
+            x: 0.5,
+            y: 0.25,
+        })),
+    };
+    control.send(&tap).await.unwrap();
+    eventually("the tap reaches the phone", || {
+        phone.screen.controls.lock().unwrap().as_slice() == [tap.clone()]
+    })
+    .await;
+
+    drop(control);
+    eventually("closing stops the sharing", || {
+        phone.screen.stopped.load(Ordering::Relaxed)
+    })
+    .await;
+    assert!(frames.next().await.is_err());
+}
+
+#[tokio::test]
+async fn a_computer_uses_the_phones_camera_and_switches_sides() {
+    let (computer, phone) = pair();
+    computer
+        .registry
+        .connect(HIGH, phone.cert.spki_hash, phone.listen_addr)
+        .await
+        .unwrap();
+    let to_phone = computer.registry.get(HIGH).unwrap();
+
+    let request = CameraRequest {
+        max_size: 1920,
+        front: true,
+    };
+    let (_, mut frames, mut control) = to_phone.watch_camera(request).await.unwrap().unwrap();
+    assert!(frames.next().await.unwrap().key);
+
+    let back = CameraControl {
+        body: Some(camera_control::Body::Front(false)),
+    };
+    control.send(&back).await.unwrap();
+    eventually("the switch reaches the phone", || {
+        phone.camera.controls.lock().unwrap().as_slice() == [back]
+    })
+    .await;
+
+    drop(control);
+    eventually("closing stops the camera", || {
+        phone.camera.stopped.load(Ordering::Relaxed)
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_computer_sees_what_the_phone_plays_and_skips_it() {
+    let (phone, computer) = pair();
+    phone
+        .registry
+        .connect(HIGH, computer.cert.spki_hash, computer.listen_addr)
+        .await
+        .unwrap();
+    let song = NowPlaying {
+        title: "Clair de lune".into(),
+        playing: true,
+        ..Default::default()
+    };
+    let to_computer = phone.registry.get(HIGH).unwrap();
+    let shown = to_computer
+        .send_media_message(media_message::Body::NowPlaying(song.clone()))
+        .await
+        .unwrap();
+    assert!(shown.done);
+    assert_eq!(computer.now_playing.lock().unwrap().as_slice(), [song]);
+
+    eventually("the computer has the session", || {
+        computer.registry.get(LOW).is_some()
+    })
+    .await;
+    let skip = MediaCommand {
+        kind: media_command::Kind::Next.into(),
+    };
+    let skipped = computer
+        .registry
+        .get(LOW)
+        .unwrap()
+        .send_media_message(media_message::Body::Command(skip))
+        .await
+        .unwrap();
+    assert!(skipped.done);
+    assert_eq!(
+        phone.player.commands.lock().unwrap().as_slice(),
+        [media_command::Kind::Next]
+    );
+}
+
+#[tokio::test]
+async fn the_computer_rings_the_phone_and_stops_it() {
+    let (computer, phone) = pair();
+    computer
+        .registry
+        .connect(HIGH, phone.cert.spki_hash, phone.listen_addr)
+        .await
+        .unwrap();
+    let to_phone = computer.registry.get(HIGH).unwrap();
+
+    assert!(to_phone.ring_peer(true).await.unwrap().done);
+    assert!(phone.bell.0.load(Ordering::Relaxed));
+    assert!(to_phone.ring_peer(false).await.unwrap().done);
+    assert!(!phone.bell.0.load(Ordering::Relaxed));
+}
+
+#[tokio::test]
+async fn the_computer_pointer_moves_onto_the_phone_and_comes_back() {
+    let (computer, phone) = pair();
+    computer
+        .registry
+        .connect(HIGH, phone.cert.spki_hash, phone.listen_addr)
+        .await
+        .unwrap();
+    let to_phone = computer.registry.get(HIGH).unwrap();
+    let start = PointerStart {
+        y: 0.5,
+        from_left: true,
+    };
+    let (mut control, mut leaves) = to_phone.point(start).await.unwrap().unwrap();
+
+    let input = |body| PointerInput { body: Some(body) };
+    let moved = |dx| input(pointer_input::Body::Move(PointerMove { dx, dy: 0.0 }));
+    for sent in [
+        moved(40.0),
+        input(pointer_input::Body::Press(true)),
+        input(pointer_input::Body::Press(false)),
+        moved(-80.0),
+    ] {
+        control.send(&sent).await.unwrap();
+    }
+    assert_eq!(leaves.next().await.unwrap().y, 0.25);
+    assert_eq!(phone.pad.inputs.lock().unwrap().len(), 4);
+    assert_eq!(
+        phone.pad.inputs.lock().unwrap()[1].body,
+        Some(pointer_input::Body::Press(true))
+    );
+
+    drop(control);
+    eventually("the phone hid its pointer", || {
+        phone.pad.stopped.load(Ordering::Relaxed)
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_phone_locks_the_computer_and_types_into_it() {
+    let (computer, phone) = pair();
+    phone
+        .registry
+        .connect(LOW, computer.cert.spki_hash, computer.listen_addr)
+        .await
+        .unwrap();
+    let to_computer = phone.registry.get(LOW).unwrap();
+
+    let lock = computer_action::Body::Lock(true);
+    let typed = computer_action::Body::TypeText("hello".to_string());
+    assert!(to_computer.act_on_peer(lock.clone()).await.unwrap().done);
+    assert!(to_computer.act_on_peer(typed.clone()).await.unwrap().done);
+    assert_eq!(*computer.desk.0.lock().unwrap(), [lock, typed]);
+}
+
+#[tokio::test]
+async fn snippets_pinned_on_one_device_reach_the_other() {
+    let (computer, phone) = pair();
+    phone
+        .registry
+        .connect(LOW, computer.cert.spki_hash, computer.listen_addr)
+        .await
+        .unwrap();
+    let address = Snippet {
+        id: "a".to_string(),
+        text: "12 High Street".to_string(),
+        changed_at: 1,
+        removed: false,
+    };
+
+    let to_computer = phone.registry.get(LOW).unwrap();
+    assert!(to_computer
+        .send_snippets(vec![address.clone()])
+        .await
+        .unwrap());
+    assert_eq!(*computer.pinned.0.lock().unwrap(), [address]);
+}
+
+#[tokio::test]
+async fn the_computer_searches_the_phone_and_gets_only_matches() {
+    let (computer, phone) = pair();
+    computer
+        .registry
+        .connect(HIGH, phone.cert.spki_hash, phone.listen_addr)
+        .await
+        .unwrap();
+    let to_phone = computer.registry.get(HIGH).unwrap();
+
+    let found = to_phone.search_peer("dinner".to_string()).await.unwrap();
+    assert!(found.available);
+    assert_eq!(found.results.len(), 1);
+    assert_eq!(found.results[0].title, "Sam");
+    assert!(to_phone
+        .search_peer("lunch".to_string())
+        .await
+        .unwrap()
+        .results
+        .is_empty());
+}
+
+#[tokio::test]
+async fn the_computer_lists_the_phones_contacts() {
+    let (computer, phone) = pair();
+    computer
+        .registry
+        .connect(HIGH, phone.cert.spki_hash, phone.listen_addr)
+        .await
+        .unwrap();
+    let to_phone = computer.registry.get(HIGH).unwrap();
+
+    let reply = to_phone
+        .send_messages_message(messages_message::Body::Contacts(ListContacts { limit: 10 }))
+        .await
+        .unwrap();
+    assert!(reply.available);
+    assert_eq!(reply.contacts[0].name, "Asha");
+    assert!(reply.contacts[0].favorite);
 }
