@@ -27,7 +27,7 @@ fun SendNewCopies(
         val ready = focused && state.loaded && state.connected.isNotEmpty()
         val copy = if (ready && app.sendNewCopies) newCopy(context, app) else null
         if (copy != null) {
-            val (sent, message) = state.sendToConnected(copy.text)
+            val (sent, message) = state.sendToConnected(context, copy)
             // Only a copy that went counts as sent; otherwise the next opening tries again.
             if (sent) markSent(app, copy)
             onMessage(message.replace("Sent to", "Sent what you copied to"))

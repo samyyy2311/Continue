@@ -19,6 +19,7 @@ import org.continueapp.bridge.ContinueCoreBridge
 import org.continueapp.bridge.ContinueException
 import org.continueapp.bridge.IncomingFile
 import org.continueapp.bridge.ReceivedFile
+import org.continueapp.bridge.ReceivedImage
 import org.continueapp.bridge.ReceivedText
 import java.io.File
 import java.io.IOException
@@ -79,6 +80,10 @@ class Incoming(
                     onArrival("${item.peerName.ifBlank { "Your computer" }} sent a file", item.name, open)
                     val id = item.historyId
                     if (uri != null && id != null) remember(id, uri)
+                }
+                is ReceivedImage -> {
+                    copyImageToClipboard(context, item.png)
+                    onArrival("Copied an image from ${item.peerName.ifBlank { "your computer" }}", "", null)
                 }
                 is ReceivedText -> {
                     copyToClipboard(context, item.text)

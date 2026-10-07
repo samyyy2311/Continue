@@ -4,40 +4,62 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.core.content.FileProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.File
 
 private const val CLIP_LABEL = "Continue"
 
-/**
- * Puts text from a computer on the clipboard, and notes the copy as seen so it isn't sent
- * straight back the next time the app opens.
- */
 fun copyToClipboard(
     context: Context,
     text: String,
+) = setClip(context, ClipData.newPlainText(CLIP_LABEL, text))
+
+/** Shared through [FileProvider] from the app's cache, which other apps can't read directly. */
+fun copyImageToClipboard(
+    context: Context,
+    png: ByteArray,
+) {
+    val file = File(context.cacheDir, "clipboard").apply { mkdirs() }.resolve("copied.png")
+    file.writeBytes(png)
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+    setClip(context, ClipData.newUri(context.contentResolver, CLIP_LABEL, uri))
+}
+
+/** Notes the copy as seen so it isn't sent straight back the next time the app opens. */
+private fun setClip(
+    context: Context,
+    clip: ClipData,
 ) {
     val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
-    clipboard.setPrimaryClip(ClipData.newPlainText(CLIP_LABEL, text))
+    clipboard.setPrimaryClip(clip)
     val app = context.applicationContext as ContinueApplication
     // In the background Android won't describe the clip, but it was copied just now.
     val copiedAt = clipboard.primaryClipDescription?.timestamp ?: System.currentTimeMillis()
     app.lastCopySeen = maxOf(app.lastCopySeen, copiedAt)
 }
 
-/** Text that was copied, and when, so it can be marked as dealt with once it's sent. */
+/** Text or an image that was copied, and when, so it can be marked as dealt with once it's sent. */
 class Copy(
-    val text: String,
+    val text: String?,
+    val image: Uri?,
     val at: Long,
 )
 
-/**
- * The copied text, read only while Continue is on screen, as Android requires. Images and
- * other copies that aren't text count as nothing to send.
- */
+/** Read only while Continue is on screen, as Android requires. */
 fun readCopy(context: Context): Copy? {
     val clipboard = context.getSystemService(ClipboardManager::class.java)
-    val at = clipboard?.primaryClipDescription?.timestamp ?: return null
-    val text = clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
-    return text?.takeIf { it.isNotBlank() }?.let { Copy(it, at) }
+    val description = clipboard?.primaryClipDescription
+    val item = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+    if (description == null || item == null) return null
+    val text = item.text?.toString()?.takeIf { it.isNotBlank() }
+    val image = item.uri?.takeIf { description.hasMimeType("image/*") }
+    return if (text != null || image != null) Copy(text, image, description.timestamp) else null
 }
 
 /**
@@ -70,14 +92,41 @@ private const val IS_SENSITIVE = "android.content.extra.IS_SENSITIVE"
 
 private fun ClipDescription.isSensitive(): Boolean = extras?.getBoolean(IS_SENSITIVE) == true
 
-/** Sends text to every connected computer. Says whether it all went, and how to put it. */
-suspend fun AppState.sendToConnected(text: String): Pair<Boolean, String> {
+/** Sends a copy to every connected computer. Says whether it all went, and how to put it. */
+suspend fun AppState.sendToConnected(
+    context: Context,
+    copy: Copy,
+): Pair<Boolean, String> {
     refresh()
     val targets = peers.filter { it.fingerprint in connected }
-    val failed = targets.map { sendText(it, text) }.firstOrNull { it != null }
+    // Text copied while the computer is away goes once it's back; images aren't kept.
+    if (targets.isEmpty() && copy.text != null && peers.isNotEmpty()) {
+        val failed = peers.map { sendLater(context, it, copy.text, emptyList()) }.firstOrNull { it != null }
+        val names = peers.joinToString { it.displayName }
+        return if (failed != null) false to failed else true to "Sends when $names connects"
+    }
+    val png = copy.image?.let { withContext(Dispatchers.IO) { readPng(context, it) } }
+    val failed =
+        targets
+            .map { peer -> if (png != null) sendImage(peer, png) else sendText(peer, copy.text.orEmpty()) }
+            .firstOrNull { it != null }
     return when {
         targets.isEmpty() -> false to "Your computer isn't connected."
         failed != null -> false to failed
         else -> true to "Sent to ${targets.joinToString { it.displayName }}"
+    }
+}
+
+/** Computers expect PNG, so other formats are converted. */
+private fun readPng(
+    context: Context,
+    uri: Uri,
+): ByteArray? {
+    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+    if (context.contentResolver.getType(uri) == "image/png") return bytes
+    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+    return ByteArrayOutputStream().use {
+        bitmap.compress(Bitmap.CompressFormat.PNG, 0, it)
+        it.toByteArray()
     }
 }

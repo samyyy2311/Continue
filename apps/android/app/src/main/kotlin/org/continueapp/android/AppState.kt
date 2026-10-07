@@ -7,23 +7,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.continueapp.bridge.ComputerAction
 import org.continueapp.bridge.ContinueCoreBridge
 import org.continueapp.bridge.ContinueException
 import org.continueapp.bridge.HistoryEntry
-import org.continueapp.bridge.PermissionAnswer
-import org.continueapp.bridge.PermissionGrant
-import org.continueapp.bridge.PermissionQuestion
+import org.continueapp.bridge.NearbyComputer
+import org.continueapp.bridge.Snippet
 import org.continueapp.bridge.TrustedPeer
 import java.io.File
 import java.io.IOException
 import java.util.UUID
 
 private const val RECENT_LIMIT = 20
-private const val QUESTION_WAIT_MS = 1_000L
 
 enum class TransferKind { File, Text }
 
@@ -125,64 +121,25 @@ private fun HistoryEntry.toTransfer() =
         text = label.takeIf { isText },
     )
 
-/** Questions from devices set to Ask. The core asks one at a time. */
-class PermissionQuestions(private val bridge: ContinueCoreBridge) {
-    private var shown by mutableStateOf<PermissionQuestion?>(null)
-
-    /** The question waiting for an answer, if there is one. */
-    val current: PermissionQuestion? get() = shown
-
-    /** Hears each new question, and null once it's answered or has run out of time. */
-    var onChange: (PermissionQuestion?) -> Unit = {}
-
-    /**
-     * Picks up questions from the core for as long as the caller keeps it running. Each one
-     * goes away when the core stops waiting for it.
-     */
-    suspend fun listen() =
-        coroutineScope {
-            while (true) {
-                val next = withContext(Dispatchers.IO) { bridge.nextPermissionQuestion(QUESTION_WAIT_MS) }
-                if (next != null && next.expiresAt > System.currentTimeMillis()) {
-                    show(next)
-                    launch {
-                        delay(next.expiresAt - System.currentTimeMillis())
-                        if (shown?.id == next.id) show(null)
-                    }
-                }
-            }
-        }
-
-    /** Answers question [id]. An answer to a question that already went away is ignored. */
-    suspend fun answer(
-        id: Long,
-        answer: PermissionAnswer,
-    ) {
-        if (shown?.id == id) show(null)
-        withContext(Dispatchers.IO) { bridge.answerPermissionQuestion(id, answer) }
-    }
-
-    private fun show(question: PermissionQuestion?) {
-        shown = question
-        onChange(question)
-    }
-}
-
 /**
  * What the screens show, read from the core. Every call into the core runs off the main
  * thread, and failures come back as a message to show rather than an exception.
  */
+@Suppress("TooManyFunctions")
 class AppState(private val bridge: ContinueCoreBridge) {
     var peers by mutableStateOf<List<TrustedPeer>>(emptyList())
         private set
     var connected by mutableStateOf<Set<String>>(emptySet())
         private set
 
+    /** Latest wallpaper JPEG from each connected computer. */
+    var wallpapers by mutableStateOf<Map<String, ByteArray>>(emptyMap())
+        private set
+
     /** False until the core has been read once, so screens don't flash "nothing paired". */
     var loaded by mutableStateOf(false)
         private set
     val recent = RecentTransfers(bridge)
-    val questions = PermissionQuestions(bridge)
     val incoming = Incoming(bridge, recent)
 
     /** Keeps what's on screen if the core can't be read this time; the next refresh tries again. */
@@ -199,6 +156,15 @@ class AppState(private val bridge: ContinueCoreBridge) {
         peers = latestPeers
         connected = latestConnected
         loaded = true
+        val latestWallpapers =
+            withContext(Dispatchers.IO) {
+                latestConnected.mapNotNull { fp -> bridge.peerWallpaper(fp)?.let { fp to it } }.toMap()
+            }
+        // Replaced only on a real change, so screens don't decode the same picture again.
+        val changed =
+            latestWallpapers.keys != wallpapers.keys ||
+                latestWallpapers.any { (fp, bytes) -> !bytes.contentEquals(wallpapers[fp]) }
+        if (changed) wallpapers = latestWallpapers
     }
 
     /** Returns what to tell the user if pairing failed, or null once paired. */
@@ -206,6 +172,20 @@ class AppState(private val bridge: ContinueCoreBridge) {
         run("Pairing didn't work. Try again.") {
             bridge.pairFromQr(code)
         }
+
+    /** Waits a moment to hear from computers on this network. */
+    suspend fun nearbyComputers(): List<NearbyComputer> =
+        withContext(Dispatchers.IO) { runCatching { bridge.nearbyComputers(NEARBY_WAIT_MS) }.getOrDefault(emptyList()) }
+
+    /** The six digits to compare, or why pairing didn't get that far. */
+    suspend fun pairNearby(code: String): Result<String> =
+        withContext(Dispatchers.IO) { runCatching { bridge.pairNearby(code) } }
+
+    suspend fun confirmNearbyPairing(accept: Boolean): String? {
+        val error = run("Pairing didn't finish. Try again.") { bridge.confirmNearbyPairing(accept) }
+        refresh()
+        return error
+    }
 
     suspend fun disconnect(peer: String): String? = run("Couldn't disconnect.") { bridge.disconnect(peer) }
 
@@ -216,6 +196,44 @@ class AppState(private val bridge: ContinueCoreBridge) {
         val failed = "Couldn't forget this computer. Try again."
         return run(failed) { bridge.removeTrustedPeer(peer) }
     }
+
+    suspend fun pairingWords(peer: TrustedPeer): String =
+        withContext(Dispatchers.IO) { runCatching { bridge.pairingWords(peer.fingerprint) }.getOrDefault("") }
+
+    suspend fun snippets(): List<Snippet> =
+        withContext(Dispatchers.IO) {
+            runCatching { bridge.snippets() }.getOrDefault(emptyList())
+        }
+
+    suspend fun pin(text: String): String? = run("Couldn't pin that. Try again.") { bridge.pinSnippet(text) }
+
+    suspend fun unpin(id: String): String? = run("Couldn't unpin that. Try again.") { bridge.unpinSnippet(id) }
+
+    /** Null when the computer rang or stopped, otherwise why not. */
+    suspend fun ringComputer(
+        peer: TrustedPeer,
+        on: Boolean,
+    ): String? {
+        var done = false
+        return run("Couldn't reach your computer.") { done = bridge.ringComputer(peer.fingerprint, on) }
+            ?: "Your computer didn't ring.".takeUnless { done }
+    }
+
+    /** Null when the computer did it, otherwise why not. */
+    suspend fun act(
+        peer: TrustedPeer,
+        action: ComputerAction,
+    ): String? {
+        var done = false
+        return run("Couldn't reach your computer.") { done = bridge.actOnComputer(peer.fingerprint, action) }
+            ?: "Your computer didn't do that. Check that Control this computer is on for this phone there."
+                .takeUnless { done }
+    }
+
+    suspend fun sendImage(
+        peer: TrustedPeer,
+        png: ByteArray,
+    ): String? = run("Couldn't send the image.") { bridge.sendClipboardImage(peer.fingerprint, png) }
 
     suspend fun sendText(
         peer: TrustedPeer,
@@ -252,19 +270,36 @@ class AppState(private val bridge: ContinueCoreBridge) {
         return error
     }
 
-    suspend fun permission(
-        peer: String,
-        capability: Int,
-    ): PermissionGrant =
-        withContext(Dispatchers.IO) {
-            PermissionGrant.fromRaw(bridge.queryPermission(peer, capability))
+    /** Keeps text, or copies of files, for a computer that isn't connected; they go when it connects. */
+    suspend fun sendLater(
+        context: Context,
+        peer: TrustedPeer,
+        text: String?,
+        uris: List<Uri>,
+    ): String? =
+        run("Couldn't keep that to send later.") {
+            if (uris.isEmpty()) bridge.sendTextLater(peer.fingerprint, text.orEmpty())
+            for (uri in uris) {
+                val outbox = File(context.cacheDir, "outgoing/${UUID.randomUUID()}").apply { mkdirs() }
+                try {
+                    val copy = copyInto(File(outbox, displayName(context, uri)), context, uri)
+                    bridge.sendFileLater(peer.fingerprint, copy.absolutePath)
+                } finally {
+                    outbox.deleteRecursively()
+                }
+            }
         }
 
-    suspend fun setPermission(
+    suspend fun isAllowed(
         peer: String,
         capability: Int,
-        grant: PermissionGrant,
-    ): String? = run("Couldn't save that change. Try again.") { bridge.setPermission(peer, capability, grant.rawValue) }
+    ): Boolean = withContext(Dispatchers.IO) { bridge.isAllowed(peer, capability) }
+
+    suspend fun setAllowed(
+        peer: String,
+        capability: Int,
+        allowed: Boolean,
+    ): String? = run("Couldn't save that change. Try again.") { bridge.setAllowed(peer, capability, allowed) }
 
     private suspend fun run(
         fallback: String,
@@ -329,3 +364,5 @@ private fun displayName(
         }
     return name?.substringAfterLast('/')?.takeIf { it.isNotBlank() && it != "." && it != ".." } ?: "file"
 }
+
+private const val NEARBY_WAIT_MS = 2_500

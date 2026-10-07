@@ -3,11 +3,13 @@ package org.continueapp.android
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.RemoteInput
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import androidx.core.app.NotificationManagerCompat
 import org.continueapp.bridge.NotificationButton
 import org.continueapp.bridge.NotificationEvent
 import org.continueapp.bridge.PhoneNotification
@@ -21,7 +23,8 @@ class ContinueNotificationListener : NotificationListenerService() {
     /** The buttons of each forwarded notification, so a computer can press them later. */
     private val buttons = ConcurrentHashMap<String, List<Notification.Action>>()
 
-    private val core get() = (application as ContinueApplication).coreBridge
+    private val app get() = application as ContinueApplication
+    private val core get() = app.coreBridge
 
     override fun onListenerConnected() {
         active = this
@@ -37,6 +40,7 @@ class ContinueNotificationListener : NotificationListenerService() {
         // Ongoing ones are music, calls and the like; group summaries repeat their children.
         val skipped =
             sbn.packageName == packageName ||
+                sbn.packageName in app.mutedApps ||
                 sbn.isOngoing ||
                 notification.flags and Notification.FLAG_GROUP_SUMMARY != 0
         if (skipped) return
@@ -51,7 +55,7 @@ class ContinueNotificationListener : NotificationListenerService() {
             PhoneNotification(
                 id = sbn.key,
                 packageName = sbn.packageName,
-                appName = appName(sbn.packageName),
+                appName = appLabel(this, sbn.packageName),
                 title = title,
                 text = text,
                 postedAt = sbn.postTime,
@@ -72,6 +76,7 @@ class ContinueNotificationListener : NotificationListenerService() {
         when (event) {
             is NotificationEvent.Dismissed -> cancelNotification(event.notificationId)
             is NotificationEvent.Pressed -> press(event)
+            is NotificationEvent.Muted -> app.mutedApps += event.packageName
         }
     }
 
@@ -90,13 +95,6 @@ class ContinueNotificationListener : NotificationListenerService() {
         }
     }
 
-    private fun appName(packageName: String): String =
-        try {
-            packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
-        } catch (_: PackageManager.NameNotFoundException) {
-            packageName
-        }
-
     companion object {
         @Volatile
         private var active: ContinueNotificationListener? = null
@@ -107,3 +105,18 @@ class ContinueNotificationListener : NotificationListenerService() {
         }
     }
 }
+
+/** The app's name as the launcher shows it, or its package when it's gone. */
+fun appLabel(
+    context: Context,
+    packageName: String,
+): String =
+    try {
+        val packages = context.packageManager
+        packages.getApplicationLabel(packages.getApplicationInfo(packageName, 0)).toString()
+    } catch (_: PackageManager.NameNotFoundException) {
+        packageName
+    }
+
+fun hasNotificationAccess(context: Context): Boolean =
+    context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)

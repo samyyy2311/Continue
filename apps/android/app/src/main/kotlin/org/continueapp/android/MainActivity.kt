@@ -48,7 +48,6 @@ import org.continueapp.android.ui.screens.DeviceScreen
 import org.continueapp.android.ui.screens.DevicesScreen
 import org.continueapp.android.ui.screens.HomeScreen
 import org.continueapp.android.ui.screens.PairScreen
-import org.continueapp.android.ui.screens.PermissionPrompts
 import org.continueapp.android.ui.screens.SendNewCopies
 import org.continueapp.android.ui.screens.SettingsScreen
 import org.continueapp.android.ui.screens.SharePrompt
@@ -139,7 +138,6 @@ private fun ContinueApp(
     val scope = rememberCoroutineScope()
     val showMessage: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
 
-    PermissionPrompts(state.questions)
     SendNewCopies(state, onMessage = showMessage)
     BackHandler(enabled = overlay != null) { overlay = null }
     SharePrompt(shared, state, onMessage = showMessage) {
@@ -151,7 +149,7 @@ private fun ContinueApp(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
-            if (overlay == null && tab != Tab.Settings) {
+            if (overlay == null && (tab == Tab.Devices || state.peers.isEmpty())) {
                 ExtendedFloatingActionButton(
                     onClick = { overlay = Overlay.Pair },
                     icon = { Icon(Icons.Outlined.QrCodeScanner, contentDescription = null) },
@@ -180,7 +178,7 @@ private fun ContinueApp(
             val content = Modifier.fillMaxSize().widthIn(max = 840.dp)
             when (val current = overlay) {
                 Overlay.Pair ->
-                    PairScreen(onPair = state::pair, onDone = { overlay = null }, modifier = content)
+                    PairScreen(state = state, onDone = { overlay = null }, modifier = content)
                 is Overlay.Device -> {
                     val peer = state.peers.firstOrNull { it.fingerprint == current.fingerprint }
                     if (peer == null) {

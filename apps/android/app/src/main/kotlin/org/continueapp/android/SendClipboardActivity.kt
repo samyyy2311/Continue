@@ -24,7 +24,7 @@ class SendClipboardActivity : ComponentActivity() {
                 if (copy == null) {
                     "There's nothing copied to send."
                 } else {
-                    val (sent, message) = app.state.sendToConnected(copy.text)
+                    val (sent, message) = app.state.sendToConnected(this@SendClipboardActivity, copy)
                     if (sent) markSent(app, copy)
                     message
                 }
