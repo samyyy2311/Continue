@@ -66,20 +66,17 @@ class ContinueCoreBridgeTest {
     }
 
     @Test
-    fun permissionsLifecycle() {
+    fun everythingIsAllowedUntilTurnedOff() {
         bridge.initCore(":memory:")
         val peerFp = "peer-test-123"
+        assertTrue(bridge.isAllowed(peerFp, Capability.FILE_TRANSFER.id))
 
-        val defaultGrant = bridge.queryPermission(peerFp, Capability.FILE_TRANSFER.id)
-        assertEquals(PermissionGrant.ASK.rawValue, defaultGrant)
+        bridge.setAllowed(peerFp, Capability.FILE_TRANSFER.id, false)
+        assertFalse(bridge.isAllowed(peerFp, Capability.FILE_TRANSFER.id))
+        assertTrue(bridge.isAllowed(peerFp, Capability.CLIPBOARD.id))
 
-        bridge.setPermission(peerFp, Capability.FILE_TRANSFER.id, PermissionGrant.ALLOW.rawValue)
-        val updatedGrant = bridge.queryPermission(peerFp, Capability.FILE_TRANSFER.id)
-        assertEquals(PermissionGrant.ALLOW.rawValue, updatedGrant)
-
-        bridge.setPermission(peerFp, Capability.FILE_TRANSFER.id, PermissionGrant.ASK.rawValue)
-        val revokedGrant = bridge.queryPermission(peerFp, Capability.FILE_TRANSFER.id)
-        assertEquals(PermissionGrant.ASK.rawValue, revokedGrant)
+        bridge.setAllowed(peerFp, Capability.FILE_TRANSFER.id, true)
+        assertTrue(bridge.isAllowed(peerFp, Capability.FILE_TRANSFER.id))
     }
 
     @Test
