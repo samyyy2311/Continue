@@ -59,37 +59,6 @@ fun PairScreen(
     var message by remember { mutableStateOf<String?>(null) }
     // Changing this restarts the scanner after a failed attempt.
     var scanAttempt by remember { mutableIntStateOf(0) }
-    var nearby by remember { mutableStateOf(emptyList<NearbyComputer>()) }
-    // The computer picked from Nearby and the digits to compare with its screen.
-    var comparing by remember { mutableStateOf<Pair<String, String>?>(null) }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            nearby = state.nearbyComputers()
-            delay(NEARBY_REFRESH_MS)
-        }
-    }
-
-    fun pairNearby(computer: NearbyComputer) {
-        pairing = true
-        message = null
-        scope.launch {
-            state
-                .pairNearby(computer.code)
-                .onSuccess { digits -> comparing = computer.name to digits }
-                .onFailure { message = "Couldn't pair with ${computer.name}. Try again." }
-            pairing = false
-        }
-    }
-
-    fun answer(accept: Boolean) {
-        comparing = null
-        scope.launch {
-            val error = state.confirmNearbyPairing(accept)
-            if (!accept) return@launch
-            if (error == null) onDone() else message = error
-        }
-    }
 
     val requestCamera =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -143,30 +112,8 @@ fun PairScreen(
         ) {
             when {
                 pairing -> Text("Pairing…", style = MaterialTheme.typography.titleMedium)
-                scanning ->
-                    key(scanAttempt) {
-                        QrScanner(
-                            onScanned = ::pair,
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(1f)
-                                    .clip(MaterialTheme.shapes.large)
-                                    .border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.large),
-                        )
-                    }
-                else -> {
-                    OutlinedTextField(
-                        value = typedCode,
-                        onValueChange = { typedCode = it },
-                        label = { Text("Pairing code") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    ActionButton(onClick = { pair(typedCode.trim()) }, enabled = typedCode.isNotBlank()) {
-                        Text("Pair")
-                    }
-                }
+                scanning -> key(scanAttempt) { Scanner(onScanned = ::pair) }
+                else -> TypedCode(typedCode, onChange = { typedCode = it }, onPair = { pair(typedCode.trim()) })
             }
             message?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
@@ -180,32 +127,136 @@ fun PairScreen(
             Text(if (scanning) "Type the code instead" else "Scan with the camera")
         }
 
-        if (nearby.isNotEmpty()) {
-            Text("Nearby", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-            nearby.forEach { computer ->
-                TextButton(onClick = { pairNearby(computer) }, enabled = !pairing) {
-                    Icon(Icons.Outlined.Laptop, contentDescription = null)
-                    Text(computer.name, modifier = Modifier.padding(start = 12.dp))
-                }
-            }
-        }
-    }
-
-    comparing?.let { (name, digits) ->
-        AlertDialog(
-            onDismissRequest = { answer(false) },
-            title = { Text("Check $name") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Pair if it shows the same six digits:")
-                    Text("${digits.take(3)} ${digits.drop(3)}", style = MaterialTheme.typography.displaySmall)
-                }
+        NearbyPairing(
+            state = state,
+            pairing = pairing,
+            onPairing = { busy ->
+                pairing = busy
+                if (busy) message = null
             },
-            confirmButton = { TextButton(onClick = { answer(true) }) { Text("Pair") } },
-            dismissButton = { TextButton(onClick = { answer(false) }) { Text("Not mine") } },
+            onMessage = { message = it },
+            onDone = onDone,
         )
     }
 }
 
+/** Lists computers nearby; picking one pairs with it once the person confirms the six digits match. */
+@Composable
+private fun NearbyPairing(
+    state: AppState,
+    pairing: Boolean,
+    onPairing: (Boolean) -> Unit,
+    onMessage: (String) -> Unit,
+    onDone: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var nearby by remember { mutableStateOf(emptyList<NearbyComputer>()) }
+    // The computer picked and the digits to compare with its screen.
+    var comparing by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            nearby = state.nearbyComputers()
+            delay(NEARBY_REFRESH_MS)
+        }
+    }
+
+    fun pick(computer: NearbyComputer) {
+        onPairing(true)
+        scope.launch {
+            state
+                .pairNearby(computer.code)
+                .onSuccess { digits -> comparing = computer.name to digits }
+                .onFailure { onMessage("Couldn't pair with ${computer.name}. Try again.") }
+            onPairing(false)
+        }
+    }
+
+    fun answer(accept: Boolean) {
+        comparing = null
+        scope.launch {
+            val error = state.confirmNearbyPairing(accept)
+            if (!accept) return@launch
+            if (error == null) onDone() else onMessage(error)
+        }
+    }
+
+    Nearby(nearby, enabled = !pairing, onPick = ::pick)
+    comparing?.let { (name, digits) -> CompareDigits(name, digits, ::answer) }
+}
+
+@Composable
+private fun Scanner(onScanned: (String) -> Unit) {
+    QrScanner(
+        onScanned = onScanned,
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(MaterialTheme.shapes.large)
+                .border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.large),
+    )
+}
+
+@Composable
+private fun TypedCode(
+    code: String,
+    onChange: (String) -> Unit,
+    onPair: () -> Unit,
+) {
+    OutlinedTextField(
+        value = code,
+        onValueChange = onChange,
+        label = { Text("Pairing code") },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+    )
+    ActionButton(onClick = onPair, enabled = code.isNotBlank()) {
+        Text("Pair")
+    }
+}
+
+@Composable
+private fun Nearby(
+    computers: List<NearbyComputer>,
+    enabled: Boolean,
+    onPick: (NearbyComputer) -> Unit,
+) {
+    if (computers.isEmpty()) return
+    Text("Nearby", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+    computers.forEach { computer ->
+        TextButton(onClick = { onPick(computer) }, enabled = enabled) {
+            Icon(Icons.Outlined.Laptop, contentDescription = null)
+            Text(computer.name, modifier = Modifier.padding(start = 12.dp))
+        }
+    }
+}
+
+/** Asks whether [name] shows the same [digits], in two groups of three so they're easier to compare. */
+@Composable
+private fun CompareDigits(
+    name: String,
+    digits: String,
+    onAnswer: (Boolean) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { onAnswer(false) },
+        title = { Text("Check $name") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Pair if it shows the same six digits:")
+                Text(
+                    "${digits.take(DIGIT_GROUP)} ${digits.drop(DIGIT_GROUP)}",
+                    style = MaterialTheme.typography.displaySmall,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onAnswer(true) }) { Text("Pair") } },
+        dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text("Not mine") } },
+    )
+}
+
 /** How often the list of computers nearby is looked for again. */
 private const val NEARBY_REFRESH_MS = 1_500L
+
+private const val DIGIT_GROUP = 3

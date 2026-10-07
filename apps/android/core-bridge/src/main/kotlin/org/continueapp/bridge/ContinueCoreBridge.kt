@@ -87,6 +87,16 @@ import org.continueapp.bridge.ffi.unpinSnippet as coreUnpinSnippet
 
 private const val SECONDS_DIVISOR = 1000L
 private const val QR_SUFFIX_LENGTH = 4
+private const val PRESENCE_TOKEN_BYTES = 8
+
+/** The parts of the phone the core hands to computers: its screen, camera, media, ringer and pointer. */
+class PhoneFeatures(
+    val screen: ScreenShare,
+    val camera: CameraShare,
+    val media: MediaRemote,
+    val ringer: Ringer,
+    val pointer: PointerTarget,
+)
 
 @Suppress("TooManyFunctions")
 interface ContinueCoreBridge {
@@ -281,12 +291,9 @@ interface ContinueCoreBridge {
     companion object {
         fun create(
             context: Context,
-            screen: ScreenShare,
-            camera: CameraShare,
-            media: MediaRemote,
-            ringer: Ringer,
-            pointer: PointerTarget,
-        ): ContinueCoreBridge = NativeContinueCoreBridge(context, screen, camera, media, ringer, pointer)
+            phone: PhoneFeatures,
+        ): ContinueCoreBridge =
+            NativeContinueCoreBridge(context, phone.screen, phone.camera, phone.media, phone.ringer, phone.pointer)
 
         fun mock(): MockContinueCoreBridge = MockContinueCoreBridge()
     }
@@ -512,7 +519,7 @@ class MockContinueCoreBridge : ContinueCoreBridge {
 
     override fun presenceToken(): ByteArray {
         checkInitialized()
-        return ByteArray(8)
+        return ByteArray(PRESENCE_TOKEN_BYTES)
     }
 
     private val pinned = mutableListOf<Snippet>()
@@ -859,16 +866,21 @@ private fun HistoryEntryFfi.toHistoryEntry() =
     )
 
 private fun ReceivedFfi.toReceived(): Received {
-    image?.let { return ReceivedImage(peerFingerprint, peerName, it) }
-    val path = filePath ?: return ReceivedText(historyId, peerFingerprint, peerName, text.orEmpty())
-    return ReceivedFile(
-        historyId = historyId,
-        peerFingerprint = peerFingerprint,
-        peerName = peerName,
-        path = path,
-        name = fileName ?: path.substringAfterLast('/'),
-        size = size.toLong(),
-    )
+    val image = image
+    val path = filePath
+    return when {
+        image != null -> ReceivedImage(peerFingerprint, peerName, image)
+        path == null -> ReceivedText(historyId, peerFingerprint, peerName, text.orEmpty())
+        else ->
+            ReceivedFile(
+                historyId = historyId,
+                peerFingerprint = peerFingerprint,
+                peerName = peerName,
+                path = path,
+                name = fileName ?: path.substringAfterLast('/'),
+                size = size.toLong(),
+            )
+    }
 }
 
 /** Runs a core call, turning its errors into the bridge's own exception types. */

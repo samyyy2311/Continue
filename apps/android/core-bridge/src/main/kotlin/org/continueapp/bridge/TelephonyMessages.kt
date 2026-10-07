@@ -17,6 +17,9 @@ import org.continueapp.bridge.ffi.TextMessageFfi
 /** How far back conversations are gathered from, so a long history isn't read every time. */
 private const val SCAN_LIMIT = 2000
 
+/** Numbers that end the same are one number written two ways, like +1 555 0100 and 555 0100. */
+private const val SAME_NUMBER_DIGITS = 9
+
 val MESSAGES_PERMISSIONS =
     arrayOf(Manifest.permission.READ_SMS, Manifest.permission.SEND_SMS, Manifest.permission.READ_CONTACTS)
 
@@ -33,6 +36,9 @@ internal class TelephonyMessages(
         val latest = linkedMapOf<Long, ConversationFfi>()
         val columns = arrayOf(Sms.THREAD_ID, Sms.ADDRESS, Sms.BODY, Sms.DATE, Sms.TYPE, Sms.READ)
         context.contentResolver.query(Sms.CONTENT_URI, columns, null, null, "${Sms.DATE} DESC")?.use { rows ->
+            val date = rows.getColumnIndexOrThrow(Sms.DATE)
+            val type = rows.getColumnIndexOrThrow(Sms.TYPE)
+            val read = rows.getColumnIndexOrThrow(Sms.READ)
             var scanned = 0
             while (latest.size < limit.toInt() && scanned++ < SCAN_LIMIT && rows.moveToNext()) {
                 val thread = rows.getLong(0)
@@ -44,8 +50,8 @@ internal class TelephonyMessages(
                         address = address,
                         name = contactName(context, address).orEmpty(),
                         snippet = rows.getString(2).orEmpty(),
-                        at = rows.getLong(3).toULong(),
-                        unread = rows.getInt(4) == Sms.MESSAGE_TYPE_INBOX && rows.getInt(5) == 0,
+                        at = rows.getLong(date).toULong(),
+                        unread = rows.getInt(type) == Sms.MESSAGE_TYPE_INBOX && rows.getInt(read) == 0,
                     )
             }
         }
@@ -62,13 +68,14 @@ internal class TelephonyMessages(
         context.contentResolver
             .query(Sms.CONTENT_URI, columns, "${Sms.THREAD_ID} = ?", arrayOf(id), "${Sms.DATE} DESC")
             ?.use { rows ->
+                val type = rows.getColumnIndexOrThrow(Sms.TYPE)
                 while (texts.size < limit.toInt() && rows.moveToNext()) {
                     texts +=
                         TextMessageFfi(
                             id = rows.getLong(0).toString(),
                             body = rows.getString(1).orEmpty(),
                             at = rows.getLong(2).toULong(),
-                            outgoing = rows.getInt(3) != Sms.MESSAGE_TYPE_INBOX,
+                            outgoing = rows.getInt(type) != Sms.MESSAGE_TYPE_INBOX,
                         )
                 }
             }
@@ -109,25 +116,24 @@ internal class TelephonyMessages(
         // A contact can list the same number more than once, written differently.
         val seen = mutableSetOf<String>()
         context.contentResolver.query(Phone.CONTENT_URI, columns, null, null, order)?.use { cursor ->
+            val photoUri = cursor.getColumnIndexOrThrow(Phone.PHOTO_THUMBNAIL_URI)
             while (contacts.size < limit.toInt() && cursor.moveToNext()) {
-                val number = cursor.getString(1) ?: continue
-                if (!seen.add(number.filter(Char::isDigit).takeLast(9))) continue
-                val photo =
-                    cursor.getString(3)?.let { uri ->
-                        runCatching { context.contentResolver.openInputStream(Uri.parse(uri))?.use { it.readBytes() } }
-                            .getOrNull()
-                    }
+                val number = cursor.getString(1)
+                if (number == null || !seen.add(number.filter(Char::isDigit).takeLast(SAME_NUMBER_DIGITS))) continue
                 contacts +=
                     ContactFfi(
                         name = cursor.getString(0).orEmpty(),
                         number = number,
                         favorite = cursor.getInt(2) == 1,
-                        photo = photo ?: ByteArray(0),
+                        photo = cursor.getString(photoUri)?.let(::readPhoto) ?: ByteArray(0),
                     )
             }
         }
         return contacts
     }
+
+    private fun readPhoto(uri: String): ByteArray? =
+        runCatching { context.contentResolver.openInputStream(Uri.parse(uri))?.use { it.readBytes() } }.getOrNull()
 }
 
 /** Null without contacts permission or a match. */

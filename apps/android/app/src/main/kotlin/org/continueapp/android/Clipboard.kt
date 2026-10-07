@@ -54,8 +54,9 @@ class Copy(
 /** Read only while Continue is on screen, as Android requires. */
 fun readCopy(context: Context): Copy? {
     val clipboard = context.getSystemService(ClipboardManager::class.java)
-    val description = clipboard?.primaryClipDescription ?: return null
-    val item = clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0) ?: return null
+    val description = clipboard?.primaryClipDescription
+    val item = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+    if (description == null || item == null) return null
     val text = item.text?.toString()?.takeIf { it.isNotBlank() }
     val image = item.uri?.takeIf { description.hasMimeType("image/*") }
     return if (text != null || image != null) Copy(text, image, description.timestamp) else null

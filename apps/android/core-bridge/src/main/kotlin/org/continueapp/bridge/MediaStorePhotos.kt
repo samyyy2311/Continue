@@ -73,10 +73,11 @@ internal class MediaStorePhotos(
         val order = "${MediaStore.Images.Media.DATE_ADDED} DESC"
         val photos = mutableListOf<PhotoFfi>()
         context.contentResolver.query(IMAGES, columns, selection, null, order)?.use { rows ->
+            val added = rows.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
             while (photos.size < limit && rows.moveToNext()) {
                 val id = rows.getLong(0)
                 val thumbnail = thumbnail(id) ?: continue
-                val takenAt = if (rows.isNull(2)) rows.getLong(3) * MS_PER_SECOND else rows.getLong(2)
+                val takenAt = if (rows.isNull(2)) rows.getLong(added) * MS_PER_SECOND else rows.getLong(2)
                 photos += PhotoFfi(id.toString(), rows.getString(1).orEmpty(), takenAt.toULong(), thumbnail)
             }
         }

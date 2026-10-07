@@ -19,3 +19,6 @@ style:
     ignoreNamedArgument: true
     ignoreEnums: true
     ignoreConstantDeclaration: true
+  ReturnCount:
+    # Early exits like `?: return null` read better than nesting.
+    excludeGuardClauses: true

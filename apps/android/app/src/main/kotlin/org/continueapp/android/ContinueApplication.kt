@@ -30,11 +30,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.continueapp.android.ui.theme.ThemeMode
 import org.continueapp.bridge.ContinueCoreBridge
+import org.continueapp.bridge.PhoneFeatures
 import org.continueapp.bridge.canReadFiles
 import org.continueapp.bridge.canReadMessages
 import org.continueapp.bridge.canSeeCalls
 import java.io.ByteArrayOutputStream
 
+@Suppress("TooManyFunctions")
 class ContinueApplication : Application() {
     lateinit var coreBridge: ContinueCoreBridge
         private set
@@ -151,11 +153,7 @@ class ContinueApplication : Application() {
         coreBridge =
             ContinueCoreBridge.create(
                 this,
-                phoneScreen,
-                phoneCamera,
-                phoneMedia,
-                phoneRinger,
-                ControlService.pointerTarget,
+                PhoneFeatures(phoneScreen, phoneCamera, phoneMedia, phoneRinger, ControlService.pointerTarget),
             )
         val dbFile = getDatabasePath("continue_android.db")
         dbFile.parentFile?.mkdirs()

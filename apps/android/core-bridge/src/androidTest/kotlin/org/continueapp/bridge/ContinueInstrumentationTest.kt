@@ -23,7 +23,11 @@ class ContinueInstrumentationTest {
         val dataDir = File(context.cacheDir, "core-test").apply { deleteRecursively() }
         dataDir.mkdirs()
         val dbPath = File(dataDir, "continue.db").absolutePath
-        val bridge = ContinueCoreBridge.create(context, NoScreen, NoCamera, { false }, { false }, NoPointer)
+        val bridge =
+            ContinueCoreBridge.create(
+                context,
+                PhoneFeatures(NoScreen, NoCamera, { false }, { false }, NoPointer),
+            )
 
         bridge.initCore(dbPath)
         val fingerprint = bridge.getDeviceFingerprint()
@@ -39,7 +43,11 @@ class ContinueInstrumentationTest {
     @Test
     fun nativeCoreStartsAndStopsDiscovery() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val bridge = ContinueCoreBridge.create(context, NoScreen, NoCamera, { false }, { false }, NoPointer)
+        val bridge =
+            ContinueCoreBridge.create(
+                context,
+                PhoneFeatures(NoScreen, NoCamera, { false }, { false }, NoPointer),
+            )
         bridge.initCore(File(context.cacheDir, "discovery-test.db").absolutePath)
 
         bridge.startDiscovery()
@@ -50,7 +58,11 @@ class ContinueInstrumentationTest {
     @Test
     fun nativeCoreReportsInvalidQrCodes() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val bridge = ContinueCoreBridge.create(context, NoScreen, NoCamera, { false }, { false }, NoPointer)
+        val bridge =
+            ContinueCoreBridge.create(
+                context,
+                PhoneFeatures(NoScreen, NoCamera, { false }, { false }, NoPointer),
+            )
         bridge.initCore(File(context.cacheDir, "qr-test.db").absolutePath)
 
         assertThrows(ContinueException.InvalidQrException::class.java) {

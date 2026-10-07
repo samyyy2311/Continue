@@ -125,6 +125,7 @@ private fun HistoryEntry.toTransfer() =
  * What the screens show, read from the core. Every call into the core runs off the main
  * thread, and failures come back as a message to show rather than an exception.
  */
+@Suppress("TooManyFunctions")
 class AppState(private val bridge: ContinueCoreBridge) {
     var peers by mutableStateOf<List<TrustedPeer>>(emptyList())
         private set

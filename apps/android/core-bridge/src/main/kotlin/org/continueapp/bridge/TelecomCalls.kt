@@ -62,9 +62,10 @@ internal class TelecomCalls(
 
     override fun dial(number: String): Boolean {
         val allowed = context.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
-        if (!allowed || number.isBlank()) return false
+        val telecom = telecom
+        if (!allowed || number.isBlank() || telecom == null) return false
         @Suppress("MissingPermission")
-        telecom?.placeCall(Uri.fromParts("tel", number, null), Bundle()) ?: return false
+        telecom.placeCall(Uri.fromParts("tel", number, null), Bundle())
         return true
     }
 }

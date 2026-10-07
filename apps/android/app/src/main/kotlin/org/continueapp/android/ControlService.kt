@@ -36,6 +36,7 @@ private const val SCROLL_STEP_DP = 60
 private const val SCROLL_MS = 120L
 
 /** Performs the computer's input through accessibility gestures, the only route without system privileges. */
+@Suppress("TooManyFunctions")
 class ControlService : AccessibilityService() {
     override fun onServiceConnected() {
         current = this

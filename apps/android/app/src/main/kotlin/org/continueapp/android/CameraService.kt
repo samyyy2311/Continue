@@ -35,6 +35,13 @@ private const val FRAMING_ZOOM = 1.6f
 private const val FRAMING_EASE = 0.15f
 private const val FRAMING_EVERY_MS = 100L
 
+private const val WIDE_WIDTH = 16
+private const val WIDE_HEIGHT = 9
+
+/** Asked for when the camera lists no size that fits. */
+private val FALLBACK_SIZE = Size(1280, 720)
+
+@Suppress("TooManyFunctions")
 class CameraService : Service() {
     private val thread = HandlerThread("camera").apply { start() }
     private val handler = Handler(thread.looper)
@@ -171,13 +178,9 @@ class CameraService : Service() {
             val now = SystemClock.elapsedRealtime()
             if (now - lastFraming < FRAMING_EVERY_MS) return
             lastFraming = now
-            val face = result.get(TotalCaptureResult.STATISTICS_FACES)?.maxByOrNull { it.bounds.width() } ?: return
-            val sensor =
-                camera?.id?.let {
-                    getSystemService(CameraManager::class.java)
-                        .getCameraCharacteristics(it)
-                        .get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
-                } ?: return
+            val face = result.get(TotalCaptureResult.STATISTICS_FACES)?.maxByOrNull { it.bounds.width() }
+            val sensor = activeArray()
+            if (face == null || sensor == null) return
             val (faceX, faceY) = face.bounds.exactCenterX() to face.bounds.exactCenterY()
             val (x, y) = focus ?: (faceX to faceY)
             val eased = x + (faceX - x) * FRAMING_EASE to y + (faceY - y) * FRAMING_EASE
@@ -185,6 +188,14 @@ class CameraService : Service() {
             repeat(crop(sensor, eased))
         }
     }
+
+    /** The part of the sensor the camera records from, which crops are made within. */
+    private fun activeArray(): Rect? =
+        camera?.id?.let {
+            getSystemService(CameraManager::class.java)
+                .getCameraCharacteristics(it)
+                .get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+        }
 
     private fun close() {
         session?.close()
@@ -236,8 +247,8 @@ private fun cameraSize(
 ): Size {
     val sizes = about.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)?.getOutputSizes(MediaCodec::class.java)
     val fitting = sizes.orEmpty().filter { maxOf(it.width, it.height) <= maxSize }
-    val wide = fitting.filter { it.width * 9 == it.height * 16 }
-    return (wide.ifEmpty { fitting }).maxByOrNull { it.width * it.height } ?: Size(1280, 720)
+    val wide = fitting.filter { it.width * WIDE_HEIGHT == it.height * WIDE_WIDTH }
+    return (wide.ifEmpty { fitting }).maxByOrNull { it.width * it.height } ?: FALLBACK_SIZE
 }
 
 private fun crop(

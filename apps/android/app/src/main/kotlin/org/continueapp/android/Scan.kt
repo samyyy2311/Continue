@@ -19,6 +19,10 @@ private const val PAGE_LONG_SIDE = 842
 /** Enough for print-sharp text without a huge file. */
 private const val LONGEST_SIDE_PX = 2400
 
+private const val QUARTER_TURN = 90f
+private const val HALF_TURN = 180f
+private const val THREE_QUARTER_TURN = 270f
+
 /** Where the camera app saves a photo for [scanPdf]. Shared through the app's FileProvider. */
 fun scanPhotoUri(context: Context): Uri {
     val photo = File(context.cacheDir, "scans").apply { mkdirs() }.resolve("photo.jpg")
@@ -47,26 +51,25 @@ fun scanPdf(context: Context): Uri? {
 }
 
 private fun uprightPhoto(photo: File): Bitmap? {
+    val bitmap = decodeScaled(photo) ?: return null
+    val degrees =
+        when (ExifInterface(photo.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, 0)) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> QUARTER_TURN
+            ExifInterface.ORIENTATION_ROTATE_180 -> HALF_TURN
+            ExifInterface.ORIENTATION_ROTATE_270 -> THREE_QUARTER_TURN
+            else -> 0f
+        }
+    if (degrees == 0f) return bitmap
+    val turn = Matrix().apply { postRotate(degrees) }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, turn, true)
+}
+
+/** Decodes at the largest power-of-two step down that keeps the long side at least [LONGEST_SIDE_PX]. */
+private fun decodeScaled(photo: File): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(photo.path, bounds)
     if (bounds.outWidth <= 0) return null
     var sample = 1
     while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= LONGEST_SIDE_PX) sample *= 2
-    val bitmap =
-        BitmapFactory.decodeFile(
-            photo.path,
-            BitmapFactory.Options().apply {
-                inSampleSize = sample
-            },
-        ) ?: return null
-    val orientation = ExifInterface(photo.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, 0)
-    val degrees =
-        when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> 90
-            ExifInterface.ORIENTATION_ROTATE_180 -> 180
-            ExifInterface.ORIENTATION_ROTATE_270 -> 270
-            else -> return bitmap
-        }
-    val turn = Matrix().apply { postRotate(degrees.toFloat()) }
-    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, turn, true)
+    return BitmapFactory.decodeFile(photo.path, BitmapFactory.Options().apply { inSampleSize = sample })
 }
