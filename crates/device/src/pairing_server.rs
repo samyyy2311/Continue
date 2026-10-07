@@ -4,24 +4,24 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use pairing::{PairingError, TrustedPeer};
+use pairing::PairingError;
 use tokio::sync::oneshot;
 use transport::TransportError;
 
-use crate::Device;
+use crate::{Device, PendingPair};
 
 /// A code shown for another device to pair with, and the endpoint waiting for it. Dropping
 /// it stops waiting.
 pub struct PairingServer {
     pub code: String,
     endpoint: quinn::Endpoint,
-    result: oneshot::Receiver<Result<TrustedPeer, PairingError>>,
+    result: oneshot::Receiver<Result<PendingPair, PairingError>>,
 }
 
 impl Device {
     /// Waits on `port` (0 for any) for a device to pair with the returned code, which tells it
-    /// to come to `advertise(port)`. A device that pairs is trusted and dialed straight away,
-    /// whether or not anyone is still waiting on the result.
+    /// to come to `advertise(port)`. The device that pairs is only trusted once the result is
+    /// accepted, after the person has compared its code with the phone's.
     /// Must be called inside the Tokio runtime the device runs on.
     pub fn start_pairing(
         &self,
@@ -58,11 +58,14 @@ impl Device {
                     .lock()
                     .unwrap()
                     .ok_or(PairingError::SpkiMismatch)?;
-                let peer = initiator
+                let pending = initiator
                     .complete_handshake(&mut send, &mut recv, their_key)
                     .await?;
-                device.paired(&peer, connection.remote_address().ip());
-                Ok(peer)
+                Ok(PendingPair {
+                    device,
+                    pending,
+                    ip: connection.remote_address().ip(),
+                })
             };
             let _ = done.send(paired.await);
         });
@@ -76,8 +79,8 @@ impl Device {
 }
 
 impl PairingServer {
-    /// The device that paired, once one has.
-    pub async fn finish(mut self) -> Result<TrustedPeer, PairingError> {
+    /// The device that paired, once one has, waiting to be accepted.
+    pub async fn finish(mut self) -> Result<PendingPair, PairingError> {
         (&mut self.result)
             .await
             .unwrap_or_else(|_| Err(failed("Pairing was cancelled")))

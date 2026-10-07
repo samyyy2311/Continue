@@ -10,8 +10,8 @@ use tracing::{debug, warn};
 use clipboard::ClipboardSynchronizer;
 use limits::KEEPALIVE_INTERVAL_SECS;
 use protocol::v1::{
-    session_envelope::Body, DeviceInfo, DeviceStatus, Disconnect, DisconnectReason, Ping, Pong,
-    SessionEnvelope,
+    session_envelope::Body, DeviceInfo, DeviceLook, DeviceStatus, Disconnect, DisconnectReason,
+    Ping, Pong, SessionEnvelope,
 };
 use protocol::CapabilityId;
 
@@ -48,6 +48,7 @@ pub async fn read_capability_stream_header(
 pub enum PeerUpdate {
     Info(DeviceInfo),
     Status(DeviceStatus),
+    Look(DeviceLook),
 }
 
 pub type OnPeerUpdate = Arc<dyn Fn(PeerUpdate) + Send + Sync>;
@@ -262,6 +263,11 @@ impl SessionMultiplexer {
                 Some(Body::DeviceStatus(status)) => {
                     if let Some(on_update) = on_update {
                         on_update(PeerUpdate::Status(status));
+                    }
+                }
+                Some(Body::DeviceLook(look)) => {
+                    if let Some(on_update) = on_update {
+                        on_update(PeerUpdate::Look(look));
                     }
                 }
                 _ => {}

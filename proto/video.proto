@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Answers a screen or camera request: one VideoStart, then a VideoFrame per frame.
+message VideoStart {
+  // False when the device declined or can't share it.
+  bool started = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  // Degrees to turn each frame clockwise to show it upright.
+  uint32 rotation = 4;
+}
+
+// H.264 in Annex B form. A key frame carries the stream's parameter sets, so decoding can start
+// from any of them.
+message VideoFrame {
+  bytes data = 1;
+  bool key = 2;
+  // On key frames: degrees to turn this frame and the ones after it clockwise to show them
+  // upright, which changes when the device turns or switches cameras.
+  uint32 rotation = 3;
+  // Sound instead of a picture: 16-bit stereo PCM at 48 kHz, what's playing on the screen's
+  // device. Frames with sound leave `data` empty.
+  bytes audio = 4;
+}

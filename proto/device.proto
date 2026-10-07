@@ -38,4 +38,17 @@ message DeviceInfo {
 message DeviceStatus {
   uint32 battery_percent = 1; // 0 to 100
   bool   charging        = 2;
+  // Signal bars from 0 to 4, absent without a mobile network or Wi-Fi.
+  optional uint32 cell_bars = 3;
+  optional uint32 wifi_bars = 4;
+  string carrier = 5; // the mobile network's name, empty without one
+  string network = 6; // the mobile network's kind, such as "5G" or "LTE", empty when unknown
+}
+
+// How a device looks, so the other side can draw it.
+message DeviceLook {
+  // The wallpaper's main colour as 0xRRGGBB, or 0 when it isn't known.
+  uint32 wallpaper_color = 1;
+  // A small JPEG of the wallpaper, when the device can read it.
+  bytes wallpaper = 2;
 }

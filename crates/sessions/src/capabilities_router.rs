@@ -3,47 +3,31 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::{oneshot, Notify};
-use tracing::{debug, error, info, warn};
+use tokio::sync::Notify;
+use tracing::{debug, error, info};
 
 use capabilities::CapabilityQuery;
 use clipboard::{ClipboardAck, ClipboardFormat, ClipboardUpdate};
 use notifications::Body as NotificationBody;
+use protocol::v1::Photo;
 use protocol::CapabilityId;
 use transfer::{receive_file, send_file, ReceivedFile};
+use transport::{read_msg, write_msg, TransportError};
 
+use crate::actions::{serve_actions, ComputerActions};
+use crate::calls::{serve_calls, CallControl};
 use crate::device::{PeerDevice, ThisDevice};
+use crate::files::serve_files;
+use crate::find::{serve_ring, Ringer};
 use crate::incoming::{IncomingFiles, SaveFolder};
+use crate::media::{serve_media, MediaControl};
+use crate::messages::{serve_messages, MessageStore};
 use crate::multiplexer::{OnPeerUpdate, PeerUpdate, SessionMultiplexer};
-
-/// How long a question waits for the user before it counts as declined.
-pub const PROMPT_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Something a device set to Ask is trying to send.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PermissionRequest {
-    pub peer: String,
-    pub capability: CapabilityId,
-    /// The file name, for files.
-    pub detail: Option<String>,
-    /// When the core stops waiting and declines. Apps should drop the question then too.
-    pub deadline: tokio::time::Instant,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PermissionDecision {
-    /// Just this once.
-    Allow,
-    /// This one, and everything of this kind from the device from now on.
-    AlwaysAllow,
-    Decline,
-}
-
-/// Shows a request to the user and hands back a receiver for the answer. Dropping the sender
-/// counts as declining.
-pub type PermissionPrompt =
-    Arc<dyn Fn(PermissionRequest) -> oneshot::Receiver<PermissionDecision> + Send + Sync>;
+use crate::photos::{serve_photos, PhotoLibrary};
+use crate::pointer::{serve_pointer, PointerTarget};
+use crate::search::{serve_search, PhoneSearch};
+use crate::snippets::{serve_snippets, SnippetStore};
+use crate::video::{serve_video, CameraSource, ScreenSource, VideoFeed};
 
 /// Called with the sender's fingerprint and what it sent.
 pub type OnReceived<T> = Arc<dyn Fn(&str, T) + Send + Sync>;
@@ -64,11 +48,30 @@ pub struct SessionCapabilityHandlers {
     pub on_device_info: Option<OnReceived<PeerDevice>>,
     /// Called with the peer's battery when a session starts and each time it changes.
     pub on_device_status: Option<OnReceived<protocol::v1::DeviceStatus>>,
+    pub on_device_look: Option<OnReceived<protocol::v1::DeviceLook>>,
+    pub photo_library: Option<Arc<dyn PhotoLibrary>>,
+    pub on_photo_taken: Option<OnReceived<Photo>>,
+    pub message_store: Option<Arc<dyn MessageStore>>,
+    pub on_messages_changed: Option<OnReceived<()>>,
+    pub shared_folder: Option<PathBuf>,
+    pub call_control: Option<Arc<dyn CallControl>>,
+    pub on_call: Option<OnReceived<protocol::v1::Call>>,
+    pub media_control: Option<Arc<dyn MediaControl>>,
+    pub on_now_playing: Option<OnReceived<protocol::v1::NowPlaying>>,
+    pub ringer: Option<Arc<dyn Ringer>>,
+    pub screen_source: Option<Arc<ScreenSource>>,
+    pub screen_feed: VideoFeed,
+    pub camera_source: Option<Arc<CameraSource>>,
+    pub camera_feed: VideoFeed,
+    pub pointer_target: Option<Arc<dyn PointerTarget>>,
+    pub computer_actions: Option<Arc<dyn ComputerActions>>,
+    pub phone_search: Option<Arc<dyn PhoneSearch>>,
+    /// Set by the device, which keeps snippets in its store.
+    pub snippet_store: Option<Arc<dyn SnippetStore>>,
+    /// Called when a peer's snippets changed the ones here.
+    pub on_snippets_changed: Option<OnReceived<()>>,
+    /// None means everything is allowed.
     pub permission_store: Option<Arc<permissions::PermissionStore>>,
-    pub permission_prompt: Option<PermissionPrompt>,
-    /// Keeps to one question at a time, so a batch of files asks once when the first answer is
-    /// "always".
-    prompt_turn: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl SessionCapabilityHandlers {
@@ -82,9 +85,27 @@ impl SessionCapabilityHandlers {
             this_device: ThisDevice::default(),
             on_device_info: None,
             on_device_status: None,
+            on_device_look: None,
+            photo_library: None,
+            on_photo_taken: None,
+            message_store: None,
+            on_messages_changed: None,
+            shared_folder: None,
+            call_control: None,
+            on_call: None,
+            media_control: None,
+            on_now_playing: None,
+            ringer: None,
+            screen_source: None,
+            screen_feed: VideoFeed::default(),
+            camera_source: None,
+            camera_feed: VideoFeed::default(),
+            pointer_target: None,
+            computer_actions: None,
+            snippet_store: None,
+            phone_search: None,
+            on_snippets_changed: None,
             permission_store: None,
-            permission_prompt: None,
-            prompt_turn: Arc::default(),
         }
     }
 
@@ -99,78 +120,47 @@ impl SessionCapabilityHandlers {
         self
     }
 
-    pub fn with_permission_prompt(mut self, prompt: PermissionPrompt) -> Self {
-        self.permission_prompt = Some(prompt);
-        self
-    }
-
     pub fn with_this_device(mut self, device: ThisDevice) -> Self {
         self.this_device = device;
         self
     }
 }
 
-/// Whether the device may send this. A device set to Ask gets a question; no answer, or no
-/// way to ask, means no.
-async fn permitted(
+pub(crate) fn allowed(
     handlers: &SessionCapabilityHandlers,
     peer: &str,
     capability: CapabilityId,
-    detail: Option<String>,
 ) -> bool {
-    let Some(store) = &handlers.permission_store else {
-        return true;
-    };
-    if let Some(answer) = stored_answer(store, peer, capability) {
-        return answer;
-    }
-    let Some(prompt) = &handlers.permission_prompt else {
-        return false;
-    };
+    handlers
+        .permission_store
+        .as_ref()
+        .is_none_or(|store| store.is_allowed(peer, capability))
+}
 
-    // One deadline from arrival covers waiting for a turn and the question itself, so a
-    // backlog from one device can't hold up everyone else for longer than that.
-    let deadline = tokio::time::Instant::now() + PROMPT_TIMEOUT;
-    let Ok(_turn) = tokio::time::timeout_at(deadline, handlers.prompt_turn.lock()).await else {
-        return false;
-    };
-    // An "always" given while this request waited its turn already answers it.
-    if let Some(answer) = stored_answer(store, peer, capability) {
-        return answer;
-    }
-    let request = PermissionRequest {
-        peer: peer.to_string(),
-        capability,
-        detail,
-        deadline,
-    };
-    match tokio::time::timeout_at(deadline, prompt(request)).await {
-        Ok(Ok(PermissionDecision::Allow)) => true,
-        Ok(Ok(PermissionDecision::AlwaysAllow)) => {
-            if let Err(error) =
-                store.set_persisted_grant(peer, capability, 1, permissions::PersistedGrant::Allow)
-            {
-                warn!("Could not save the permission for {peer}: {error}");
-            }
-            true
-        }
-        _ => false,
+/// For blocking app callbacks and filesystem calls. None if the closure panicked.
+pub(crate) async fn off_runtime<T: Send + 'static>(
+    f: impl FnOnce() -> Option<T> + Send + 'static,
+) -> Option<T> {
+    tokio::task::spawn_blocking(f).await.ok().flatten()
+}
+
+pub(crate) async fn send_requested_file(mux: &SessionMultiplexer, peer: &str, path: &Path) {
+    let since_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let transfer_id = format!("asked-{}", since_epoch.as_millis());
+    if let Err(e) = mux
+        .send_file_to_peer(path, transfer_id, None::<fn(u64, u64)>)
+        .await
+    {
+        error!("Couldn't send {} to {peer}: {e}", path.display());
     }
 }
 
-/// The saved answer, or None when the device is set to Ask.
-fn stored_answer(
-    store: &permissions::PermissionStore,
-    peer: &str,
-    capability: CapabilityId,
-) -> Option<bool> {
-    match store.query_state(peer, capability) {
-        Ok(permissions::PermissionState::Allow | permissions::PermissionState::AllowOnce) => {
-            Some(true)
-        }
-        Ok(permissions::PermissionState::Ask) => None,
-        Ok(permissions::PermissionState::Deny) | Err(_) => Some(false),
-    }
+/// Rejects out-of-range values so apps can show them as they are.
+fn plausible(status: &protocol::v1::DeviceStatus) -> bool {
+    let bars = |bars: Option<u32>| bars.is_none_or(|bars| bars <= 4);
+    status.battery_percent <= 100 && bars(status.cell_bars) && bars(status.wifi_bars)
 }
 
 /// Spawns the capability router loop processing incoming streams dispatched by the multiplexer.
@@ -181,10 +171,11 @@ pub fn spawn_capabilities_dispatcher(
 ) {
     let peer_fingerprint = mux.peer_fingerprint().to_string();
     let on_update: OnPeerUpdate = {
-        let (peer, on_info, on_status) = (
+        let (peer, on_info, on_status, on_look) = (
             peer_fingerprint.clone(),
             handlers.on_device_info.clone(),
             handlers.on_device_status.clone(),
+            handlers.on_device_look.clone(),
         );
         Arc::new(move |update| match update {
             PeerUpdate::Info(info) => {
@@ -192,12 +183,17 @@ pub fn spawn_capabilities_dispatcher(
                     on_info(&peer, device);
                 }
             }
-            PeerUpdate::Status(status) if status.battery_percent <= 100 => {
+            PeerUpdate::Status(status) if plausible(&status) => {
                 if let Some(on_status) = &on_status {
                     on_status(&peer, status);
                 }
             }
             PeerUpdate::Status(_) => {}
+            PeerUpdate::Look(look) => {
+                if let Some(on_look) = &on_look {
+                    on_look(&peer, look);
+                }
+            }
         })
     };
     let mut stream_rx = mux.spawn_router_with(buffer_size, Some(on_update));
@@ -205,6 +201,7 @@ pub fn spawn_capabilities_dispatcher(
 
     tokio::spawn(async move {
         while let Some(mut stream) = stream_rx.recv().await {
+            let mux = mux.clone();
             let handlers = handlers.clone();
             let peer_fp = peer_fingerprint.clone();
             let clipboard = clipboard.clone();
@@ -214,18 +211,10 @@ pub fn spawn_capabilities_dispatcher(
                     CapabilityId::FILE_TRANSFER => {
                         debug!("Handling incoming file transfer stream from {peer_fp}");
                         let (handlers_ref, peer_ref) = (&handlers, &peer_fp);
-                        let check = |req: &protocol::v1::FileTransferRequest| {
-                            let detail = Some(req.file_name.clone());
-                            async move {
-                                permitted(
-                                    handlers_ref,
-                                    peer_ref,
-                                    CapabilityId::FILE_TRANSFER,
-                                    detail,
-                                )
-                                .await
-                            }
-                        };
+                        let allows_files =
+                            allowed(handlers_ref, peer_ref, CapabilityId::FILE_TRANSFER);
+                        let check =
+                            |_: &protocol::v1::FileTransferRequest| async move { allows_files };
 
                         // Signalled by `IncomingFiles::cancel`.
                         let stop = Arc::new(Notify::new());
@@ -251,12 +240,6 @@ pub fn spawn_capabilities_dispatcher(
                                     "Successfully received file {} ({} bytes) from {peer_fp}",
                                     received.file_name, received.bytes_received
                                 );
-                                if let Some(store) = &handlers.permission_store {
-                                    store.consume_if_allow_once(
-                                        &peer_fp,
-                                        CapabilityId::FILE_TRANSFER,
-                                    );
-                                }
                                 if let Some(cb) = &handlers.on_file_received {
                                     cb(&peer_fp, received);
                                 }
@@ -269,11 +252,10 @@ pub fn spawn_capabilities_dispatcher(
                     }
                     CapabilityId::CLIPBOARD => {
                         debug!("Handling incoming clipboard stream from {peer_fp}");
-                        let is_permitted =
-                            permitted(&handlers, &peer_fp, CapabilityId::CLIPBOARD, None).await;
-
-                        let query =
-                            CapabilityQuery::negotiated(CapabilityId::CLIPBOARD, is_permitted);
+                        let query = CapabilityQuery::negotiated(
+                            CapabilityId::CLIPBOARD,
+                            allowed(&handlers, &peer_fp, CapabilityId::CLIPBOARD),
+                        );
 
                         let on_received = handlers.on_clipboard_received.clone();
                         let result = clipboard
@@ -293,9 +275,6 @@ pub fn spawn_capabilities_dispatcher(
 
                         match result {
                             Ok(update) => {
-                                if let Some(store) = &handlers.permission_store {
-                                    store.consume_if_allow_once(&peer_fp, CapabilityId::CLIPBOARD);
-                                }
                                 if let Some(cb) = on_received {
                                     cb(&peer_fp, update);
                                 }
@@ -313,31 +292,87 @@ pub fn spawn_capabilities_dispatcher(
                                 return;
                             }
                         };
-                        // Showing the peer's notifications needs permission. Replies and
-                        // dismissals only act on notifications this device sent it.
-                        let allowed = match &body {
+                        // Replies, dismissals and mutes only act on notifications this device sent.
+                        let shown = match &body {
                             NotificationBody::Post(_) => {
-                                let allowed = permitted(
-                                    &handlers,
-                                    &peer_fp,
-                                    CapabilityId::NOTIFICATIONS,
-                                    None,
-                                )
-                                .await;
-                                if let (true, Some(store)) = (allowed, &handlers.permission_store) {
-                                    store.consume_if_allow_once(
-                                        &peer_fp,
-                                        CapabilityId::NOTIFICATIONS,
-                                    );
-                                }
-                                allowed
+                                allowed(&handlers, &peer_fp, CapabilityId::NOTIFICATIONS)
                             }
-                            NotificationBody::Action(_) | NotificationBody::Dismiss(_) => true,
+                            NotificationBody::Action(_)
+                            | NotificationBody::Dismiss(_)
+                            | NotificationBody::Mute(_) => true,
                         };
-                        if let (true, Some(cb)) = (allowed, &handlers.on_notification) {
+                        if let (true, Some(cb)) = (shown, &handlers.on_notification) {
                             cb(&peer_fp, body);
                         }
-                        let _ = notifications::acknowledge(&mut stream.send_stream, allowed).await;
+                        let _ = notifications::acknowledge(&mut stream.send_stream, shown).await;
+                    }
+                    CapabilityId::PHOTOS => {
+                        if let Err(e) = serve_photos(&mux, &handlers, &peer_fp, stream).await {
+                            error!("Couldn't answer a photos request from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::SCREEN => {
+                        let source = handlers
+                            .screen_source
+                            .clone()
+                            .filter(|_| allowed(&handlers, &peer_fp, CapabilityId::SCREEN));
+                        if let Err(e) = serve_video(source, &handlers.screen_feed, stream).await {
+                            debug!("Stopped sharing the screen with {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::CAMERA => {
+                        let source = handlers
+                            .camera_source
+                            .clone()
+                            .filter(|_| allowed(&handlers, &peer_fp, CapabilityId::CAMERA));
+                        if let Err(e) = serve_video(source, &handlers.camera_feed, stream).await {
+                            debug!("Stopped sharing the camera with {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::POINTER => {
+                        if let Err(e) = serve_pointer(&handlers, &peer_fp, stream).await {
+                            debug!("Stopped taking pointer input from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::SEARCH => {
+                        if let Err(e) = serve_search(&handlers, &peer_fp, stream).await {
+                            error!("Couldn't answer a search from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::SNIPPETS => {
+                        if let Err(e) = serve_snippets(&handlers, &peer_fp, stream).await {
+                            error!("Couldn't take snippets from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::ACTIONS => {
+                        if let Err(e) = serve_actions(&handlers, &peer_fp, stream).await {
+                            error!("Couldn't answer an action from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::FIND => {
+                        if let Err(e) = serve_ring(&handlers, &peer_fp, stream).await {
+                            error!("Couldn't answer a ring from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::MEDIA => {
+                        if let Err(e) = serve_media(&handlers, &peer_fp, stream).await {
+                            error!("Couldn't answer a media request from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::CALLS => {
+                        if let Err(e) = serve_calls(&handlers, &peer_fp, stream).await {
+                            error!("Couldn't answer a calls request from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::FILES => {
+                        if let Err(e) = serve_files(&mux, &handlers, &peer_fp, stream).await {
+                            error!("Couldn't answer a files request from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::MESSAGES => {
+                        if let Err(e) = serve_messages(&handlers, &peer_fp, stream).await {
+                            error!("Couldn't answer a messages request from {peer_fp}: {e}");
+                        }
                     }
                     unknown => {
                         debug!("Received unsupported capability stream {unknown:?} from {peer_fp}");
@@ -349,6 +384,18 @@ pub fn spawn_capabilities_dispatcher(
 }
 
 impl SessionMultiplexer {
+    pub(crate) async fn ask<M: prost::Message, R: prost::Message + Default>(
+        &self,
+        capability: CapabilityId,
+        message: &M,
+        max_bytes: usize,
+    ) -> Result<R, TransportError> {
+        let (mut send, mut recv) = self.open_stream(capability).await?;
+        write_msg(&mut send, message, max_bytes).await?;
+        let _ = send.finish();
+        read_msg(&mut recv, max_bytes).await
+    }
+
     /// `on_progress` receives (bytes sent, file size) after each chunk is written.
     pub async fn send_file_to_peer<F>(
         &self,

@@ -17,8 +17,6 @@ use std::time::{Duration, Instant};
 use device::{Device, Stores};
 use identity::FileSecretStore;
 use pairing::DeviceKeys;
-use permissions::PermissionState;
-use protocol::CapabilityId;
 use sessions::{SessionCapabilityHandlers, SessionState, ThisDevice};
 use tokio::runtime::Runtime;
 
@@ -107,7 +105,12 @@ fn pair(computer: &App, phone: &App) {
         .runtime
         .block_on(phone.device.pair_with_code(&server.code))
         .unwrap();
-    let phone_peer = computer.runtime.block_on(server.finish()).unwrap();
+    let phone_peer = computer
+        .runtime
+        .block_on(server.finish())
+        .unwrap()
+        .accept()
+        .unwrap();
 
     assert_eq!(phone_peer.fingerprint, phone.fingerprint());
     assert_eq!(computer_peer.fingerprint, computer.fingerprint());
@@ -132,17 +135,6 @@ fn paired_devices_reconnect_after_both_restart_and_the_phone_can_send_a_file() {
         phone.fingerprint().to_string(),
     );
     pair(&computer, &phone);
-    // The person allows files from the phone, as they would in the computer's settings.
-    computer
-        .device
-        .stores
-        .permissions
-        .set_state(
-            phone.fingerprint(),
-            CapabilityId::FILE_TRANSFER,
-            PermissionState::Allow,
-        )
-        .unwrap();
     eventually("the new pair connects", || {
         phone.connected_to(&computer) && computer.connected_to(&phone)
     });
@@ -193,4 +185,72 @@ fn paired_devices_reconnect_after_both_restart_and_the_phone_can_send_a_file() {
 
     phone.quit();
     computer.quit();
+}
+
+#[test]
+fn what_waits_for_a_device_survives_a_restart_and_stays_while_it_is_away() {
+    let dir = data_dir("waiting");
+    let computer = App::start(&dir, "Work laptop");
+    let first = computer
+        .device
+        .send_later("phone", history::Kind::Text, "hi")
+        .unwrap();
+    computer
+        .device
+        .send_later("phone", history::Kind::File, "/missing.jpg")
+        .unwrap();
+    computer.quit();
+
+    let computer = App::start(&dir, "Work laptop");
+    let done = std::sync::Mutex::new(Vec::new());
+    computer
+        .runtime
+        .block_on(computer.device.send_waiting("phone", |item, sent| {
+            done.lock().unwrap().push((item.id, sent))
+        }));
+
+    assert!(done.into_inner().unwrap().is_empty());
+    let waiting = computer
+        .device
+        .stores
+        .history
+        .waiting(Some("phone"))
+        .unwrap();
+    assert_eq!(waiting.len(), 2);
+    assert_eq!(waiting[0].id, first);
+}
+
+#[test]
+fn a_nearby_pairing_shows_the_same_code_on_both_and_trusts_only_once_accepted() {
+    let (computer, phone) = (
+        App::start(&data_dir("computer"), "Work laptop"),
+        App::start(&data_dir("phone"), "Phone"),
+    );
+    let server = computer.runtime.block_on(async {
+        computer
+            .device
+            .start_pairing(0, |port| format!("127.0.0.1:{port}"))
+            .unwrap()
+    });
+    let on_phone = phone
+        .runtime
+        .block_on(phone.device.pair_nearby(&server.code))
+        .unwrap();
+    let on_computer = computer.runtime.block_on(server.finish()).unwrap();
+
+    assert_eq!(on_phone.code(), on_computer.code());
+    assert_eq!(on_phone.code().len(), 6);
+    let trusted = |app: &App, other: &App| {
+        app.device
+            .stores
+            .trust
+            .get_peer(other.fingerprint())
+            .unwrap()
+            .is_some()
+    };
+    assert!(!trusted(&phone, &computer) && !trusted(&computer, &phone));
+
+    on_phone.accept().unwrap();
+    on_computer.accept().unwrap();
+    assert!(trusted(&phone, &computer) && trusted(&computer, &phone));
 }

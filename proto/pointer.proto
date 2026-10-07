@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+import "screen.proto";
+
+// Opened by a computer when its pointer crosses onto the phone, or by a phone used as the
+// computer's touchpad. The other side answers with a PointerReply, then the opener sends
+// PointerInput until it closes the stream. A phone sends PointerLeft when the computer's pointer
+// goes back over the edge it came in by; a computer never does.
+message PointerStart {
+  // Where along the edge it came in, from 0 at the top to 1 at the bottom.
+  float y = 1;
+  // True when it came in by the phone's left edge, as with a phone placed right of the screen.
+  bool from_left = 2;
+}
+
+message PointerReply {
+  // False when the phone can't take input, such as with its control service off.
+  bool started = 1;
+}
+
+message PointerInput {
+  oneof body {
+    PointerMove move = 1;
+    // The main button going down (true) or up.
+    bool press = 2;
+    // Wheel notches; positive scrolls up.
+    float scroll = 3;
+    // Typing and the phone's own buttons, as in screen control. Touches aren't used here.
+    ScreenInput screen = 4;
+    // The other button going down (true) or up, for a menu.
+    bool press_secondary = 5;
+  }
+}
+
+// In the computer's pixels.
+message PointerMove {
+  float dx = 1;
+  float dy = 2;
+}
+
+message PointerLeft {
+  float y = 1;
+}

@@ -17,6 +17,7 @@ permissions = { path = "../permissions" }
 transfer = { path = "../transfer" }
 clipboard = { path = "../clipboard" }
 notifications = { path = "../notifications" }
+prost = { workspace = true }
 quinn = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "rt", "net", "macros"] }
 rand = { workspace = true }

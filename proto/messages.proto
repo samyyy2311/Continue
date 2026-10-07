@@ -1,0 +1,74 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Opens a messages stream; answered with a MessagesReply.
+message MessagesMessage {
+  oneof body {
+    ListConversations conversations = 1;
+    ReadConversation read = 2;
+    SendText send = 3;
+    // The phone telling a computer its messages changed, so an open view can refresh.
+    MessagesChanged changed = 4;
+    ListContacts contacts = 5;
+  }
+}
+
+message ListContacts {
+  uint32 limit = 1;
+}
+
+message Contact {
+  string name = 1;
+  string number = 2;
+  bool favorite = 3;
+  // A small JPEG; empty without a photo.
+  bytes photo = 4;
+}
+
+message ListConversations {
+  uint32 limit = 1;
+}
+
+message ReadConversation {
+  string conversation_id = 1;
+  uint32 limit = 2;
+}
+
+message SendText {
+  string address = 1;
+  string body = 2;
+}
+
+message MessagesChanged {}
+
+message Conversation {
+  string id = 1;
+  string address = 2;
+  string name = 3; // from the phone's contacts, empty when unknown
+  string snippet = 4;
+  uint64 at = 5; // Unix time in milliseconds
+  bool unread = 6;
+}
+
+message TextMessage {
+  string id = 1;
+  string body = 2;
+  uint64 at = 3;
+  bool outgoing = 4;
+}
+
+message MessagesReply {
+  // False when the phone hasn't been given access to its messages.
+  bool available = 1;
+  // Newest first.
+  repeated Conversation conversations = 2;
+  // Oldest first, as a conversation reads.
+  repeated TextMessage messages = 3;
+  // Whether a text was handed to the phone's carrier.
+  bool sent = 4;
+  // Favourites first, then by name.
+  repeated Contact contacts = 5;
+}

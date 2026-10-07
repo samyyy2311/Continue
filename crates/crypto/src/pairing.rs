@@ -23,6 +23,7 @@ const DOMAIN_RESP: &[u8] = b"PAIRING_V1_RESP";
 /// Labels for role-separated PairConfirm MACs.
 const CONFIRM_INIT_LABEL: &[u8] = b"CONFIRM_INIT_V1";
 const CONFIRM_RESP_LABEL: &[u8] = b"CONFIRM_RESP_V1";
+const COMPARE_LABEL: &[u8] = b"COMPARE_V1";
 
 /// All inputs needed to construct the initiator pairing transcript.
 pub struct InitiatorTranscriptInputs<'a> {
@@ -133,6 +134,18 @@ fn compute_confirm_mac(
     mac.update(transcript);
     let result = mac.finalize().into_bytes();
     Ok(result.into())
+}
+
+/// Six digits both devices show for a pairing, for people to compare when there was no QR code
+/// to carry a secret between them. Someone in the middle of the pairing ends up with different
+/// keys on each side, so the two screens show different digits.
+pub fn comparison_code(
+    confirmation_key: &Zeroizing<[u8; 32]>,
+    full_transcript: &[u8],
+) -> Result<String, CryptoError> {
+    let mac = compute_confirm_mac(confirmation_key, COMPARE_LABEL, full_transcript)?;
+    let number = u32::from_be_bytes([mac[0], mac[1], mac[2], mac[3]]) % 1_000_000;
+    Ok(format!("{number:06}"))
 }
 
 /// Verify a PairConfirm MAC in constant time.

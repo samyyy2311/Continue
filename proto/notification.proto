@@ -35,6 +35,11 @@ message NotificationActionInvoke {
   string reply_text      = 3;
 }
 
+// Sent by a computer so the phone stops forwarding an app's notifications.
+message NotificationMute {
+  string package_name = 1;
+}
+
 // Response acknowledging receipt and processing of a notification event.
 message NotificationAck {
   string notification_id = 1;
@@ -47,5 +52,6 @@ message NotificationMessage {
     NotificationPost         post    = 1;
     NotificationDismiss      dismiss = 2;
     NotificationActionInvoke action  = 3;
+    NotificationMute         mute    = 4;
   }
 }

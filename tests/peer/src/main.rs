@@ -207,12 +207,18 @@ async fn test_quic_loopback_pairing() -> Result<()> {
 
     let responder =
         ResponderPairing::new(resp_signer.clone(), resp_cert.clone(), resp_store.clone());
-    let resp_paired_peer = responder
+    let resp_pending = responder
         .complete_handshake(&qr, &mut send, &mut recv)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let init_paired_peer = server_handle.await??;
+    let init_pending = server_handle.await??;
+    assert_eq!(
+        init_pending.code, resp_pending.code,
+        "both sides show the same digits"
+    );
+    let init_paired_peer = init_pending.accept()?;
+    let resp_paired_peer = resp_pending.accept()?;
 
     let resp_key = resp_signer.verifying_key()?;
     let expected_resp_fingerprint =

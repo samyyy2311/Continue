@@ -7,8 +7,7 @@
 uniffi::include_scaffolding!("continue");
 
 use std::collections::{BTreeMap, VecDeque};
-use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use thiserror::Error;
@@ -17,9 +16,8 @@ use device::{Device, PairError, Stores};
 use history::{Direction, Kind};
 use identity::FileSecretStore;
 use pairing::{DeviceKeys, TrustedPeer};
-use permissions::PermissionState;
 use protocol::CapabilityId;
-use sessions::{PermissionDecision, SessionState};
+use sessions::SessionState;
 use tokio::runtime::Runtime;
 use transport::TransportCertificate;
 
@@ -87,6 +85,625 @@ pub fn set_key_store(store: Box<dyn SecretStoreFfi>) {
     *KEY_STORE.lock().unwrap() = Some(Arc::from(store));
 }
 
+pub struct PhotoFfi {
+    pub id: String,
+    pub name: String,
+    pub taken_at: u64,
+    pub thumbnail: Vec<u8>,
+}
+
+pub trait PhotoLibraryFfi: Send + Sync {
+    fn recent(&self, limit: u32) -> Option<Vec<PhotoFfi>>;
+    fn file(&self, id: String) -> Option<String>;
+}
+
+static PHOTO_LIBRARY: Mutex<Option<Arc<dyn sessions::PhotoLibrary>>> = Mutex::new(None);
+
+pub fn set_photo_library(library: Box<dyn PhotoLibraryFfi>) {
+    *PHOTO_LIBRARY.lock().unwrap() = Some(Arc::new(AppPhotos(library)));
+}
+
+struct AppPhotos(Box<dyn PhotoLibraryFfi>);
+
+impl From<PhotoFfi> for protocol::v1::Photo {
+    fn from(photo: PhotoFfi) -> Self {
+        Self {
+            id: photo.id,
+            name: photo.name,
+            taken_at: photo.taken_at,
+            thumbnail: photo.thumbnail,
+        }
+    }
+}
+
+impl sessions::PhotoLibrary for AppPhotos {
+    fn recent(&self, limit: u32) -> Option<Vec<protocol::v1::Photo>> {
+        Some(self.0.recent(limit)?.into_iter().map(Into::into).collect())
+    }
+
+    fn file(&self, id: &str) -> Option<PathBuf> {
+        self.0.file(id.to_string()).map(PathBuf::from)
+    }
+}
+
+pub struct ConversationFfi {
+    pub id: String,
+    pub address: String,
+    pub name: String,
+    pub snippet: String,
+    pub at: u64,
+    pub unread: bool,
+}
+
+pub struct TextMessageFfi {
+    pub id: String,
+    pub body: String,
+    pub at: u64,
+    pub outgoing: bool,
+}
+
+pub struct ContactFfi {
+    pub name: String,
+    pub number: String,
+    pub favorite: bool,
+    pub photo: Vec<u8>,
+}
+
+pub trait MessageStoreFfi: Send + Sync {
+    fn conversations(&self, limit: u32) -> Option<Vec<ConversationFfi>>;
+    fn conversation(&self, id: String, limit: u32) -> Option<Vec<TextMessageFfi>>;
+    fn send(&self, address: String, body: String) -> bool;
+    fn contacts(&self, limit: u32) -> Option<Vec<ContactFfi>>;
+}
+
+pub struct NowPlayingFfi {
+    pub title: String,
+    pub artist: String,
+    pub app: String,
+    pub playing: bool,
+    pub duration_ms: u64,
+    pub position_ms: u64,
+    pub art: Option<Vec<u8>>,
+}
+
+pub enum MediaCommandFfi {
+    PlayPause,
+    Next,
+    Previous,
+    VolumeUp,
+    VolumeDown,
+}
+
+pub trait RingerFfi: Send + Sync {
+    fn ring(&self, on: bool) -> bool;
+}
+
+static RINGER: Mutex<Option<Arc<dyn sessions::Ringer>>> = Mutex::new(None);
+
+pub fn set_ringer(ringer: Box<dyn RingerFfi>) {
+    *RINGER.lock().unwrap() = Some(Arc::new(AppRinger(ringer)));
+}
+
+struct AppRinger(Box<dyn RingerFfi>);
+
+impl sessions::Ringer for AppRinger {
+    fn ring(&self, on: bool) -> bool {
+        self.0.ring(on)
+    }
+}
+
+pub trait MediaControlFfi: Send + Sync {
+    fn command(&self, command: MediaCommandFfi) -> bool;
+}
+
+static MEDIA_CONTROL: Mutex<Option<Arc<dyn sessions::MediaControl>>> = Mutex::new(None);
+
+pub fn set_media_control(control: Box<dyn MediaControlFfi>) {
+    *MEDIA_CONTROL.lock().unwrap() = Some(Arc::new(AppMedia(control)));
+}
+
+struct AppMedia(Box<dyn MediaControlFfi>);
+
+impl sessions::MediaControl for AppMedia {
+    fn command(&self, command: protocol::v1::media_command::Kind) -> bool {
+        use protocol::v1::media_command::Kind;
+        self.0.command(match command {
+            Kind::PlayPause => MediaCommandFfi::PlayPause,
+            Kind::Next => MediaCommandFfi::Next,
+            Kind::Previous => MediaCommandFfi::Previous,
+            Kind::VolumeUp => MediaCommandFfi::VolumeUp,
+            Kind::VolumeDown => MediaCommandFfi::VolumeDown,
+        })
+    }
+}
+
+pub enum CallStateFfi {
+    Ringing,
+    Talking,
+    Ended,
+}
+
+pub struct CallFfi {
+    pub state: CallStateFfi,
+    pub number: String,
+    pub name: String,
+}
+
+pub trait CallControlFfi: Send + Sync {
+    fn answer(&self) -> bool;
+    fn decline(&self) -> bool;
+    fn silence(&self) -> bool;
+    fn dial(&self, number: String) -> bool;
+}
+
+static CALL_CONTROL: Mutex<Option<Arc<dyn sessions::CallControl>>> = Mutex::new(None);
+
+pub fn set_call_control(control: Box<dyn CallControlFfi>) {
+    *CALL_CONTROL.lock().unwrap() = Some(Arc::new(AppCalls(control)));
+}
+
+struct AppCalls(Box<dyn CallControlFfi>);
+
+impl sessions::CallControl for AppCalls {
+    fn answer(&self) -> bool {
+        self.0.answer()
+    }
+
+    fn decline(&self) -> bool {
+        self.0.decline()
+    }
+
+    fn silence(&self) -> bool {
+        self.0.silence()
+    }
+
+    fn dial(&self, number: &str) -> bool {
+        self.0.dial(number.to_string())
+    }
+}
+
+pub enum VideoKindFfi {
+    Screen,
+    Camera,
+}
+
+pub struct VideoStartFfi {
+    pub width: u32,
+    pub height: u32,
+    pub rotation: u32,
+}
+
+impl From<VideoStartFfi> for protocol::v1::VideoStart {
+    fn from(start: VideoStartFfi) -> Self {
+        Self {
+            started: true,
+            width: start.width,
+            height: start.height,
+            rotation: start.rotation,
+        }
+    }
+}
+
+pub enum CameraControlFfi {
+    Front { front: bool },
+    Framing { on: bool },
+}
+
+pub trait CameraSourceFfi: Send + Sync {
+    fn start(&self, max_size: u32, front: bool) -> Option<VideoStartFfi>;
+    fn control(&self, control: CameraControlFfi);
+    fn stop(&self);
+}
+
+static CAMERA_SOURCE: Mutex<Option<Arc<sessions::CameraSource>>> = Mutex::new(None);
+
+pub fn set_camera_source(source: Box<dyn CameraSourceFfi>) {
+    *CAMERA_SOURCE.lock().unwrap() = Some(Arc::new(AppCamera(source)));
+}
+
+struct AppCamera(Box<dyn CameraSourceFfi>);
+
+impl sessions::VideoSource<protocol::v1::CameraRequest, protocol::v1::CameraControl> for AppCamera {
+    fn start(&self, request: protocol::v1::CameraRequest) -> Option<protocol::v1::VideoStart> {
+        self.0
+            .start(request.max_size, request.front)
+            .map(Into::into)
+    }
+
+    fn control(&self, control: protocol::v1::CameraControl) {
+        use protocol::v1::camera_control::Body;
+        let control = match control.body {
+            Some(Body::Front(front)) => CameraControlFfi::Front { front },
+            Some(Body::Framing(on)) => CameraControlFfi::Framing { on },
+            None => return,
+        };
+        self.0.control(control);
+    }
+
+    fn stop(&self) {
+        self.0.stop();
+    }
+}
+
+pub enum TouchActionFfi {
+    Down,
+    Move,
+    Up,
+}
+
+pub enum ScreenInputFfi {
+    Touch {
+        action: TouchActionFfi,
+        x: f32,
+        y: f32,
+    },
+    Swipe {
+        from_x: f32,
+        from_y: f32,
+        to_x: f32,
+        to_y: f32,
+        duration_ms: u32,
+    },
+    Back,
+    Home,
+    Recents,
+    Text {
+        text: String,
+    },
+    Backspace,
+    Enter,
+}
+
+pub trait ScreenSourceFfi: Send + Sync {
+    fn start(&self, max_size: u32) -> Option<VideoStartFfi>;
+    fn input(&self, input: ScreenInputFfi);
+    fn stop(&self);
+}
+
+static SCREEN_SOURCE: Mutex<Option<Arc<sessions::ScreenSource>>> = Mutex::new(None);
+
+pub fn set_screen_source(source: Box<dyn ScreenSourceFfi>) {
+    *SCREEN_SOURCE.lock().unwrap() = Some(Arc::new(AppScreen(source)));
+}
+
+struct AppScreen(Box<dyn ScreenSourceFfi>);
+
+impl sessions::VideoSource<protocol::v1::ScreenRequest, protocol::v1::ScreenInput> for AppScreen {
+    fn start(&self, request: protocol::v1::ScreenRequest) -> Option<protocol::v1::VideoStart> {
+        self.0.start(request.max_size).map(Into::into)
+    }
+
+    fn control(&self, input: protocol::v1::ScreenInput) {
+        if let Some(input) = screen_input(input) {
+            self.0.input(input);
+        }
+    }
+
+    fn stop(&self) {
+        self.0.stop();
+    }
+}
+
+fn screen_input(input: protocol::v1::ScreenInput) -> Option<ScreenInputFfi> {
+    use protocol::v1::{screen_input::Body, touch::Action, ScreenButton, ScreenKey};
+    Some(match input.body? {
+        Body::Touch(touch) => ScreenInputFfi::Touch {
+            action: match touch.action() {
+                Action::Down => TouchActionFfi::Down,
+                Action::Move => TouchActionFfi::Move,
+                Action::Up => TouchActionFfi::Up,
+            },
+            x: touch.x,
+            y: touch.y,
+        },
+        Body::Swipe(swipe) => ScreenInputFfi::Swipe {
+            from_x: swipe.from_x,
+            from_y: swipe.from_y,
+            to_x: swipe.to_x,
+            to_y: swipe.to_y,
+            duration_ms: swipe.duration_ms,
+        },
+        Body::Button(button) => match ScreenButton::try_from(button).ok()? {
+            ScreenButton::Back => ScreenInputFfi::Back,
+            ScreenButton::Home => ScreenInputFfi::Home,
+            ScreenButton::Recents => ScreenInputFfi::Recents,
+        },
+        Body::Text(text) => ScreenInputFfi::Text { text },
+        Body::Key(key) => match ScreenKey::try_from(key).ok()? {
+            ScreenKey::Backspace => ScreenInputFfi::Backspace,
+            ScreenKey::Enter => ScreenInputFfi::Enter,
+        },
+    })
+}
+
+pub enum PointerInputFfi {
+    Move { dx: f32, dy: f32 },
+    Press { down: bool },
+    PressSecondary { down: bool },
+    Scroll { notches: f32 },
+    Screen { input: ScreenInputFfi },
+}
+
+pub trait PointerTargetFfi: Send + Sync {
+    fn start(&self, y: f32, from_left: bool) -> bool;
+    fn input(&self, input: PointerInputFfi);
+    fn stop(&self);
+}
+
+static POINTER_TARGET: Mutex<Option<Arc<dyn sessions::PointerTarget>>> = Mutex::new(None);
+
+/// Set while a computer's pointer is on the phone.
+static POINTER_LEAVE: Mutex<Option<sessions::PointerLeave>> = Mutex::new(None);
+
+pub fn set_pointer_target(target: Box<dyn PointerTargetFfi>) {
+    *POINTER_TARGET.lock().unwrap() = Some(Arc::new(AppPointer(target)));
+}
+
+/// The phone used as a touchpad for a computer: input goes there until stopped.
+static TOUCHPAD: Mutex<Option<sessions::PointerControl>> = Mutex::new(None);
+
+/// False when the computer can't take input, such as with that switched off there.
+pub fn touchpad_start(peer_fingerprint: String) -> Result<bool, ContinueFfiError> {
+    let (runtime, device) = device()?;
+    let mux = device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| internal("Not connected"))?;
+    let start = protocol::v1::PointerStart::default();
+    let control = runtime
+        .block_on(mux.point(start))
+        .map_err(internal)?
+        .map(|(control, _)| control);
+    let started = control.is_some();
+    *TOUCHPAD.lock().unwrap() = control;
+    Ok(started)
+}
+
+/// False once the computer has gone.
+pub fn touchpad_input(input: PointerInputFfi) -> bool {
+    use protocol::v1::pointer_input::Body;
+    let body = match input {
+        PointerInputFfi::Move { dx, dy } => Body::Move(protocol::v1::PointerMove { dx, dy }),
+        PointerInputFfi::Press { down } => Body::Press(down),
+        PointerInputFfi::PressSecondary { down } => Body::PressSecondary(down),
+        PointerInputFfi::Scroll { notches } => Body::Scroll(notches),
+        PointerInputFfi::Screen { input } => Body::Screen(screen_input_message(input)),
+    };
+    let Ok((runtime, _)) = device() else {
+        return false;
+    };
+    let mut touchpad = TOUCHPAD.lock().unwrap();
+    let Some(control) = touchpad.as_mut() else {
+        return false;
+    };
+    let input = protocol::v1::PointerInput { body: Some(body) };
+    runtime.block_on(control.send(&input)).is_ok()
+}
+
+pub fn touchpad_stop() {
+    TOUCHPAD.lock().unwrap().take();
+}
+
+fn screen_input_message(input: ScreenInputFfi) -> protocol::v1::ScreenInput {
+    use protocol::v1::{screen_input::Body, touch::Action, ScreenButton, ScreenKey, Swipe, Touch};
+    let body = match input {
+        ScreenInputFfi::Touch { action, x, y } => Body::Touch(Touch {
+            action: match action {
+                TouchActionFfi::Down => Action::Down,
+                TouchActionFfi::Move => Action::Move,
+                TouchActionFfi::Up => Action::Up,
+            }
+            .into(),
+            x,
+            y,
+        }),
+        ScreenInputFfi::Swipe {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            duration_ms,
+        } => Body::Swipe(Swipe {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            duration_ms,
+        }),
+        ScreenInputFfi::Back => Body::Button(ScreenButton::Back.into()),
+        ScreenInputFfi::Home => Body::Button(ScreenButton::Home.into()),
+        ScreenInputFfi::Recents => Body::Button(ScreenButton::Recents.into()),
+        ScreenInputFfi::Text { text } => Body::Text(text),
+        ScreenInputFfi::Backspace => Body::Key(ScreenKey::Backspace.into()),
+        ScreenInputFfi::Enter => Body::Key(ScreenKey::Enter.into()),
+    };
+    protocol::v1::ScreenInput { body: Some(body) }
+}
+
+/// The app calls this when the pointer goes back over the edge it came in by.
+pub fn pointer_left(y: f32) {
+    if let Some(leave) = POINTER_LEAVE.lock().unwrap().as_ref() {
+        leave(y);
+    }
+}
+
+struct AppPointer(Box<dyn PointerTargetFfi>);
+
+impl sessions::PointerTarget for AppPointer {
+    fn start(&self, start: protocol::v1::PointerStart, leave: sessions::PointerLeave) -> bool {
+        *POINTER_LEAVE.lock().unwrap() = Some(leave);
+        self.0.start(start.y, start.from_left)
+    }
+
+    fn input(&self, input: protocol::v1::PointerInput) {
+        use protocol::v1::pointer_input::Body;
+        let input = match input.body {
+            Some(Body::Move(moved)) => PointerInputFfi::Move {
+                dx: moved.dx,
+                dy: moved.dy,
+            },
+            Some(Body::Press(down)) => PointerInputFfi::Press { down },
+            Some(Body::PressSecondary(down)) => PointerInputFfi::PressSecondary { down },
+            Some(Body::Scroll(notches)) => PointerInputFfi::Scroll { notches },
+            Some(Body::Screen(screen)) => match screen_input(screen) {
+                Some(input) => PointerInputFfi::Screen { input },
+                None => return,
+            },
+            None => return,
+        };
+        self.0.input(input);
+    }
+
+    fn stop(&self) {
+        *POINTER_LEAVE.lock().unwrap() = None;
+        self.0.stop();
+    }
+}
+
+fn video_feed(kind: VideoKindFfi) -> Option<sessions::VideoFeed> {
+    let core = CORE.lock().unwrap();
+    let core = core.as_ref()?;
+    Some(match kind {
+        VideoKindFfi::Screen => core.screen_feed.clone(),
+        VideoKindFfi::Camera => core.camera_feed.clone(),
+    })
+}
+
+pub fn push_video_frame(kind: VideoKindFfi, data: Vec<u8>, key: bool, rotation: u32) -> bool {
+    let frame = protocol::v1::VideoFrame {
+        data,
+        key,
+        rotation,
+        ..Default::default()
+    };
+    video_feed(kind).is_some_and(|feed| feed.push(frame))
+}
+
+/// 16-bit stereo PCM at 48 kHz, what's playing while the screen is shared.
+pub fn push_audio(kind: VideoKindFfi, pcm: Vec<u8>) -> bool {
+    video_feed(kind).is_some_and(|feed| feed.push_audio(pcm))
+}
+
+pub fn end_video(kind: VideoKindFfi) {
+    if let Some(feed) = video_feed(kind) {
+        feed.end();
+    }
+}
+
+static SHARED_FOLDER: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+pub fn set_shared_folder(path: String) {
+    *SHARED_FOLDER.lock().unwrap() = Some(PathBuf::from(path));
+}
+
+static MESSAGE_STORE: Mutex<Option<Arc<dyn sessions::MessageStore>>> = Mutex::new(None);
+
+pub enum SearchKindFfi {
+    File,
+    Text,
+    Contact,
+}
+
+pub struct SearchResultFfi {
+    pub kind: SearchKindFfi,
+    pub title: String,
+    pub detail: String,
+    pub reference: String,
+    pub at: u64,
+}
+
+pub trait PhoneSearchFfi: Send + Sync {
+    fn search(&self, query: String, limit: u32) -> Option<Vec<SearchResultFfi>>;
+}
+
+static PHONE_SEARCH: Mutex<Option<Arc<dyn sessions::PhoneSearch>>> = Mutex::new(None);
+
+pub fn set_phone_search(search: Box<dyn PhoneSearchFfi>) {
+    *PHONE_SEARCH.lock().unwrap() = Some(Arc::new(AppSearch(search)));
+}
+
+struct AppSearch(Box<dyn PhoneSearchFfi>);
+
+impl sessions::PhoneSearch for AppSearch {
+    fn search(&self, query: &str, limit: u32) -> Option<Vec<protocol::v1::SearchResult>> {
+        use protocol::v1::search_result::Kind;
+        let results = self.0.search(query.to_string(), limit)?;
+        Some(
+            results
+                .into_iter()
+                .map(|result| protocol::v1::SearchResult {
+                    kind: match result.kind {
+                        SearchKindFfi::File => Kind::File,
+                        SearchKindFfi::Text => Kind::Text,
+                        SearchKindFfi::Contact => Kind::Contact,
+                    }
+                    .into(),
+                    title: result.title,
+                    detail: result.detail,
+                    reference: result.reference,
+                    at: result.at,
+                })
+                .collect(),
+        )
+    }
+}
+
+pub fn set_message_store(store: Box<dyn MessageStoreFfi>) {
+    *MESSAGE_STORE.lock().unwrap() = Some(Arc::new(AppMessages(store)));
+}
+
+struct AppMessages(Box<dyn MessageStoreFfi>);
+
+impl sessions::MessageStore for AppMessages {
+    fn conversations(&self, limit: u32) -> Option<Vec<protocol::v1::Conversation>> {
+        let found = self.0.conversations(limit)?.into_iter();
+        Some(
+            found
+                .map(|c| protocol::v1::Conversation {
+                    id: c.id,
+                    address: c.address,
+                    name: c.name,
+                    snippet: c.snippet,
+                    at: c.at,
+                    unread: c.unread,
+                })
+                .collect(),
+        )
+    }
+
+    fn conversation(&self, id: &str, limit: u32) -> Option<Vec<protocol::v1::TextMessage>> {
+        let found = self.0.conversation(id.to_string(), limit)?.into_iter();
+        Some(
+            found
+                .map(|t| protocol::v1::TextMessage {
+                    id: t.id,
+                    body: t.body,
+                    at: t.at,
+                    outgoing: t.outgoing,
+                })
+                .collect(),
+        )
+    }
+
+    fn send(&self, address: &str, body: &str) -> bool {
+        self.0.send(address.to_string(), body.to_string())
+    }
+
+    fn contacts(&self, limit: u32) -> Option<Vec<protocol::v1::Contact>> {
+        let found = self.0.contacts(limit)?.into_iter();
+        Some(
+            found
+                .map(|c| protocol::v1::Contact {
+                    name: c.name,
+                    number: c.number,
+                    favorite: c.favorite,
+                    photo: c.photo,
+                })
+                .collect(),
+        )
+    }
+}
+
 /// The app's store, seen as the core's `SecretStore`.
 struct AppSecretStore(Arc<dyn SecretStoreFfi>);
 
@@ -129,6 +746,10 @@ struct CoreState {
     incoming: sessions::IncomingFiles,
     /// The name paired devices see for this phone.
     this_device: sessions::ThisDevice,
+    screen_feed: sessions::VideoFeed,
+    camera_feed: sessions::VideoFeed,
+    /// Copies of files kept for a computer that isn't connected.
+    waiting_dir: PathBuf,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -148,24 +769,6 @@ fn device() -> Result<(Arc<Runtime>, Device), ContinueFfiError> {
     with_core(|core| Ok((core.runtime.clone(), core.device.clone())))
 }
 
-/// Something a device set to Ask wants to send, for the app to put to the user.
-pub struct PermissionRequestFfi {
-    pub id: u64,
-    pub peer_fingerprint: String,
-    pub peer_name: String,
-    pub capability_id: u32,
-    /// The file name, for files.
-    pub detail: Option<String>,
-    /// Unix time in milliseconds when the core declines an unanswered question.
-    pub expires_at: u64,
-}
-
-pub enum PermissionDecisionFfi {
-    Allow,
-    AlwaysAllow,
-    Decline,
-}
-
 /// A file or text a paired device sent to this phone. Files arrive as `file_path` and
 /// `file_name`, text as `text`.
 pub struct ReceivedFfi {
@@ -177,6 +780,8 @@ pub struct ReceivedFfi {
     pub file_name: Option<String>,
     pub size: u64,
     pub text: Option<String>,
+    /// A PNG to put on the clipboard.
+    pub image: Option<Vec<u8>>,
 }
 
 /// Items for the app to pick up whenever it next asks. Kept outside `CORE` so waiting on one
@@ -215,19 +820,6 @@ impl<T> Inbox<T> {
     }
 }
 
-/// Questions waiting for the app to pick up, and the answers the core is waiting on.
-struct Questions {
-    waiting: Inbox<PermissionRequestFfi>,
-    answers: Mutex<BTreeMap<u64, tokio::sync::oneshot::Sender<PermissionDecision>>>,
-    next_id: AtomicU64,
-}
-
-static QUESTIONS: Questions = Questions {
-    waiting: Inbox::new(),
-    answers: Mutex::new(BTreeMap::new()),
-    next_id: AtomicU64::new(0),
-};
-
 static RECEIVED: Inbox<ReceivedFfi> = Inbox::new();
 const RECEIVED_LIMIT: usize = 100;
 
@@ -241,9 +833,15 @@ pub enum NotificationEventFfi {
     Dismiss {
         notification_id: String,
     },
+    Mute {
+        package_name: String,
+    },
 }
 
 static NOTIFICATION_EVENTS: Inbox<NotificationEventFfi> = Inbox::new();
+
+/// The wallpaper each computer last sent, by fingerprint.
+static PEER_WALLPAPERS: Mutex<BTreeMap<String, Vec<u8>>> = Mutex::new(BTreeMap::new());
 
 /// Saves received files and text to history and hands them to the app through
 /// `next_received`.
@@ -268,11 +866,28 @@ fn deliver_received(
                 file_name: Some(file.file_name),
                 size: file.bytes_received,
                 text: None,
+                image: None,
             },
             RECEIVED_LIMIT,
         );
     }));
     handlers.on_clipboard_received = Some(Arc::new(move |peer, update| {
+        if update.format() == protocol::v1::ClipboardFormat::ImagePng {
+            RECEIVED.push(
+                ReceivedFfi {
+                    history_id: None,
+                    peer_fingerprint: peer.to_string(),
+                    peer_name: stores.peer_name(peer),
+                    file_path: None,
+                    file_name: None,
+                    size: update.payload.len() as u64,
+                    text: None,
+                    image: Some(update.payload),
+                },
+                RECEIVED_LIMIT,
+            );
+            return;
+        }
         let text = String::from_utf8_lossy(&update.payload).into_owned();
         let saved = stores.received_text(peer, &text);
         RECEIVED.push(
@@ -284,9 +899,18 @@ fn deliver_received(
                 file_name: None,
                 size: update.payload.len() as u64,
                 text: Some(text),
+                image: None,
             },
             RECEIVED_LIMIT,
         );
+    }));
+    handlers.on_device_look = Some(Arc::new(|peer, look| {
+        let mut wallpapers = PEER_WALLPAPERS.lock().unwrap();
+        if look.wallpaper.is_empty() {
+            wallpapers.remove(peer);
+        } else {
+            wallpapers.insert(peer.to_string(), look.wallpaper);
+        }
     }));
     handlers.on_notification = Some(Arc::new(|_peer, body| {
         let event = match body {
@@ -297,6 +921,9 @@ fn deliver_received(
             },
             notifications::Body::Dismiss(dismiss) => NotificationEventFfi::Dismiss {
                 notification_id: dismiss.notification_id,
+            },
+            notifications::Body::Mute(mute) => NotificationEventFfi::Mute {
+                package_name: mute.package_name,
             },
             // The phone shows its own notifications, not a computer's.
             notifications::Body::Post(_) => return,
@@ -358,65 +985,6 @@ pub fn next_received(timeout_ms: u32) -> Option<ReceivedFfi> {
     RECEIVED.next(Duration::from_millis(timeout_ms.into()))
 }
 
-fn permission_prompt(stores: Stores) -> sessions::PermissionPrompt {
-    Arc::new(move |request| {
-        let (answer, decision) = tokio::sync::oneshot::channel();
-        let id = QUESTIONS.next_id.fetch_add(1, Ordering::Relaxed);
-        QUESTIONS.answers.lock().unwrap().insert(id, answer);
-        QUESTIONS.waiting.push(
-            PermissionRequestFfi {
-                id,
-                peer_name: stores.peer_name(&request.peer),
-                peer_fingerprint: request.peer,
-                capability_id: request.capability.raw(),
-                detail: request.detail,
-                expires_at: unix_ms(request.deadline),
-            },
-            usize::MAX,
-        );
-
-        // The core stops waiting at the deadline; drop the question then too.
-        tokio::spawn(async move {
-            tokio::time::sleep_until(request.deadline).await;
-            QUESTIONS.answers.lock().unwrap().remove(&id);
-            QUESTIONS
-                .waiting
-                .items
-                .lock()
-                .unwrap()
-                .retain(|q| q.id != id);
-        });
-        decision
-    })
-}
-
-fn unix_ms(deadline: tokio::time::Instant) -> u64 {
-    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-    (std::time::SystemTime::now() + remaining)
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-/// Waits up to `timeout_ms` for the next question for the user.
-pub fn next_permission_request(timeout_ms: u32) -> Option<PermissionRequestFfi> {
-    QUESTIONS
-        .waiting
-        .next(Duration::from_millis(timeout_ms.into()))
-}
-
-/// Answers a question from `next_permission_request`. Late answers are ignored.
-pub fn answer_permission_request(id: u64, decision: PermissionDecisionFfi) {
-    let decision = match decision {
-        PermissionDecisionFfi::Allow => PermissionDecision::Allow,
-        PermissionDecisionFfi::AlwaysAllow => PermissionDecision::AlwaysAllow,
-        PermissionDecisionFfi::Decline => PermissionDecision::Decline,
-    };
-    if let Some(waiting) = QUESTIONS.answers.lock().unwrap().remove(&id) {
-        let _ = waiting.send(decision);
-    }
-}
-
 pub struct TrustedPeerFfi {
     pub fingerprint: String,
     pub display_name: String,
@@ -450,23 +1018,40 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
     let stores = Stores::open(&db_path)?;
     let keys = load_device_keys(&db_path)?;
 
-    // Next to the database, in the app's own storage; the app moves files on from there.
-    let download_dir = Path::new(&db_path)
+    let db_dir = Path::new(&db_path)
         .parent()
         .unwrap_or(Path::new("."))
-        .join("received");
+        .to_path_buf();
+    // Next to the database, in the app's own storage; the app moves files on from there.
+    let download_dir = db_dir.join("received");
     let _ = std::fs::create_dir_all(&download_dir);
     let incoming = sessions::IncomingFiles::default();
     // Named by `set_device_name` once the app has read the phone's name.
     let this_device = sessions::ThisDevice::default();
-    let handlers = deliver_received(
+    let mut handlers = deliver_received(
         sessions::SessionCapabilityHandlers::new(download_dir)
             .with_this_device(this_device.clone())
-            .with_incoming(incoming.clone())
-            .with_permission_prompt(permission_prompt(stores.clone())),
+            .with_incoming(incoming.clone()),
         stores.clone(),
     );
-    let device = Device::new(stores, keys, handlers, None)?;
+    handlers.photo_library = PHOTO_LIBRARY.lock().unwrap().clone();
+    handlers.message_store = MESSAGE_STORE.lock().unwrap().clone();
+    handlers.phone_search = PHONE_SEARCH.lock().unwrap().clone();
+    handlers.shared_folder = SHARED_FOLDER.lock().unwrap().clone();
+    handlers.call_control = CALL_CONTROL.lock().unwrap().clone();
+    handlers.media_control = MEDIA_CONTROL.lock().unwrap().clone();
+    handlers.ringer = RINGER.lock().unwrap().clone();
+    handlers.pointer_target = POINTER_TARGET.lock().unwrap().clone();
+    handlers.screen_source = SCREEN_SOURCE.lock().unwrap().clone();
+    handlers.camera_source = CAMERA_SOURCE.lock().unwrap().clone();
+    let (screen_feed, camera_feed) = (handlers.screen_feed.clone(), handlers.camera_feed.clone());
+    let waiting_dir = db_dir.join("waiting");
+    let device = Device::new(
+        stores,
+        keys,
+        handlers,
+        Some(send_waiting_on_connect(waiting_dir.clone())),
+    )?;
     let listener = {
         let _runtime = runtime.enter();
         device
@@ -481,6 +1066,9 @@ pub fn init_core(db_path: String) -> Result<(), ContinueFfiError> {
         discovery_tasks: Vec::new(),
         incoming,
         this_device,
+        screen_feed,
+        camera_feed,
+        waiting_dir,
     });
     Ok(())
 }
@@ -522,15 +1110,48 @@ pub fn set_device_name(name: String) -> Result<(), ContinueFfiError> {
     })
 }
 
-/// Sends the phone's battery to connected computers, now and whenever they connect.
-pub fn set_device_status(battery_percent: u32, charging: bool) -> Result<(), ContinueFfiError> {
+pub struct DeviceStatusFfi {
+    pub battery_percent: u32,
+    pub charging: bool,
+    pub cell_bars: Option<u32>,
+    pub wifi_bars: Option<u32>,
+    pub carrier: String,
+    pub network: String,
+}
+
+pub fn set_device_status(status: DeviceStatusFfi) -> Result<(), ContinueFfiError> {
     let (runtime, device) = device()?;
     let _runtime = runtime.enter();
     device.sessions.report_status(protocol::v1::DeviceStatus {
-        battery_percent: battery_percent.min(100),
-        charging,
+        battery_percent: status.battery_percent.min(100),
+        charging: status.charging,
+        cell_bars: status.cell_bars.map(|bars| bars.min(MAX_BARS)),
+        wifi_bars: status.wifi_bars.map(|bars| bars.min(MAX_BARS)),
+        carrier: status.carrier,
+        network: status.network,
     });
     Ok(())
+}
+
+const MAX_BARS: u32 = 4;
+
+/// `wallpaper_color` is 0xRRGGBB; `wallpaper` is a small JPEG when the app can read it.
+pub fn set_look(wallpaper_color: u32, wallpaper: Option<Vec<u8>>) -> Result<(), ContinueFfiError> {
+    let (runtime, device) = device()?;
+    let _runtime = runtime.enter();
+    device.sessions.report_look(protocol::v1::DeviceLook {
+        wallpaper_color: wallpaper_color & 0xff_ffff,
+        wallpaper: wallpaper.unwrap_or_default(),
+    });
+    Ok(())
+}
+
+pub fn peer_wallpaper(peer_fingerprint: String) -> Option<Vec<u8>> {
+    PEER_WALLPAPERS
+        .lock()
+        .unwrap()
+        .get(&peer_fingerprint)
+        .cloned()
 }
 
 pub fn get_device_fingerprint() -> Result<String, ContinueFfiError> {
@@ -612,6 +1233,56 @@ pub fn pair_from_qr(qr_payload: String) -> Result<TrustedPeerFfi, ContinueFfiErr
     }
 }
 
+pub struct NearbyComputerFfi {
+    pub name: String,
+    pub code: String,
+}
+
+/// Computers showing a pairing code on this network, gathered for `wait_ms`.
+pub fn nearby_computers(wait_ms: u32) -> Result<Vec<NearbyComputerFfi>, ContinueFfiError> {
+    let (runtime, _) = device()?;
+    let wait = std::time::Duration::from_millis(u64::from(wait_ms));
+    let found = runtime
+        .block_on(discovery::find_nearby(wait))
+        .map_err(internal)?;
+    Ok(found
+        .into_iter()
+        .map(|computer| NearbyComputerFfi {
+            name: computer.name,
+            code: computer.code,
+        })
+        .collect())
+}
+
+/// A nearby pairing waiting for the person to compare codes.
+static PENDING_PAIR: Mutex<Option<device::PendingPair>> = Mutex::new(None);
+
+/// Pairs with a computer found nearby. Returns the six digits to compare with its screen;
+/// nothing is trusted until [`confirm_nearby_pairing`] accepts.
+pub fn pair_nearby(code: String) -> Result<String, ContinueFfiError> {
+    let (runtime, device) = device()?;
+    let pending = match runtime.block_on(device.pair_nearby(&code)) {
+        Ok(pending) => pending,
+        Err(PairError::BadCode(reason)) => return Err(ContinueFfiError::InvalidQr(reason)),
+        Err(error) => return Err(pairing_failed(error)),
+    };
+    let digits = pending.code().to_string();
+    *PENDING_PAIR.lock().unwrap() = Some(pending);
+    Ok(digits)
+}
+
+/// The computer, once accepted; None when the codes didn't match and it was turned down.
+pub fn confirm_nearby_pairing(accept: bool) -> Result<Option<TrustedPeerFfi>, ContinueFfiError> {
+    let Some(pending) = PENDING_PAIR.lock().unwrap().take() else {
+        return Ok(None);
+    };
+    if !accept {
+        return Ok(None);
+    }
+    let peer = pending.accept().map_err(pairing_failed)?;
+    Ok(Some(peer.into()))
+}
+
 pub fn list_trusted_peers() -> Result<Vec<TrustedPeerFfi>, ContinueFfiError> {
     let peers = with_core(|core| core.device.stores.trust.list_peers().map_err(database))?;
     Ok(peers.into_iter().map(Into::into).collect())
@@ -624,33 +1295,26 @@ pub fn remove_trusted_peer(fingerprint: String) -> Result<bool, ContinueFfiError
         .map_err(database)
 }
 
-pub fn query_permission(
-    peer_fingerprint: String,
-    capability_id: u32,
-) -> Result<String, ContinueFfiError> {
+pub fn is_allowed(peer_fingerprint: String, capability_id: u32) -> Result<bool, ContinueFfiError> {
     with_core(|core| {
-        let state = core
+        Ok(core
             .device
             .stores
             .permissions
-            .query_state(&peer_fingerprint, CapabilityId(capability_id))
-            .map_err(database)?;
-        Ok(state.as_str().to_string())
+            .is_allowed(&peer_fingerprint, CapabilityId(capability_id)))
     })
 }
 
-pub fn set_permission(
+pub fn set_allowed(
     peer_fingerprint: String,
     capability_id: u32,
-    grant: String,
+    allowed: bool,
 ) -> Result<(), ContinueFfiError> {
-    let state = PermissionState::parse(&grant)
-        .ok_or_else(|| internal(format!("Invalid grant string: {grant}")))?;
     with_core(|core| {
         core.device
             .stores
             .permissions
-            .set_state(&peer_fingerprint, CapabilityId(capability_id), state)
+            .set_allowed(&peer_fingerprint, CapabilityId(capability_id), allowed)
             .map_err(database)
     })
 }
@@ -676,6 +1340,13 @@ pub fn reconnect(peer_fingerprint: String) -> Result<(), ContinueFfiError> {
         core.device.sessions.resume_auto_connect(&peer_fingerprint);
         Ok(())
     })
+}
+
+/// Pausing drops every connection and turns new ones away until resumed.
+pub fn set_paused(paused: bool) -> Result<(), ContinueFfiError> {
+    let (runtime, device) = device()?;
+    runtime.block_on(device.sessions.set_paused(paused));
+    Ok(())
 }
 
 pub fn disconnect(peer_fingerprint: String) -> Result<(), ContinueFfiError> {
@@ -765,6 +1436,225 @@ pub fn next_notification_event(timeout_ms: u32) -> Option<NotificationEventFfi> 
     NOTIFICATION_EVENTS.next(Duration::from_millis(timeout_ms.into()))
 }
 
+pub fn announce_photo(photo: PhotoFfi) -> Result<(), ContinueFfiError> {
+    let body = protocol::v1::photos_message::Body::Taken(photo.into());
+    tell_connected(move |device, peer| {
+        let body = body.clone();
+        async move { device.photos(&peer, body).await.map(drop) }
+    })
+}
+
+pub fn announce_messages_changed() -> Result<(), ContinueFfiError> {
+    let body = protocol::v1::messages_message::Body::Changed(Default::default());
+    tell_connected(move |device, peer| {
+        let body = body.clone();
+        async move { device.messages(&peer, body).await.map(drop) }
+    })
+}
+
+pub fn announce_call(call: CallFfi) -> Result<(), ContinueFfiError> {
+    use protocol::v1::call::State;
+    let state = match call.state {
+        CallStateFfi::Ringing => State::Ringing,
+        CallStateFfi::Talking => State::Talking,
+        CallStateFfi::Ended => State::Ended,
+    };
+    let body = protocol::v1::calls_message::Body::Call(protocol::v1::Call {
+        state: state.into(),
+        number: call.number,
+        name: call.name,
+    });
+    tell_connected(move |device, peer| {
+        let body = body.clone();
+        async move { device.calls(&peer, body).await.map(drop) }
+    })
+}
+
+pub fn announce_now_playing(playing: NowPlayingFfi) -> Result<(), ContinueFfiError> {
+    let body = protocol::v1::media_message::Body::NowPlaying(protocol::v1::NowPlaying {
+        title: playing.title,
+        artist: playing.artist,
+        app: playing.app,
+        playing: playing.playing,
+        duration_ms: playing.duration_ms,
+        position_ms: playing.position_ms,
+        art: playing.art.unwrap_or_default(),
+    });
+    tell_connected(move |device, peer| {
+        let body = body.clone();
+        async move { device.media(&peer, body).await.map(drop) }
+    })
+}
+
+/// Best effort: failures are logged, not returned.
+fn tell_connected<F>(send: impl Fn(Device, String) -> F) -> Result<(), ContinueFfiError>
+where
+    F: std::future::Future<Output = Result<(), device::SendError>>,
+{
+    let (runtime, device) = device()?;
+    runtime.block_on(async {
+        for peer in device.sessions.connected() {
+            if let Err(error) = send(device.clone(), peer.clone()).await {
+                tracing::debug!("Couldn't reach {peer}: {error}");
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Kept until the computer connects. The file is the app's temporary copy; it's moved into
+/// the core's own folder and deleted once sent.
+pub fn send_file_later(
+    peer_fingerprint: String,
+    file_path: String,
+) -> Result<(), ContinueFfiError> {
+    let (_, device) = device()?;
+    let from = Path::new(&file_path);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    let folder = waiting_dir()?.join(now.map_or(0, |since| since.as_nanos()).to_string());
+    let to = folder.join(from.file_name().unwrap_or_default());
+    std::fs::create_dir_all(&folder)
+        .and_then(|()| std::fs::rename(from, &to).or_else(|_| std::fs::copy(from, &to).map(drop)))
+        .map_err(internal)?;
+    device
+        .send_later(
+            &peer_fingerprint,
+            history::Kind::File,
+            &to.to_string_lossy(),
+        )
+        .map(drop)
+        .map_err(internal)
+}
+
+pub fn send_text_later(peer_fingerprint: String, text: String) -> Result<(), ContinueFfiError> {
+    let (_, device) = device()?;
+    device
+        .send_later(&peer_fingerprint, history::Kind::Text, &text)
+        .map(drop)
+        .map_err(internal)
+}
+
+/// Sends what was kept for a computer as soon as it connects, then deletes the copies made
+/// for it in `waiting_dir`.
+fn send_waiting_on_connect(waiting_dir: PathBuf) -> sessions::StateListener {
+    Arc::new(move |peer, state| {
+        if state != SessionState::Connected {
+            return;
+        }
+        // Only missing before `init_core` finishes, when nothing has connected yet.
+        let Ok((runtime, device)) = device() else {
+            return;
+        };
+        let (peer, waiting_dir) = (peer.to_string(), waiting_dir.clone());
+        runtime.spawn(async move {
+            device.share_snippets(&peer).await;
+            device
+                .send_waiting(&peer, |item, _| {
+                    let folder = Path::new(&item.content).parent();
+                    if let Some(folder) = folder.filter(|f| f.starts_with(&waiting_dir)) {
+                        let _ = std::fs::remove_dir_all(folder);
+                    }
+                })
+                .await;
+        });
+    })
+}
+
+fn waiting_dir() -> Result<PathBuf, ContinueFfiError> {
+    with_core(|core| Ok(core.waiting_dir.clone()))
+}
+
+pub fn send_clipboard_image(
+    peer_fingerprint: String,
+    png: Vec<u8>,
+) -> Result<(), ContinueFfiError> {
+    let (runtime, device) = device()?;
+    runtime
+        .block_on(device.send_image(&peer_fingerprint, png))
+        .map_err(internal)
+}
+
+pub struct SnippetFfi {
+    pub id: String,
+    pub text: String,
+}
+
+impl From<history::Snippet> for SnippetFfi {
+    fn from(snippet: history::Snippet) -> Self {
+        Self {
+            id: snippet.id,
+            text: snippet.text,
+        }
+    }
+}
+
+/// What the phone broadcasts over Bluetooth right now so paired computers know it's near.
+pub fn presence_token() -> Result<Vec<u8>, ContinueFfiError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    with_core(|core| Ok(pairing::presence_token(&core.device.fingerprint, now).to_vec()))
+}
+
+/// The four words the computer shows for this pairing too.
+pub fn pairing_words(peer_fingerprint: String) -> Result<String, ContinueFfiError> {
+    with_core(|core| {
+        Ok(pairing::pairing_words(&core.device.fingerprint, &peer_fingerprint).join(" "))
+    })
+}
+
+/// Pinned text, newest first.
+pub fn snippets() -> Result<Vec<SnippetFfi>, ContinueFfiError> {
+    let (_, device) = device()?;
+    let snippets = device.stores.history.snippets(false).map_err(internal)?;
+    Ok(snippets.into_iter().map(Into::into).collect())
+}
+
+/// Pins text on every paired computer too.
+pub fn pin_snippet(text: String) -> Result<SnippetFfi, ContinueFfiError> {
+    let (runtime, device) = device()?;
+    let snippet = runtime.block_on(device.pin(&text)).map_err(internal)?;
+    Ok(snippet.into())
+}
+
+pub fn unpin_snippet(id: String) -> Result<(), ContinueFfiError> {
+    let (runtime, device) = device()?;
+    runtime.block_on(device.unpin(&id)).map_err(internal)
+}
+
+pub enum ComputerActionFfi {
+    Lock,
+    Sleep,
+    TypeText { text: String },
+    OpenLink { url: String },
+}
+
+/// Rings the computer so it can be found, or stops it. False if it didn't.
+pub fn ring_computer(peer_fingerprint: String, on: bool) -> Result<bool, ContinueFfiError> {
+    let (runtime, device) = device()?;
+    runtime
+        .block_on(device.ring(&peer_fingerprint, on))
+        .map_err(internal)
+}
+
+/// False if the computer didn't do it, such as with that switched off there.
+pub fn act_on_computer(
+    peer_fingerprint: String,
+    action: ComputerActionFfi,
+) -> Result<bool, ContinueFfiError> {
+    use protocol::v1::computer_action::Body;
+    let body = match action {
+        ComputerActionFfi::Lock => Body::Lock(true),
+        ComputerActionFfi::Sleep => Body::Sleep(true),
+        ComputerActionFfi::TypeText { text } => Body::TypeText(text),
+        ComputerActionFfi::OpenLink { url } => Body::OpenLink(url),
+    };
+    let (runtime, device) = device()?;
+    runtime
+        .block_on(device.act(&peer_fingerprint, body))
+        .map_err(internal)
+}
+
 pub fn send_clipboard_text(peer_fingerprint: String, text: String) -> Result<(), ContinueFfiError> {
     let (runtime, device) = device()?;
     runtime
@@ -828,39 +1718,6 @@ mod tests {
         assert_eq!(files, 0, "no key left in files");
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    // One test, since the question queue is shared by the whole process.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn questions_reach_the_app_and_answers_reach_the_core() {
-        let none = tokio::task::spawn_blocking(|| next_permission_request(10))
-            .await
-            .unwrap();
-        assert!(none.is_none());
-
-        let prompt = permission_prompt(memory_stores());
-        let decision = prompt(sessions::PermissionRequest {
-            peer: "phone".to_string(),
-            capability: CapabilityId::FILE_TRANSFER,
-            detail: Some("photo.jpg".to_string()),
-            deadline: tokio::time::Instant::now() + sessions::PROMPT_TIMEOUT,
-        });
-
-        let question = tokio::task::spawn_blocking(|| next_permission_request(1000))
-            .await
-            .unwrap()
-            .expect("a question");
-        assert_eq!(question.peer_fingerprint, "phone");
-        assert_eq!(question.capability_id, CapabilityId::FILE_TRANSFER.raw());
-        assert_eq!(question.detail.as_deref(), Some("photo.jpg"));
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-        assert!(question.expires_at > now && question.expires_at <= now + 30_000);
-
-        answer_permission_request(question.id, PermissionDecisionFfi::AlwaysAllow);
-        assert_eq!(decision.await.unwrap(), PermissionDecision::AlwaysAllow);
     }
 
     fn memory_stores() -> Stores {

@@ -1,0 +1,24 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Every pinned clip a device has, removed ones included, sent on connect and after a change.
+// For each id the receiver keeps whichever copy changed last, so removals carry over too.
+// Answered with a SnippetsReply.
+message Snippets {
+  repeated Snippet snippets = 1;
+}
+
+message Snippet {
+  string id = 1;
+  string text = 2;
+  // When it was pinned or removed, in Unix milliseconds.
+  uint64 changed_at = 3;
+  bool removed = 4;
+}
+
+message SnippetsReply {
+  bool taken = 1;
+}

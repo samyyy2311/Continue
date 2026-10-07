@@ -8,5 +8,6 @@ pub use dispatcher::{acknowledge, read, send};
 pub use error::NotificationError;
 pub use protocol::v1::notification_message::Body;
 pub use protocol::v1::{
-    NotificationAction, NotificationActionInvoke, NotificationDismiss, NotificationPost,
+    NotificationAction, NotificationActionInvoke, NotificationDismiss, NotificationMute,
+    NotificationPost,
 };

@@ -1,0 +1,14 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+// Sent by a computer to ring the phone, even on silent, or to stop it ringing.
+message Ring {
+  bool on = 1;
+}
+
+message RingReply {
+  bool done = 1;
+}
