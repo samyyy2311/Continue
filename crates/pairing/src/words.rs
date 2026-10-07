@@ -4,7 +4,9 @@
 //! Four words both devices show for a pairing, made from both identities, so people can check
 //! they paired with the device they meant to without scanning anything.
 
-const INFO: &[u8] = b"PAIRING_WORDS_V1";
+use sha2::{Digest, Sha256};
+
+const DOMAIN: &[u8] = b"PAIRING_WORDS_V1";
 
 /// The same four words on both devices, whichever one asks.
 pub fn pairing_words(one: &str, other: &str) -> [&'static str; 4] {
@@ -13,9 +15,14 @@ pub fn pairing_words(one: &str, other: &str) -> [&'static str; 4] {
     } else {
         (other, one)
     };
-    let both = [first.as_bytes(), b"\0", second.as_bytes()].concat();
-    let key = crypto::hkdf::derive_key(&both, b"continue", INFO).expect("32 bytes is always valid");
-    std::array::from_fn(|i| WORDS[usize::from(key[i])])
+    // Both identities are public, so a hash is enough; there's no secret to derive a key from.
+    let hash = Sha256::new()
+        .chain_update(DOMAIN)
+        .chain_update(first)
+        .chain_update(b"\0")
+        .chain_update(second)
+        .finalize();
+    std::array::from_fn(|i| WORDS[usize::from(hash[i])])
 }
 
 /// How long a presence token lasts before the phone moves to the next one.
