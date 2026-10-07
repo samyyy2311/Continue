@@ -27,12 +27,14 @@ message Call {
 
 message CallAction {
   enum Kind {
-    ANSWER = 0;
-    DECLINE = 1;
+    // Missing or from a newer version; nothing is done.
+    KIND_UNSPECIFIED = 0;
+    ANSWER = 1;
+    DECLINE = 2;
     // Stops the ringtone and leaves the call ringing.
-    SILENCE = 2;
+    SILENCE = 3;
     // Calls `number` from the phone.
-    DIAL = 3;
+    DIAL = 4;
   }
   Kind kind = 1;
   string number = 2;

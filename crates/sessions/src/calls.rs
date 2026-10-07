@@ -41,6 +41,7 @@ pub(crate) async fn serve_calls(
                     let kind = action.kind();
                     reply.done = off_runtime(move || {
                         Some(match kind {
+                            call_action::Kind::Unspecified => false,
                             call_action::Kind::Answer => control.answer(),
                             call_action::Kind::Decline => control.decline(),
                             call_action::Kind::Silence => control.silence(),
