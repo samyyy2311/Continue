@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_service_description">Lets your paired computer tap, swipe and go back or home on this phone while it shows the screen. Continue does nothing with it otherwise.</string>
+</resources>

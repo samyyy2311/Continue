@@ -14,6 +14,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Laptop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,15 +36,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.continueapp.android.AppState
 import org.continueapp.android.ui.components.ActionButton
 import org.continueapp.android.ui.components.PageTitle
 import org.continueapp.android.ui.components.ScreenPadding
+import org.continueapp.bridge.NearbyComputer
 
-/** [onPair] returns an error message, or null once paired. */
+/** Scans or takes a computer's code, or picks a computer nearby and compares six digits. */
 @Composable
 fun PairScreen(
-    onPair: suspend (String) -> String?,
+    state: AppState,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -54,6 +59,37 @@ fun PairScreen(
     var message by remember { mutableStateOf<String?>(null) }
     // Changing this restarts the scanner after a failed attempt.
     var scanAttempt by remember { mutableIntStateOf(0) }
+    var nearby by remember { mutableStateOf(emptyList<NearbyComputer>()) }
+    // The computer picked from Nearby and the digits to compare with its screen.
+    var comparing by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            nearby = state.nearbyComputers()
+            delay(NEARBY_REFRESH_MS)
+        }
+    }
+
+    fun pairNearby(computer: NearbyComputer) {
+        pairing = true
+        message = null
+        scope.launch {
+            state
+                .pairNearby(computer.code)
+                .onSuccess { digits -> comparing = computer.name to digits }
+                .onFailure { message = "Couldn't pair with ${computer.name}. Try again." }
+            pairing = false
+        }
+    }
+
+    fun answer(accept: Boolean) {
+        comparing = null
+        scope.launch {
+            val error = state.confirmNearbyPairing(accept)
+            if (!accept) return@launch
+            if (error == null) onDone() else message = error
+        }
+    }
 
     val requestCamera =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -73,7 +109,7 @@ fun PairScreen(
         pairing = true
         message = null
         scope.launch {
-            val error = onPair(code)
+            val error = state.pair(code)
             pairing = false
             if (error == null) {
                 onDone()
@@ -143,5 +179,33 @@ fun PairScreen(
         ) {
             Text(if (scanning) "Type the code instead" else "Scan with the camera")
         }
+
+        if (nearby.isNotEmpty()) {
+            Text("Nearby", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+            nearby.forEach { computer ->
+                TextButton(onClick = { pairNearby(computer) }, enabled = !pairing) {
+                    Icon(Icons.Outlined.Laptop, contentDescription = null)
+                    Text(computer.name, modifier = Modifier.padding(start = 12.dp))
+                }
+            }
+        }
+    }
+
+    comparing?.let { (name, digits) ->
+        AlertDialog(
+            onDismissRequest = { answer(false) },
+            title = { Text("Check $name") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Pair if it shows the same six digits:")
+                    Text("${digits.take(3)} ${digits.drop(3)}", style = MaterialTheme.typography.displaySmall)
+                }
+            },
+            confirmButton = { TextButton(onClick = { answer(true) }) { Text("Pair") } },
+            dismissButton = { TextButton(onClick = { answer(false) }) { Text("Not mine") } },
+        )
     }
 }
+
+/** How often the list of computers nearby is looked for again. */
+private const val NEARBY_REFRESH_MS = 1_500L

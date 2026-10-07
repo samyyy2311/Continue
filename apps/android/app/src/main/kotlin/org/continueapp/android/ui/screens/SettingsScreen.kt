@@ -2,6 +2,7 @@ package org.continueapp.android.ui.screens
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -14,13 +15,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Bluetooth
+import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.PauseCircle
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.ScreenShare
+import androidx.compose.material.icons.outlined.Sms
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.Switch
@@ -32,10 +41,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
 import org.continueapp.android.ContinueApplication
+import org.continueapp.android.ControlService
+import org.continueapp.android.appLabel
+import org.continueapp.android.canAdvertise
+import org.continueapp.android.hasNotificationAccess
 import org.continueapp.android.needsNotificationPermission
 import org.continueapp.android.ui.components.ChoiceRow
 import org.continueapp.android.ui.components.PageTitle
@@ -43,6 +56,13 @@ import org.continueapp.android.ui.components.ScreenPadding
 import org.continueapp.android.ui.components.SectionLabel
 import org.continueapp.android.ui.components.SettingsRow
 import org.continueapp.android.ui.theme.ThemeMode
+import org.continueapp.bridge.CALLS_PERMISSIONS
+import org.continueapp.bridge.MESSAGES_PERMISSIONS
+import org.continueapp.bridge.PHOTOS_PERMISSION
+import org.continueapp.bridge.canReadFiles
+import org.continueapp.bridge.canReadMessages
+import org.continueapp.bridge.canReadPhotos
+import org.continueapp.bridge.canSeeCalls
 
 private const val SOURCE_URL = "https://github.com/samyyy2311/Continue"
 
@@ -90,6 +110,65 @@ private fun SaveFolderRow() {
 private fun folderName(tree: Uri): String {
     val path = DocumentsContract.getTreeDocumentId(tree).substringAfter(':')
     return path.ifBlank { "Picked folder" }
+}
+
+@Composable
+private fun PauseRow() {
+    val app = LocalContext.current.applicationContext as ContinueApplication
+    var on by remember { mutableStateOf(app.paused) }
+    SettingsRow(
+        title = "Pause connections",
+        subtitle = "Computers are disconnected and can't connect until you turn this off.",
+        icon = Icons.Outlined.PauseCircle,
+        trailing = {
+            Switch(
+                checked = on,
+                onCheckedChange = {
+                    on = it
+                    app.paused = it
+                },
+            )
+        },
+    )
+}
+
+/** Lets a computer lock itself when the phone moves away. */
+@Composable
+private fun PresenceRow() {
+    val context = LocalContext.current
+    val app = context.applicationContext as ContinueApplication
+    var on by remember { mutableStateOf(app.announcesPresence && canAdvertise(context)) }
+    val turnOn = {
+        on = true
+        app.announcesPresence = true
+    }
+    val allow =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) turnOn()
+        }
+    SettingsRow(
+        title = "Let your computer see you're nearby",
+        subtitle =
+            "Sends a signal over Bluetooth that only your paired computers recognise, " +
+                "so one can lock itself when you walk away.",
+        icon = Icons.Outlined.Bluetooth,
+        trailing = {
+            Switch(
+                checked = on,
+                onCheckedChange = { wanted ->
+                    when {
+                        !wanted -> {
+                            on = false
+                            app.announcesPresence = false
+                        }
+                        canAdvertise(context) -> turnOn()
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+                            allow.launch(Manifest.permission.BLUETOOTH_ADVERTISE)
+                    }
+                },
+            )
+        },
+    )
 }
 
 /** Sends anything newly copied when the app opens. */
@@ -143,24 +222,64 @@ private fun BackgroundRow() {
     )
 }
 
-/** Shows the phone's notifications on the computer. Android grants the access in its own settings. */
+/** Toggle for access Android grants either through a prompt or on its own settings page. */
 @Composable
-private fun NotificationsRow() {
+private fun AccessRow(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    granted: (Context) -> Boolean,
+    permissions: Array<String> = emptyArray(),
+    settings: Intent? = null,
+) {
     val context = LocalContext.current
-
-    fun granted() = context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
-
-    var on by remember { mutableStateOf(granted()) }
-    val openSettings =
-        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { on = granted() }
-    val toggle = { openSettings.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+    var on by remember { mutableStateOf(granted(context)) }
+    val update = {
+        on = granted(context)
+        (context.applicationContext as ContinueApplication).watchPhone()
+    }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { update() }
+    val openSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { update() }
+    val toggle = {
+        when {
+            settings != null -> openSettings.launch(settings)
+            on -> {
+                val details = Uri.fromParts("package", context.packageName, null)
+                openSettings.launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, details))
+            }
+            else -> ask.launch(permissions)
+        }
+    }
     SettingsRow(
-        title = "Show notifications on your computer",
-        subtitle = "Read and reply to them from your computer. Turn on Continue in the list that opens.",
-        icon = Icons.Outlined.Notifications,
+        title = title,
+        subtitle = subtitle,
+        icon = icon,
         onClick = toggle,
         trailing = { Switch(checked = on, onCheckedChange = { toggle() }) },
     )
+}
+
+/** Apps muted from a computer, each with a way to show it again. */
+@Composable
+private fun MutedAppsRows() {
+    val context = LocalContext.current
+    val app = context.applicationContext as ContinueApplication
+    var muted by remember { mutableStateOf(app.mutedApps.sorted()) }
+    muted.forEach { packageName ->
+        SettingsRow(
+            title = appLabel(context, packageName),
+            subtitle = "Not shown on your computer",
+            icon = Icons.Outlined.NotificationsOff,
+            trailing = {
+                TextButton(
+                    onClick = {
+                        app.mutedApps -= packageName
+                        muted = muted - packageName
+                    },
+                ) { Text("Unmute") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -184,7 +303,60 @@ fun SettingsScreen(
             trailing = { Switch(checked = visible, onCheckedChange = onVisibleChange) },
         )
         BackgroundRow()
-        NotificationsRow()
+        AccessRow(
+            title = "Show notifications on your computer",
+            subtitle = "Read and reply to them from your computer. Turn on Continue in the list that opens.",
+            icon = Icons.Outlined.Notifications,
+            granted = ::hasNotificationAccess,
+            settings = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),
+        )
+        MutedAppsRows()
+        AccessRow(
+            title = "Show photos on your computer",
+            subtitle = "Browse your photos from your computer, and see new ones as you take them.",
+            icon = Icons.Outlined.PhotoLibrary,
+            permissions = arrayOf(PHOTOS_PERMISSION),
+            granted = ::canReadPhotos,
+        )
+        AccessRow(
+            title = "Text from your computer",
+            subtitle = "Read your texts and reply from your computer.",
+            icon = Icons.Outlined.Sms,
+            permissions = MESSAGES_PERMISSIONS,
+            granted = ::canReadMessages,
+        )
+        AccessRow(
+            title = "Calls on your computer",
+            subtitle = "See who's calling and answer or decline from your computer.",
+            icon = Icons.Outlined.Call,
+            permissions = CALLS_PERMISSIONS,
+            granted = ::canSeeCalls,
+        )
+        AccessRow(
+            title = "Control this phone from your computer",
+            subtitle =
+                "Tap, swipe and go back or home from the screen's window on your computer. " +
+                    "Turn on Continue in the list that opens.",
+            icon = Icons.Outlined.ScreenShare,
+            granted = ControlService::isOn,
+            settings = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+        )
+        AccessRow(
+            title = "Browse phone files from your computer",
+            subtitle = "See your phone's folders on your computer and copy files from them.",
+            icon = Icons.Outlined.FolderOpen,
+            granted = ::canReadFiles,
+            permissions = arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE),
+            settings =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val app = Uri.fromParts("package", context.packageName, null)
+                    Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, app)
+                } else {
+                    null
+                },
+        )
+        PauseRow()
+        PresenceRow()
         SendCopiesRow()
 
         SectionLabel("Received files")

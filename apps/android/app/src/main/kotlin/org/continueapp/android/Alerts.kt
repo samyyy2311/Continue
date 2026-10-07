@@ -6,7 +6,6 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -14,19 +13,14 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.launch
-import org.continueapp.android.ui.screens.describe
-import org.continueapp.bridge.PermissionAnswer
-import org.continueapp.bridge.PermissionQuestion
 
 private const val CHANNEL_BACKGROUND = "background"
 private const val CHANNEL_RECEIVED = "received"
-private const val CHANNEL_QUESTIONS = "questions"
 const val BACKGROUND_NOTIFICATION_ID = 1
-private const val QUESTION_NOTIFICATION_ID = 2
+const val SCREEN_NOTIFICATION_ID = 3
+const val CAMERA_NOTIFICATION_ID = 4
+private const val RINGING_NOTIFICATION_ID = 5
 private const val FIRST_ARRIVAL_ID = 100
-private const val EXTRA_QUESTION = "question"
-private const val EXTRA_ANSWER = "answer"
 private const val IMMUTABLE = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
 
 private var nextArrivalId = FIRST_ARRIVAL_ID
@@ -39,9 +33,11 @@ fun createNotificationChannels(context: Context) {
             NotificationChannel(CHANNEL_BACKGROUND, "Receiving in the background", NotificationManager.IMPORTANCE_LOW)
                 .apply { description = "Shown while Continue keeps receiving with the app closed." },
             NotificationChannel(CHANNEL_RECEIVED, "Files and text you receive", NotificationManager.IMPORTANCE_DEFAULT),
-            NotificationChannel(CHANNEL_QUESTIONS, "Requests to send", NotificationManager.IMPORTANCE_HIGH),
         )
-    context.getSystemService(NotificationManager::class.java)?.createNotificationChannels(channels)
+    val manager = context.getSystemService(NotificationManager::class.java) ?: return
+    manager.createNotificationChannels(channels)
+    // Leftover from older versions.
+    manager.deleteNotificationChannel("questions")
 }
 
 /** Whether Android 13 or newer still needs to be asked before notifications can show. */
@@ -70,6 +66,41 @@ fun backgroundNotification(context: Context): Notification {
         .build()
 }
 
+/** Ongoing while the screen or camera is shared, with a Stop action. */
+fun sharingNotification(
+    context: Context,
+    title: String,
+    stop: Intent,
+): Notification =
+    NotificationCompat
+        .Builder(context, CHANNEL_BACKGROUND)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setContentTitle(title)
+        .setContentIntent(openApp(context))
+        .addAction(0, "Stop", PendingIntent.getService(context, 0, stop, IMMUTABLE))
+        .setOngoing(true)
+        .build()
+
+/** Stopping or swiping it away stops the ringing. */
+fun notifyRinging(
+    context: Context,
+    stop: Intent,
+) {
+    val stopping = PendingIntent.getBroadcast(context, 0, stop, IMMUTABLE)
+    val notification =
+        NotificationCompat
+            .Builder(context, CHANNEL_RECEIVED)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Your computer is ringing this phone")
+            .setContentIntent(stopping)
+            .setDeleteIntent(stopping)
+            .addAction(0, "Stop", stopping)
+            .build()
+    post(context, RINGING_NOTIFICATION_ID, notification)
+}
+
+fun cancelRinging(context: Context) = NotificationManagerCompat.from(context).cancel(RINGING_NOTIFICATION_ID)
+
 /** Shows the latest connection state in the background notification. */
 fun updateBackgroundNotification(context: Context) {
     post(context, BACKGROUND_NOTIFICATION_ID, backgroundNotification(context))
@@ -94,63 +125,6 @@ fun notifyArrival(
             .setAutoCancel(true)
             .build()
     post(context, id, notification)
-}
-
-/** Asks from the notification shade, with the same three answers as the dialog. */
-fun notifyQuestion(
-    context: Context,
-    question: PermissionQuestion,
-) {
-    val (title, body) = describe(question)
-    val notification =
-        NotificationCompat
-            .Builder(context, CHANNEL_QUESTIONS)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setContentIntent(openApp(context))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setTimeoutAfter(question.expiresAt - System.currentTimeMillis())
-            .addAction(0, "Decline", answerIntent(context, question.id, PermissionAnswer.DECLINE))
-            .addAction(0, "Always allow", answerIntent(context, question.id, PermissionAnswer.ALWAYS_ALLOW))
-            .addAction(0, "Allow", answerIntent(context, question.id, PermissionAnswer.ALLOW))
-            .build()
-    post(context, QUESTION_NOTIFICATION_ID, notification)
-}
-
-fun cancelQuestion(context: Context) = NotificationManagerCompat.from(context).cancel(QUESTION_NOTIFICATION_ID)
-
-/** Answers a question from its notification's buttons. */
-class QuestionAnswerReceiver : BroadcastReceiver() {
-    override fun onReceive(
-        context: Context,
-        intent: Intent,
-    ) {
-        val answer = PermissionAnswer.entries.firstOrNull { it.name == intent.getStringExtra(EXTRA_ANSWER) } ?: return
-        val app = context.applicationContext as ContinueApplication
-        val done = goAsync()
-        app.scope.launch {
-            try {
-                app.state.questions.answer(intent.getLongExtra(EXTRA_QUESTION, -1), answer)
-            } finally {
-                done.finish()
-            }
-        }
-    }
-}
-
-private fun answerIntent(
-    context: Context,
-    question: Long,
-    answer: PermissionAnswer,
-): PendingIntent {
-    val intent =
-        Intent(context, QuestionAnswerReceiver::class.java)
-            .putExtra(EXTRA_QUESTION, question)
-            .putExtra(EXTRA_ANSWER, answer.name)
-    // Each question gets its own buttons, so an old notification can never answer a newer one.
-    val code = (question * PermissionAnswer.entries.size + answer.ordinal).toInt()
-    return PendingIntent.getBroadcast(context, code, intent, IMMUTABLE)
 }
 
 private fun openApp(context: Context): PendingIntent =

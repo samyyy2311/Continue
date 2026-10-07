@@ -9,6 +9,7 @@ import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
+import org.continueapp.bridge.ComputerAction
 import org.continueapp.bridge.TrustedPeer
 
 private const val SHARE_CATEGORY = "org.continueapp.android.SEND_TO_COMPUTER"
@@ -71,9 +72,11 @@ fun publishShareTargets(
     ShortcutManagerCompat.setDynamicShortcuts(context, shortcuts)
 }
 
-/** Connects to [peer] and waits until it is, as a share to a computer that isn't connected would fail. */
-private suspend fun AppState.connectNow(peer: String): String? {
-    reconnect(peer)?.let { return it }
+private val WEB_LINK = Regex("""https?://\S+""")
+
+/** Connects to [peer] and waits until it is. False if it couldn't be reached in time. */
+private suspend fun AppState.connectNow(peer: String): Boolean {
+    if (reconnect(peer) != null) return false
     val reached =
         withTimeoutOrNull(CONNECT_WAIT_MS) {
             refresh()
@@ -82,10 +85,13 @@ private suspend fun AppState.connectNow(peer: String): String? {
                 refresh()
             }
         }
-    return if (reached == null) "Couldn't reach your computer. Check that both are on the same Wi-Fi." else null
+    return reached != null
 }
 
-/** Sends what another app shared, connecting to [peer] first if it isn't already. */
+/**
+ * Sends what another app shared, connecting to [peer] first if it isn't already. If it can't
+ * be reached, what was shared waits and goes when it connects.
+ */
 suspend fun AppState.sendShared(
     context: Context,
     peer: TrustedPeer,
@@ -93,10 +99,14 @@ suspend fun AppState.sendShared(
 ): String? {
     // Puts the computers shared to most often first in the share sheet.
     ShortcutManagerCompat.reportShortcutUsed(context, peer.fingerprint)
-    if (peer.fingerprint !in connected) connectNow(peer.fingerprint)?.let { return it }
-    return if (shared.uris.isNotEmpty()) {
-        sendFiles(context, peer, shared.uris)
-    } else {
-        sendText(peer, shared.text.orEmpty())
+    if (peer.fingerprint !in connected && !connectNow(peer.fingerprint)) {
+        return sendLater(context, peer, shared.text, shared.uris) ?: "Sends when ${peer.displayName} connects"
+    }
+    val link = shared.text?.trim()?.takeIf { it.matches(WEB_LINK) }
+    return when {
+        shared.uris.isNotEmpty() -> sendFiles(context, peer, shared.uris)
+        // A link shared on its own opens on the computer, to carry on reading there.
+        link != null -> act(peer, ComputerAction.OpenLink(link)) ?: "Opened on ${peer.displayName}"
+        else -> sendText(peer, shared.text.orEmpty())
     }
 }
