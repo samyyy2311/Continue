@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -62,6 +64,9 @@ jobs:
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -169,6 +174,80 @@ jobs:
         run: pnpm vitest run
         working-directory: apps/desktop
 
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
       - name: Tauri build check
         run: pnpm tauri build --debug
         working-directory: apps/desktop
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: apps/desktop/src-tauri
+
+      - name: Tests
+        run: cargo test --workspace
+        working-directory: apps/desktop/src-tauri
+
+  desktop-windows:
+    name: Desktop (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Install protoc
+        run: choco install protoc --no-progress -y
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: apps/desktop
+
+      - name: Build the frontend
+        run: pnpm build
+        working-directory: apps/desktop
+
+      - name: Format check
+        run: cargo fmt --check --all
+        working-directory: apps/desktop/src-tauri
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: apps/desktop/src-tauri
+
+      - name: Tests
+        run: cargo test --workspace
+        working-directory: apps/desktop/src-tauri
+
+      - name: Tauri build check
+        run: pnpm tauri build --debug --no-bundle
+        working-directory: apps/desktop
+
+  workflows:
+    name: Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        uses: raven-actions/actionlint@v2
