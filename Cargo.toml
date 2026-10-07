@@ -51,7 +51,7 @@ base64 = "0.22"
 hex = "0.4"
 
 # Protocol
-prost = "0.13"
+prost = "0.14"
 prost-build = "0.13"
 bytes = "1"
 
