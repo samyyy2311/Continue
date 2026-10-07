@@ -7,22 +7,32 @@
 use std::collections::BTreeMap;
 
 use parking_lot::Mutex;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
 const TRAY_ID: &str = "main";
 
-pub fn create(app: &AppHandle) -> tauri::Result<()> {
+pub fn create(app: &AppHandle, paused: bool) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Continue", true, None::<&str>)?;
+    let pause = CheckMenuItem::with_id(
+        app,
+        "pause",
+        "Pause connections",
+        true,
+        paused,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &pause, &quit])?;
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("Continue · No phone connected")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
+        .on_menu_event(move |app, event| match event.id.as_ref() {
             "open" => show_window(app),
+            // Clicking has already flipped the tick.
+            "pause" => crate::set_paused(app, pause.is_checked().unwrap_or(false)),
             "quit" => app.exit(0),
             _ => {}
         })

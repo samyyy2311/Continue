@@ -3,12 +3,20 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod actions;
+mod call_camera;
 mod clipboard_sync;
+mod drop_folder;
+mod look;
+mod pointer;
+mod proximity;
 mod receiving;
 mod secrets;
+mod send_to;
 mod tray;
+mod video;
 
-use clipboard_sync::ClipboardSync;
+use clipboard_sync::{Clip, ClipboardSync};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -23,9 +31,14 @@ use tauri_plugin_opener::OpenerExt;
 use device::{ConnectError, Device, PairError, SendError, Stores};
 use history::{Direction, HistoryStore, Kind};
 use pairing::DeviceKeys;
-use permissions::PermissionState;
+use protocol::v1::{
+    call_action, calls_message, files_message, media_message, messages_message, photos_message,
+    CallAction, CallsReply, Conversation, FileEntry, FilesReply, GetFile, ListConversations,
+    ListFolder, ListPhotos, MediaCommand, MediaReply, MessagesReply, PhotosReply, ReadConversation,
+    SendPhoto, SendText, TextMessage,
+};
 use protocol::CapabilityId;
-use sessions::{PermissionDecision, SessionState};
+use sessions::SessionState;
 use transfer::TransferError;
 
 /// Logs what actually went wrong and gives the UI a sentence a person can act on.
@@ -36,7 +49,10 @@ fn user_error<E: std::fmt::Display>(message: &'static str) -> impl FnOnce(E) -> 
     }
 }
 
-const NOT_CONNECTED: &str = "That device isn't connected.";
+/// Warns once per discharge when a phone reports this or less.
+const LOW_BATTERY_PERCENT: u32 = 15;
+
+pub(crate) const NOT_CONNECTED: &str = "That device isn't connected.";
 const PAIRING_SETUP_FAILED: &str = "Couldn't get a pairing code ready. Try again.";
 const PAIRING_FAILED: &str = "Pairing didn't finish. Try again.";
 const BAD_CODE: &str = "That code doesn't look right. Copy the whole code and try again.";
@@ -59,54 +75,62 @@ pub struct TrustedPeerDto {
     pub is_connected: bool,
     pub endpoint: Option<String>,
     /// Only while connected, and once the device has said.
-    pub battery: Option<BatteryDto>,
+    pub status: Option<StatusDto>,
+    /// The main colour of the device's wallpaper, as #rrggbb, once it has said.
+    pub wallpaper_color: Option<String>,
+    /// JPEG data URL of the wallpaper, when the device could read it.
+    pub wallpaper: Option<String>,
+    /// The same four words show on the device, to check it's the one that was paired.
+    pub words: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+fn pairing_words(device: &Device, peer: &str) -> String {
+    pairing::pairing_words(&device.fingerprint, peer).join(" ")
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct BatteryDto {
+pub struct StatusDto {
     pub percent: u32,
     pub charging: bool,
+    pub cell_bars: Option<u32>,
+    pub wifi_bars: Option<u32>,
+    pub carrier: String,
+    pub network: String,
 }
 
-/// The latest battery each device reported, by fingerprint.
-type Batteries = Arc<Mutex<HashMap<String, BatteryDto>>>;
+/// Latest report from each device, by fingerprint.
+#[derive(Default, Clone)]
+struct PeerReport {
+    status: Option<StatusDto>,
+    /// Set once the low-battery alert is shown, until the phone charges again.
+    warned_low: bool,
+    /// Set once the fully-charged alert is shown, until the phone comes off charge.
+    warned_full: bool,
+    wallpaper_color: Option<u32>,
+    wallpaper: Option<String>,
+}
+
+type PeerReports = Arc<Mutex<HashMap<String, PeerReport>>>;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PeerPermissionDto {
     pub capability_id: u32,
-    pub grant: &'static str,
+    pub allowed: bool,
 }
-
-/// A question for the window, as it shows it.
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionQuestionDto {
-    pub id: u64,
-    pub peer_name: String,
-    pub kind: &'static str,
-    pub detail: Option<String>,
-}
-
-struct PendingQuestion {
-    question: PermissionQuestionDto,
-    answer: tokio::sync::oneshot::Sender<PermissionDecision>,
-}
-
-/// Questions waiting for the user, by the id the window answers with.
-type PendingAnswers = Arc<Mutex<HashMap<u64, PendingQuestion>>>;
 
 pub struct DesktopRuntimeState {
     device_name: String,
-    device: Device,
+    pub(crate) device: Device,
     /// The pairing code on show, waiting for a phone.
     active_pairing: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    pending_answers: PendingAnswers,
+    /// A phone that paired and waits for the person to compare codes.
+    pending_pair: Mutex<Option<device::PendingPair>>,
     save_folder: sessions::SaveFolder,
     incoming: sessions::IncomingFiles,
     clipboard: ClipboardSync,
-    batteries: Batteries,
+    reports: PeerReports,
 }
 
 #[derive(Serialize)]
@@ -138,10 +162,7 @@ fn get_history(state: State<DesktopRuntimeState>) -> Result<Vec<HistoryEntryDto>
             id: entry.id,
             at: entry.at,
             received: entry.item.direction == Direction::Received,
-            kind: match entry.item.kind {
-                Kind::File => "file",
-                Kind::Text => "text",
-            },
+            kind: kind_name(entry.item.kind),
             label: entry.item.label,
             peer_id: entry.item.peer_fingerprint,
             peer_name: entry.item.peer_name,
@@ -150,6 +171,119 @@ fn get_history(state: State<DesktopRuntimeState>) -> Result<Vec<HistoryEntryDto>
             location: entry.item.location,
         })
         .collect())
+}
+
+fn kind_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::File => "file",
+        Kind::Text => "text",
+    }
+}
+
+/// Text or a file kept for a device that isn't connected.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaitingDto {
+    pub id: i64,
+    pub peer_id: String,
+    pub peer_name: String,
+    pub kind: &'static str,
+    /// The text, or the file's path.
+    pub content: String,
+}
+
+#[tauri::command]
+fn get_waiting(state: State<DesktopRuntimeState>) -> Result<Vec<WaitingDto>, String> {
+    let stores = &state.device.stores;
+    let waiting = stores
+        .history
+        .waiting(None)
+        .map_err(user_error("Couldn't load what's waiting to send."))?;
+    Ok(waiting
+        .into_iter()
+        .map(|item| WaitingDto {
+            id: item.id,
+            peer_name: shown_name(stores.peer_name(&item.peer_fingerprint)),
+            peer_id: item.peer_fingerprint,
+            kind: kind_name(item.kind),
+            content: item.content,
+        })
+        .collect())
+}
+
+/// Keeps text or a file for a device that isn't connected; it goes when the device connects.
+#[tauri::command]
+fn send_later(
+    state: State<DesktopRuntimeState>,
+    peer_fingerprint: String,
+    is_text: bool,
+    content: String,
+) -> Result<i64, String> {
+    let kind = if is_text { Kind::Text } else { Kind::File };
+    state
+        .device
+        .send_later(&peer_fingerprint, kind, &content)
+        .map_err(user_error(SAVE_FAILED))
+}
+
+#[tauri::command]
+fn cancel_waiting(state: State<DesktopRuntimeState>, id: i64) -> Result<(), String> {
+    state
+        .device
+        .stores
+        .history
+        .remove_waiting(id)
+        .map(drop)
+        .map_err(user_error(SAVE_FAILED))
+}
+
+/// A pinned clip, on every paired device.
+#[derive(Serialize)]
+pub struct SnippetDto {
+    id: String,
+    text: String,
+}
+
+impl From<history::Snippet> for SnippetDto {
+    fn from(snippet: history::Snippet) -> Self {
+        Self {
+            id: snippet.id,
+            text: snippet.text,
+        }
+    }
+}
+
+#[tauri::command]
+fn get_snippets(state: State<DesktopRuntimeState>) -> Result<Vec<SnippetDto>, String> {
+    let snippets = state
+        .device
+        .stores
+        .history
+        .snippets(false)
+        .map_err(user_error("Couldn't load your pinned text."))?;
+    Ok(snippets.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
+async fn pin_snippet(
+    state: State<'_, DesktopRuntimeState>,
+    text: String,
+) -> Result<SnippetDto, String> {
+    let snippet = state
+        .device
+        .pin(&text)
+        .await
+        .map_err(user_error(SAVE_FAILED))?;
+    Ok(snippet.into())
+}
+
+#[tauri::command]
+async fn unpin_snippet(state: State<'_, DesktopRuntimeState>, id: String) -> Result<(), String> {
+    state
+        .device
+        .unpin(&id)
+        .await
+        .map_err(user_error(SAVE_FAILED))
 }
 
 #[tauri::command]
@@ -171,13 +305,7 @@ fn open_received(
     path: String,
     reveal: bool,
 ) -> Result<(), String> {
-    const MISSING: &str = "Couldn't find that file. It may have been moved or deleted.";
-    let file = std::fs::canonicalize(&path).map_err(user_error(MISSING))?;
-    let folder = std::fs::canonicalize(state.save_folder.get()).map_err(user_error(MISSING))?;
-    // Files from before the folder was changed are still in history, so they can open too.
-    if !file.starts_with(&folder) && !was_received(&state.device.stores.history, &file) {
-        return Err(MISSING.to_string());
-    }
+    let file = received_file(&state, &path)?;
     let opener = app.opener();
     let result = if reveal {
         opener.reveal_item_in_dir(&file)
@@ -185,6 +313,42 @@ fn open_received(
         opener.open_path(file.to_string_lossy(), None::<&str>)
     };
     result.map_err(user_error("Couldn't open that file."))
+}
+
+/// `path` as a file this computer received. Anything else is refused, so the window can't be
+/// used to open or read arbitrary files.
+fn received_file(state: &DesktopRuntimeState, path: &str) -> Result<PathBuf, String> {
+    const MISSING: &str = "Couldn't find that file. It may have been moved or deleted.";
+    let file = std::fs::canonicalize(path).map_err(user_error(MISSING))?;
+    let folder = std::fs::canonicalize(state.save_folder.get()).map_err(user_error(MISSING))?;
+    // Files from before the folder was changed are still in history, so they count too.
+    if !file.starts_with(&folder) && !was_received(&state.device.stores.history, &file) {
+        return Err(MISSING.to_string());
+    }
+    Ok(file)
+}
+
+/// JPEG thumbnail as a data URL.
+#[tauri::command]
+async fn thumbnail(state: State<'_, DesktopRuntimeState>, path: String) -> Result<String, String> {
+    let file = received_file(&state, &path)?;
+    let jpeg = tauri::async_runtime::spawn_blocking(move || {
+        let image = image::open(file).ok()?;
+        look::jpeg(&image.thumbnail(96, 96))
+    })
+    .await
+    .ok()
+    .flatten()
+    .ok_or_else(|| "Couldn't read that image.".to_string())?;
+    Ok(jpeg_url(&jpeg))
+}
+
+fn jpeg_url(jpeg: &[u8]) -> String {
+    use base64::Engine as _;
+    format!(
+        "data:image/jpeg;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(jpeg)
+    )
 }
 
 fn was_received(history: &HistoryStore, file: &Path) -> bool {
@@ -232,6 +396,45 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
 }
 
 /// Starts Continue at login the first time it runs. After that it's the user's choice.
+/// There while connections are paused, so a pause lasts through a restart.
+fn paused_marker(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_data_dir().ok().map(|dir| dir.join("paused"))
+}
+
+pub(crate) fn set_paused(app: &AppHandle, paused: bool) {
+    if let Some(marker) = paused_marker(app) {
+        let saved = if paused {
+            std::fs::write(marker, b"")
+        } else {
+            std::fs::remove_file(marker)
+        };
+        if let Err(error) = saved {
+            tracing::warn!("Couldn't save whether connections are paused: {error}");
+        }
+    }
+    let device = app.state::<DesktopRuntimeState>().device.clone();
+    tauri::async_runtime::spawn(async move { device.sessions.set_paused(paused).await });
+}
+
+/// WebView2 acts on browser shortcuts itself: Ctrl+R reloads the window, Ctrl+P prints it and
+/// Alt+Left goes back. Editing keys like copy and paste keep working.
+#[cfg(windows)]
+fn without_browser_keys(window: &tauri::WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+    use windows::core::Interface;
+
+    let _ = window.with_webview(|webview| unsafe {
+        let settings = webview
+            .controller()
+            .CoreWebView2()
+            .and_then(|core| core.Settings())
+            .and_then(|settings| settings.cast::<ICoreWebView2Settings3>());
+        if let Ok(settings) = settings {
+            let _ = settings.SetAreBrowserAcceleratorKeysEnabled(false);
+        }
+    });
+}
+
 fn start_at_login_by_default(app: &AppHandle, app_data: &Path) {
     let chosen = app_data.join("start-at-login-set");
     if chosen.exists() {
@@ -245,12 +448,32 @@ fn start_at_login_by_default(app: &AppHandle, app_data: &Path) {
     }
 }
 
-/// Where pasted files wait to be sent. Emptied on each start.
+/// Where pasted files wait to be sent. Emptied on each start, except for files still
+/// waiting for a device to connect.
 fn pasted_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .app_cache_dir()
         .unwrap_or_else(|_| std::env::temp_dir().join("continue"))
         .join("pasted")
+}
+
+fn remove_old_pastes(app: &AppHandle, device: &Device) {
+    let waiting: std::collections::HashSet<PathBuf> = device
+        .stores
+        .history
+        .waiting(None)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|item| Path::new(&item.content).parent().map(Path::to_path_buf))
+        .collect();
+    let Ok(folders) = std::fs::read_dir(pasted_dir(app)) else {
+        return;
+    };
+    for folder in folders.flatten().map(|entry| entry.path()) {
+        if !waiting.contains(&folder) {
+            let _ = std::fs::remove_dir_all(folder);
+        }
+    }
 }
 
 /// Saves a pasted file so it can be sent like one picked from disk. The
@@ -276,8 +499,13 @@ fn save_pasted_file(app: AppHandle, request: tauri::ipc::Request) -> Result<Stri
         || "Pasted file".into(),
         |n| n.to_string_lossy().into_owned(),
     );
-    // A folder per paste keeps the original name without clashing.
-    let folder = pasted_dir(&app).join(NEXT.fetch_add(1, Ordering::Relaxed).to_string());
+    // A folder per paste keeps the original name without clashing, including with folders
+    // kept from earlier runs.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis());
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let folder = pasted_dir(&app).join(format!("{now}-{n}"));
     let path = folder.join(name);
     std::fs::create_dir_all(&folder)
         .and_then(|()| std::fs::write(&path, bytes))
@@ -323,7 +551,6 @@ fn shown_name(name: String) -> String {
 fn session_handlers(
     download_dir: PathBuf,
     stores: &Stores,
-    pending_answers: PendingAnswers,
     clipboard: ClipboardSync,
     app_handle: &AppHandle,
 ) -> sessions::SessionCapabilityHandlers {
@@ -331,11 +558,6 @@ fn session_handlers(
         .with_this_device(sessions::ThisDevice::new(
             computer_name(),
             sessions::this_platform(),
-        ))
-        .with_permission_prompt(permission_prompt(
-            app_handle.clone(),
-            stores.clone(),
-            pending_answers,
         ))
         .with_incoming(sessions::IncomingFiles::with_listener(receiving::listener(
             app_handle.clone(),
@@ -367,8 +589,14 @@ fn session_handlers(
 
     let (app, texts) = (app_handle.clone(), stores.clone());
     handlers.on_clipboard_received = Some(Arc::new(move |peer, update| {
+        if update.format() == protocol::v1::ClipboardFormat::ImagePng {
+            clipboard.write(Clip::Image(update.payload));
+            let name = shown_name(texts.peer_name(peer));
+            notify_if_away(&app, &format!("Copied an image from {name}"), "");
+            return;
+        }
         let text = String::from_utf8_lossy(&update.payload).into_owned();
-        clipboard.write(text.clone());
+        clipboard.write(Clip::Text(text.clone()));
         let name = texts.received_text(peer, &text).peer_name;
         notify_if_away(
             &app,
@@ -385,6 +613,62 @@ fn session_handlers(
         );
     }));
 
+    let (app, names) = (app_handle.clone(), stores.clone());
+    handlers.on_photo_taken = Some(Arc::new(move |peer, photo| {
+        let name = shown_name(names.peer_name(peer));
+        notify_if_away(&app, &format!("New photo on {name}"), &photo.name);
+        let _ = app.emit(
+            "photo-taken",
+            serde_json::json!({ "peerId": peer, "photo": PhotoDto::from(photo) }),
+        );
+    }));
+
+    let app = app_handle.clone();
+    handlers.on_now_playing = Some(Arc::new(move |peer, playing| {
+        let art = (!playing.art.is_empty()).then(|| jpeg_url(&playing.art));
+        let _ = app.emit(
+            "now-playing",
+            serde_json::json!({
+                "peerId": peer,
+                "title": playing.title,
+                "artist": playing.artist,
+                "app": playing.app,
+                "playing": playing.playing,
+                "durationMs": playing.duration_ms,
+                "positionMs": playing.position_ms,
+                "art": art,
+            }),
+        );
+    }));
+
+    let (app, names) = (app_handle.clone(), stores.clone());
+    handlers.on_call = Some(Arc::new(move |peer, call| {
+        let state = call.state();
+        let caller = if call.name.is_empty() {
+            call.number.clone()
+        } else {
+            call.name.clone()
+        };
+        if state == protocol::v1::call::State::Ringing {
+            let name = shown_name(names.peer_name(peer));
+            notify_if_away(&app, &format!("Call on {name}"), &caller);
+        }
+        let _ = app.emit(
+            "phone-call",
+            serde_json::json!({
+                "peerId": peer,
+                "state": state.as_str_name().to_lowercase(),
+                "number": call.number,
+                "name": call.name,
+            }),
+        );
+    }));
+
+    let app = app_handle.clone();
+    handlers.on_messages_changed = Some(Arc::new(move |peer, ()| {
+        let _ = app.emit("messages-changed", peer);
+    }));
+
     let app = app_handle.clone();
     handlers.on_notification = Some(Arc::new(move |peer, body| match body {
         notifications::Body::Post(post) => {
@@ -394,6 +678,7 @@ fn session_handlers(
                 PhoneNotificationDto {
                     peer_id: peer.to_string(),
                     id: post.notification_id,
+                    package_name: post.package_name,
                     app_name: post.app_name,
                     title: post.title,
                     text: post.body,
@@ -413,8 +698,8 @@ fn session_handlers(
         notifications::Body::Dismiss(dismiss) => {
             let _ = app.emit("notification-removed", dismiss.notification_id);
         }
-        // Only the phone carries out button presses.
-        notifications::Body::Action(_) => {}
+        // Only the phone carries out button presses and mutes.
+        notifications::Body::Action(_) | notifications::Body::Mute(_) => {}
     }));
 
     handlers
@@ -426,6 +711,7 @@ fn session_handlers(
 struct PhoneNotificationDto {
     peer_id: String,
     id: String,
+    package_name: String,
     app_name: String,
     title: String,
     text: String,
@@ -456,106 +742,60 @@ fn device_info_listener(
     })
 }
 
-/// Keeps each device's latest battery for the window, and tells it when one changes.
 fn device_status_listener(
     app: AppHandle,
-    batteries: Batteries,
+    stores: Stores,
+    reports: PeerReports,
 ) -> sessions::OnReceived<protocol::v1::DeviceStatus> {
     Arc::new(move |peer, status| {
-        let battery = BatteryDto {
+        let mut reports = reports.lock();
+        let report = reports.entry(peer.to_string()).or_default();
+        let low = !status.charging && status.battery_percent <= LOW_BATTERY_PERCENT;
+        if low && !report.warned_low {
+            let name = shown_name(stores.peer_name(peer));
+            let percent = status.battery_percent;
+            notify_if_away(
+                &app,
+                &format!("{name} battery is low"),
+                &format!("{percent}% left"),
+            );
+        }
+        report.warned_low = low;
+        let full = status.charging && status.battery_percent >= 100;
+        if full && !report.warned_full {
+            let name = shown_name(stores.peer_name(peer));
+            notify_if_away(
+                &app,
+                &format!("{name} is fully charged"),
+                "You can unplug it.",
+            );
+        }
+        report.warned_full = full;
+        report.status = Some(StatusDto {
             percent: status.battery_percent,
             charging: status.charging,
-        };
-        batteries.lock().insert(peer.to_string(), battery);
+            cell_bars: status.cell_bars,
+            wifi_bars: status.wifi_bars,
+            carrier: status.carrier,
+            network: status.network,
+        });
+        drop(reports);
         let _ = app.emit("peer-status", peer);
     })
 }
 
-/// Asks in the window, which answers through `answer_permission`. The core stops waiting
-/// after `PROMPT_TIMEOUT`, and so does the window.
-fn permission_prompt(
-    app_handle: AppHandle,
-    stores: Stores,
-    pending_answers: PendingAnswers,
-) -> sessions::PermissionPrompt {
-    let next_id = AtomicU64::new(0);
-    Arc::new(move |request| {
-        let (answer, decision) = tokio::sync::oneshot::channel();
-        let question = PermissionQuestionDto {
-            id: next_id.fetch_add(1, Ordering::Relaxed),
-            peer_name: stores.peer_name(&request.peer),
-            kind: match request.capability {
-                CapabilityId::FILE_TRANSFER => "file",
-                CapabilityId::CLIPBOARD => "text",
-                _ => "notification",
-            },
-            detail: request.detail,
-        };
-        let id = question.id;
-        pending_answers.lock().insert(
-            id,
-            PendingQuestion {
-                question: question.clone(),
-                answer,
-            },
-        );
-        let what = match (question.detail.as_deref(), question.kind) {
-            (Some(file), _) => file,
-            (None, "text") => "some text",
-            (None, _) => "notifications",
-        };
-        notify_if_away(
-            &app_handle,
-            &format!(
-                "{} wants to send {what}",
-                shown_name(question.peer_name.clone())
-            ),
-            "Open Continue to allow or decline.",
-        );
-        let _ = app_handle.emit("permission-request", question);
-
-        let (pending, app) = (pending_answers.clone(), app_handle.clone());
-        tokio::spawn(async move {
-            tokio::time::sleep_until(request.deadline).await;
-            if pending.lock().remove(&id).is_some() {
-                let _ = app.emit("permission-request-closed", id);
-            }
-        });
-        decision
+fn device_look_listener(
+    app: AppHandle,
+    reports: PeerReports,
+) -> sessions::OnReceived<protocol::v1::DeviceLook> {
+    Arc::new(move |peer, look| {
+        let mut reports = reports.lock();
+        let report = reports.entry(peer.to_string()).or_default();
+        report.wallpaper_color = (look.wallpaper_color != 0).then_some(look.wallpaper_color);
+        report.wallpaper = (!look.wallpaper.is_empty()).then(|| jpeg_url(&look.wallpaper));
+        drop(reports);
+        let _ = app.emit("peer-status", peer);
     })
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum Answer {
-    Allow,
-    AlwaysAllow,
-    Decline,
-}
-
-#[tauri::command]
-fn answer_permission(state: State<DesktopRuntimeState>, id: u64, answer: Answer) {
-    let decision = match answer {
-        Answer::Allow => PermissionDecision::Allow,
-        Answer::AlwaysAllow => PermissionDecision::AlwaysAllow,
-        Answer::Decline => PermissionDecision::Decline,
-    };
-    if let Some(waiting) = state.pending_answers.lock().remove(&id) {
-        let _ = waiting.answer.send(decision);
-    }
-}
-
-/// Questions asked before the window was listening, so none go unseen.
-#[tauri::command]
-fn pending_permission_questions(state: State<DesktopRuntimeState>) -> Vec<PermissionQuestionDto> {
-    let mut questions: Vec<_> = state
-        .pending_answers
-        .lock()
-        .values()
-        .map(|pending| pending.question.clone())
-        .collect();
-    questions.sort_by_key(|q| q.id);
-    questions
 }
 
 fn session_state_listener(
@@ -582,8 +822,29 @@ fn session_state_listener(
                     "displayName": name,
                 }),
             );
+            send_waiting(&app_handle, peer);
         }
     })
+}
+
+/// Catches a device that just connected up on what changed while it was away.
+fn send_waiting(app: &AppHandle, peer: &str) {
+    if let Some(clip) = app.state::<CopiesWaiting>().0.lock().remove(peer) {
+        send_copy(app, peer.to_string(), clip);
+    }
+    let device = app.state::<DesktopRuntimeState>().device.clone();
+    let (app, peer) = (app.clone(), peer.to_string());
+    tauri::async_runtime::spawn(async move {
+        device.share_snippets(&peer).await;
+        device
+            .send_waiting(&peer, |item, sent| {
+                let _ = app.emit(
+                    "waiting-sent",
+                    serde_json::json!({ "id": item.id, "sent": sent }),
+                );
+            })
+            .await;
+    });
 }
 
 #[tauri::command]
@@ -606,16 +867,24 @@ fn get_trusted_peers(state: State<DesktopRuntimeState>) -> Result<Vec<TrustedPee
             let is_connected =
                 state.device.sessions.state(&p.fingerprint) == SessionState::Connected;
             let endpoint = trust.last_endpoint(&p.fingerprint).ok().flatten();
-            let battery = is_connected
-                .then(|| state.batteries.lock().get(&p.fingerprint).copied())
-                .flatten();
+            let report = state
+                .reports
+                .lock()
+                .get(&p.fingerprint)
+                .cloned()
+                .unwrap_or_default();
+            let status = report.status.filter(|_| is_connected);
+            let wallpaper_color = report.wallpaper_color.map(|color| format!("#{color:06x}"));
             TrustedPeerDto {
+                words: pairing_words(&state.device, &p.fingerprint),
                 fingerprint: p.fingerprint,
                 display_name: shown_name(p.display_name),
                 paired_at: p.paired_at,
                 is_connected,
                 endpoint,
-                battery,
+                status,
+                wallpaper_color,
+                wallpaper: report.wallpaper,
             }
         })
         .collect();
@@ -655,17 +924,29 @@ async fn start_pairing(
     state: State<'_, DesktopRuntimeState>,
 ) -> Result<String, String> {
     let lan_ip = local_lan_ip()?;
+    let mut port = 0;
     let server = state
         .device
-        .start_pairing(0, |port| {
-            std::net::SocketAddr::new(lan_ip, port).to_string()
+        .start_pairing(0, |bound| {
+            port = bound;
+            std::net::SocketAddr::new(lan_ip, bound).to_string()
         })
         .map_err(user_error(PAIRING_SETUP_FAILED))?;
     let code = server.code.clone();
+    // Lets a phone nearby pick this computer from a list while the code is showing.
+    let nearby = discovery::PairingAdvertiser::start(&state.device_name, &code, port)
+        .map_err(|error| tracing::warn!("Not shown to phones nearby: {error}"))
+        .ok();
     // Replacing or cancelling the attempt drops it, so it never reports into the window.
     let waiting = tokio::spawn(async move {
-        let _ = match server.finish().await {
-            Ok(peer) => app.emit("pairing-completed", paired_dto(peer)),
+        let result = server.finish().await;
+        drop(nearby);
+        let _ = match result {
+            Ok(pending) => {
+                let code = pending.code().to_string();
+                *app.state::<DesktopRuntimeState>().pending_pair.lock() = Some(pending);
+                app.emit("pairing-check", code)
+            }
             Err(e) => app.emit("pairing-failed", user_error(PAIRING_FAILED)(e)),
         };
     });
@@ -675,8 +956,27 @@ async fn start_pairing(
     Ok(code)
 }
 
+/// Trusts the phone that paired once the person has seen the same code on both screens, or
+/// forgets it if not.
+#[tauri::command]
+fn confirm_pairing(
+    app: AppHandle,
+    state: State<DesktopRuntimeState>,
+    accept: bool,
+) -> Result<(), String> {
+    let Some(pending) = state.pending_pair.lock().take() else {
+        return Err(PAIRING_FAILED.to_string());
+    };
+    if accept {
+        let peer = pending.accept().map_err(user_error(PAIRING_FAILED))?;
+        let _ = app.emit("pairing-completed", paired_dto(&state.device, peer));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn cancel_pairing(state: State<DesktopRuntimeState>) {
+    state.pending_pair.lock().take();
     if let Some(waiting) = state.active_pairing.lock().take() {
         waiting.abort();
     }
@@ -688,7 +988,7 @@ async fn pair_from_qr(
     qr_payload: String,
 ) -> Result<TrustedPeerDto, String> {
     match state.device.pair_with_code(&qr_payload).await {
-        Ok(peer) => Ok(paired_dto(peer)),
+        Ok(peer) => Ok(paired_dto(&state.device, peer)),
         Err(e @ PairError::BadCode(_)) => Err(user_error(BAD_CODE)(e)),
         Err(e @ PairError::Unreachable(_)) => Err(user_error(UNREACHABLE)(e)),
         Err(e @ PairError::Failed(_)) => Err(user_error(PAIRING_FAILED)(e)),
@@ -696,14 +996,17 @@ async fn pair_from_qr(
 }
 
 /// A device just paired. It isn't connected yet: the session is dialed at its saved address.
-fn paired_dto(peer: pairing::TrustedPeer) -> TrustedPeerDto {
+fn paired_dto(device: &Device, peer: pairing::TrustedPeer) -> TrustedPeerDto {
     TrustedPeerDto {
+        words: pairing_words(device, &peer.fingerprint),
         fingerprint: peer.fingerprint,
         display_name: shown_name(peer.display_name),
         paired_at: peer.paired_at,
         is_connected: false,
         endpoint: None,
-        battery: None,
+        status: None,
+        wallpaper_color: None,
+        wallpaper: None,
     }
 }
 
@@ -711,42 +1014,41 @@ fn paired_dto(peer: pairing::TrustedPeer) -> TrustedPeerDto {
 fn get_permissions(
     state: State<DesktopRuntimeState>,
     peer_fingerprint: String,
-) -> Result<Vec<PeerPermissionDto>, String> {
+) -> Vec<PeerPermissionDto> {
     [
         CapabilityId::FILE_TRANSFER,
         CapabilityId::CLIPBOARD,
         CapabilityId::NOTIFICATIONS,
+        CapabilityId::PHOTOS,
+        CapabilityId::CALLS,
+        CapabilityId::MEDIA,
+        CapabilityId::ACTIONS,
+        CapabilityId::POINTER,
     ]
     .into_iter()
-    .map(|capability| {
-        let grant = state
+    .map(|capability| PeerPermissionDto {
+        capability_id: capability.raw(),
+        allowed: state
             .device
             .stores
             .permissions
-            .query_state(&peer_fingerprint, capability)
-            .map_err(user_error("Couldn't load what this device can do."))?;
-        Ok(PeerPermissionDto {
-            capability_id: capability.raw(),
-            grant: grant.as_str(),
-        })
+            .is_allowed(&peer_fingerprint, capability),
     })
     .collect()
 }
 
 #[tauri::command]
-fn set_permission(
+fn set_allowed(
     state: State<DesktopRuntimeState>,
     peer_fingerprint: String,
     capability_id: u32,
-    grant: String,
+    allowed: bool,
 ) -> Result<(), String> {
-    let permission = PermissionState::parse(&grant)
-        .ok_or_else(|| user_error(SAVE_FAILED)(format!("unknown grant {grant}")))?;
     state
         .device
         .stores
         .permissions
-        .set_state(&peer_fingerprint, CapabilityId(capability_id), permission)
+        .set_allowed(&peer_fingerprint, CapabilityId(capability_id), allowed)
         .map_err(user_error(SAVE_FAILED))
 }
 
@@ -762,6 +1064,9 @@ async fn connect_to_peer(
     match state.device.connect(&peer_fingerprint, addr).await {
         Ok(()) => Ok(()),
         Err(ConnectError::NotPaired) => Err("This device isn't paired any more.".to_string()),
+        Err(ConnectError::Paused) => {
+            Err("Connections are paused. Resume them from Continue's tray icon.".to_string())
+        }
         Err(e @ ConnectError::Store(_)) => Err(user_error("Couldn't load this device.")(e)),
         Err(e @ ConnectError::Unreachable(_)) => {
             Err(user_error("Couldn't reach the device at that address.")(e))
@@ -845,28 +1150,50 @@ struct SyncedTextDto {
     failed: bool,
 }
 
-/// Sends what was just copied here to every connected device.
-fn send_copied_text(app: &AppHandle, text: String) {
+/// The newest copy for each paired device that wasn't connected when it was made; only the
+/// newest matters on a clipboard. Kept until the device connects or the app quits.
+#[derive(Default)]
+struct CopiesWaiting(Mutex<HashMap<String, Clip>>);
+
+/// Sends what was just copied here to every paired device, now or when it connects.
+fn send_copied(app: &AppHandle, clip: Clip) {
     let device = app.state::<DesktopRuntimeState>().device.clone();
-    let peers = device.stores.trust.list_peers().unwrap_or_default();
-    for peer in peers
-        .into_iter()
-        .filter(|p| device.sessions.get(&p.fingerprint).is_some())
-    {
-        let (app, device, text) = (app.clone(), device.clone(), text.clone());
-        tauri::async_runtime::spawn(async move {
-            let result = push_text(&device, &peer.fingerprint, text.clone()).await;
-            let _ = app.emit(
-                "clipboard-synced",
-                SyncedTextDto {
-                    peer_id: peer.fingerprint,
-                    peer_name: peer.display_name,
-                    text,
-                    failed: result.is_err(),
-                },
-            );
-        });
+    for peer in device.stores.trust.list_peers().unwrap_or_default() {
+        if device.sessions.get(&peer.fingerprint).is_some() {
+            send_copy(app, peer.fingerprint, clip.clone());
+        } else {
+            app.state::<CopiesWaiting>()
+                .0
+                .lock()
+                .insert(peer.fingerprint, clip.clone());
+        }
     }
+}
+
+fn send_copy(app: &AppHandle, peer: String, clip: Clip) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let device = app.state::<DesktopRuntimeState>().device.clone();
+        let text = match clip {
+            Clip::Text(text) => text,
+            Clip::Image(png) => {
+                if let Err(error) = device.send_image(&peer, png).await {
+                    tracing::warn!("Couldn't send a copied image: {error}");
+                }
+                return;
+            }
+        };
+        let result = push_text(&device, &peer, text.clone()).await;
+        let _ = app.emit(
+            "clipboard-synced",
+            SyncedTextDto {
+                peer_name: shown_name(device.stores.peer_name(&peer)),
+                peer_id: peer,
+                text,
+                failed: result.is_err(),
+            },
+        );
+    });
 }
 
 /// Turns sending what's copied here on or off. The window says on start and on each change.
@@ -916,6 +1243,17 @@ async fn dismiss_notification(
     .await
 }
 
+/// Stops the phone forwarding an app's notifications. Unmuting is in the phone's settings.
+#[tauri::command]
+async fn mute_app(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    package_name: String,
+) -> Result<(), String> {
+    let mute = notifications::NotificationMute { package_name };
+    send_notification(&state, &peer_fingerprint, notifications::Body::Mute(mute)).await
+}
+
 async fn send_notification(
     state: &DesktopRuntimeState,
     peer: &str,
@@ -923,6 +1261,398 @@ async fn send_notification(
 ) -> Result<(), String> {
     match state.device.send_notification(peer, body).await {
         Ok(()) => Ok(()),
+        Err(SendError::NotConnected) => Err(NOT_CONNECTED.to_string()),
+        Err(e) => Err(user_error("Couldn't reach your phone. Try again.")(e)),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PhotoDto {
+    id: String,
+    name: String,
+    taken_at: u64,
+    thumbnail: String,
+}
+
+impl From<protocol::v1::Photo> for PhotoDto {
+    fn from(photo: protocol::v1::Photo) -> Self {
+        Self {
+            thumbnail: jpeg_url(&photo.thumbnail),
+            id: photo.id,
+            name: photo.name,
+            taken_at: photo.taken_at,
+        }
+    }
+}
+
+/// None when the phone hasn't granted photo access.
+#[tauri::command]
+async fn list_photos(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Result<Option<Vec<PhotoDto>>, String> {
+    let limit = sessions::MAX_PHOTOS;
+    let request = photos_message::Body::List(ListPhotos { limit });
+    let reply = ask_for_photos(&state, &peer_fingerprint, request).await?;
+    let photos = reply.photos.into_iter().map(PhotoDto::from);
+    Ok(reply.available.then(|| photos.collect()))
+}
+
+/// The photo arrives through the normal file transfer.
+#[tauri::command]
+async fn get_photo(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    id: String,
+) -> Result<(), String> {
+    let request = photos_message::Body::Send(SendPhoto { id });
+    match ask_for_photos(&state, &peer_fingerprint, request).await? {
+        PhotosReply {
+            available: true, ..
+        } => Ok(()),
+        _ => Err("That photo isn't on your phone any more.".to_string()),
+    }
+}
+
+async fn ask_for_photos(
+    state: &DesktopRuntimeState,
+    peer: &str,
+    request: photos_message::Body,
+) -> Result<PhotosReply, String> {
+    match state.device.photos(peer, request).await {
+        Ok(reply) => Ok(reply),
+        Err(SendError::NotConnected) => Err(NOT_CONNECTED.to_string()),
+        Err(e) => Err(user_error("Couldn't reach your phone. Try again.")(e)),
+    }
+}
+
+/// Call audio stays on the phone.
+#[tauri::command]
+async fn answer_call(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Result<(), String> {
+    act_on_call(&state, &peer_fingerprint, call_action::Kind::Answer).await
+}
+
+#[tauri::command]
+async fn decline_call(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Result<(), String> {
+    act_on_call(&state, &peer_fingerprint, call_action::Kind::Decline).await
+}
+
+#[tauri::command]
+async fn silence_call(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Result<(), String> {
+    act_on_call(&state, &peer_fingerprint, call_action::Kind::Silence).await
+}
+
+/// Calls a number from the phone; the call itself happens on the phone.
+#[tauri::command]
+async fn call_number(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    number: String,
+) -> Result<(), String> {
+    let request = calls_message::Body::Action(CallAction {
+        kind: call_action::Kind::Dial.into(),
+        number,
+    });
+    match state.device.calls(&peer_fingerprint, request).await {
+        Ok(CallsReply { done: true }) => Ok(()),
+        Ok(_) => Err("Your phone couldn't make the call. Turn on Calls in Continue's settings on your phone.".to_string()),
+        Err(SendError::NotConnected) => Err(NOT_CONNECTED.to_string()),
+        Err(e) => Err(user_error("Couldn't reach your phone. Try again.")(e)),
+    }
+}
+
+async fn act_on_call(
+    state: &DesktopRuntimeState,
+    peer: &str,
+    kind: call_action::Kind,
+) -> Result<(), String> {
+    let request = calls_message::Body::Action(CallAction {
+        kind: kind.into(),
+        number: String::new(),
+    });
+    match state.device.calls(peer, request).await {
+        Ok(CallsReply { done: true }) => Ok(()),
+        Ok(_) => Err("Your phone couldn't do that. Try it on the phone.".to_string()),
+        Err(SendError::NotConnected) => Err(NOT_CONNECTED.to_string()),
+        Err(e) => Err(user_error("Couldn't reach your phone. Try again.")(e)),
+    }
+}
+
+/// Rings the phone at full volume, even on silent, or stops it.
+#[tauri::command]
+async fn ring_phone(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    on: bool,
+) -> Result<(), String> {
+    match state.device.ring(&peer_fingerprint, on).await {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            Err("Your phone couldn't ring. Check Continue is allowed to ring it.".to_string())
+        }
+        Err(SendError::NotConnected) => Err(NOT_CONNECTED.to_string()),
+        Err(e) => Err(user_error("Couldn't reach your phone. Try again.")(e)),
+    }
+}
+
+/// Play, pause, skip or change the volume of what's playing on the phone.
+#[tauri::command]
+async fn media_command(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    command: String,
+) -> Result<(), String> {
+    use protocol::v1::media_command::Kind;
+    let kind =
+        Kind::from_str_name(&command).ok_or_else(|| format!("Unknown media command {command}"))?;
+    let request = media_message::Body::Command(MediaCommand { kind: kind.into() });
+    match state.device.media(&peer_fingerprint, request).await {
+        Ok(MediaReply { done: true }) => Ok(()),
+        Ok(_) => Err("Nothing is playing on your phone.".to_string()),
+        Err(SendError::NotConnected) => Err(NOT_CONNECTED.to_string()),
+        Err(e) => Err(user_error("Couldn't reach your phone. Try again.")(e)),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileEntryDto {
+    name: String,
+    folder: bool,
+    size: u64,
+    modified: u64,
+}
+
+impl From<FileEntry> for FileEntryDto {
+    fn from(entry: FileEntry) -> Self {
+        Self {
+            name: entry.name,
+            folder: entry.folder,
+            size: entry.size,
+            modified: entry.modified,
+        }
+    }
+}
+
+/// None when the phone isn't sharing its files.
+#[tauri::command]
+async fn list_phone_folder(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    path: String,
+) -> Result<Option<Vec<FileEntryDto>>, String> {
+    let request = files_message::Body::List(ListFolder { path });
+    let reply = ask_for_files(&state, &peer_fingerprint, request).await?;
+    let entries = reply.entries.into_iter().map(Into::into);
+    Ok(reply.available.then(|| entries.collect()))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResultDto {
+    kind: &'static str,
+    title: String,
+    detail: String,
+    /// A file's path in the phone's shared folder, or a text's conversation id.
+    reference: String,
+    at: u64,
+}
+
+/// Looks through the phone's files, texts and contacts. The phone does the looking.
+#[tauri::command]
+async fn search_phone(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    query: String,
+) -> Result<Vec<SearchResultDto>, String> {
+    use protocol::v1::search_result::Kind as Found;
+    let reply = match state.device.search(&peer_fingerprint, query).await {
+        Ok(reply) => reply,
+        Err(SendError::NotConnected) => return Err(NOT_CONNECTED.to_string()),
+        Err(e) => return Err(user_error("Couldn't search your phone. Try again.")(e)),
+    };
+    if !reply.available {
+        return Err(
+            "Your phone hasn't let Continue read its files, texts or contacts, or this computer \
+             may not search it."
+                .to_string(),
+        );
+    }
+    Ok(reply
+        .results
+        .into_iter()
+        .map(|result| SearchResultDto {
+            kind: match result.kind() {
+                Found::File => "file",
+                Found::Text => "text",
+                Found::Contact => "contact",
+            },
+            title: result.title,
+            detail: result.detail,
+            reference: result.reference,
+            at: result.at,
+        })
+        .collect())
+}
+
+/// The file arrives through the normal file transfer.
+#[tauri::command]
+async fn get_phone_file(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    path: String,
+) -> Result<(), String> {
+    let request = files_message::Body::Get(GetFile { path });
+    match ask_for_files(&state, &peer_fingerprint, request).await? {
+        FilesReply {
+            available: true, ..
+        } => Ok(()),
+        _ => Err("That file isn't on your phone any more.".to_string()),
+    }
+}
+
+async fn ask_for_files(
+    state: &DesktopRuntimeState,
+    peer: &str,
+    request: files_message::Body,
+) -> Result<FilesReply, String> {
+    match state.device.files(peer, request).await {
+        Ok(reply) => Ok(reply),
+        Err(SendError::NotConnected) => Err(NOT_CONNECTED.to_string()),
+        Err(e) => Err(user_error("Couldn't reach your phone. Try again.")(e)),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationDto {
+    id: String,
+    address: String,
+    name: String,
+    snippet: String,
+    at: u64,
+    unread: bool,
+}
+
+impl From<Conversation> for ConversationDto {
+    fn from(c: Conversation) -> Self {
+        Self {
+            id: c.id,
+            address: c.address,
+            name: c.name,
+            snippet: c.snippet,
+            at: c.at,
+            unread: c.unread,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TextMessageDto {
+    id: String,
+    body: String,
+    at: u64,
+    outgoing: bool,
+}
+
+impl From<TextMessage> for TextMessageDto {
+    fn from(t: TextMessage) -> Self {
+        Self {
+            id: t.id,
+            body: t.body,
+            at: t.at,
+            outgoing: t.outgoing,
+        }
+    }
+}
+
+/// None when the phone hasn't granted SMS access.
+#[tauri::command]
+async fn list_conversations(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Result<Option<Vec<ConversationDto>>, String> {
+    let limit = sessions::MAX_CONVERSATIONS;
+    let request = messages_message::Body::Conversations(ListConversations { limit });
+    let reply = ask_for_messages(&state, &peer_fingerprint, request).await?;
+    let conversations = reply.conversations.into_iter().map(Into::into);
+    Ok(reply.available.then(|| conversations.collect()))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactDto {
+    name: String,
+    number: String,
+    favorite: bool,
+    /// JPEG data URL.
+    photo: Option<String>,
+}
+
+/// None when the phone hasn't granted access to its contacts.
+#[tauri::command]
+async fn list_contacts(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Result<Option<Vec<ContactDto>>, String> {
+    let limit = sessions::MAX_CONTACTS;
+    let request = messages_message::Body::Contacts(protocol::v1::ListContacts { limit });
+    let reply = ask_for_messages(&state, &peer_fingerprint, request).await?;
+    let contacts = reply.contacts.into_iter().map(|contact| ContactDto {
+        photo: (!contact.photo.is_empty()).then(|| jpeg_url(&contact.photo)),
+        name: contact.name,
+        number: contact.number,
+        favorite: contact.favorite,
+    });
+    Ok(reply.available.then(|| contacts.collect()))
+}
+
+#[tauri::command]
+async fn read_conversation(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    conversation_id: String,
+) -> Result<Vec<TextMessageDto>, String> {
+    let request = messages_message::Body::Read(ReadConversation {
+        conversation_id,
+        limit: sessions::MAX_TEXTS,
+    });
+    let reply = ask_for_messages(&state, &peer_fingerprint, request).await?;
+    Ok(reply.messages.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
+async fn send_sms(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    address: String,
+    body: String,
+) -> Result<(), String> {
+    let request = messages_message::Body::Send(SendText { address, body });
+    match ask_for_messages(&state, &peer_fingerprint, request).await? {
+        MessagesReply { sent: true, .. } => Ok(()),
+        _ => Err("Your phone couldn't send that text.".to_string()),
+    }
+}
+
+async fn ask_for_messages(
+    state: &DesktopRuntimeState,
+    peer: &str,
+    request: messages_message::Body,
+) -> Result<MessagesReply, String> {
+    match state.device.messages(peer, request).await {
+        Ok(reply) => Ok(reply),
         Err(SendError::NotConnected) => Err(NOT_CONNECTED.to_string()),
         Err(e) => Err(user_error("Couldn't reach your phone. Try again.")(e)),
     }
@@ -947,25 +1677,27 @@ fn initialize_desktop_runtime(
     let stores = Stores::open(db_path)?;
     let keys = DeviceKeys::load_or_create(&secrets::device_key_store(secrets_dir)?)?;
 
-    let pending_answers = PendingAnswers::default();
     let connected = Arc::new(tray::Connected::default());
-    let mut handlers = session_handlers(
-        download_dir,
-        &stores,
-        pending_answers.clone(),
-        clipboard.clone(),
-        app_handle,
-    );
+    let mut handlers = session_handlers(download_dir, &stores, clipboard.clone(), app_handle);
     handlers.on_device_info = Some(device_info_listener(
         app_handle.clone(),
         stores.clone(),
         connected.clone(),
     ));
-    let batteries = Batteries::default();
+    let reports = PeerReports::default();
     handlers.on_device_status = Some(device_status_listener(
         app_handle.clone(),
-        batteries.clone(),
+        stores.clone(),
+        reports.clone(),
     ));
+    handlers.on_device_look = Some(device_look_listener(app_handle.clone(), reports.clone()));
+    handlers.computer_actions = Some(Arc::new(actions::DesktopActions(app_handle.clone())));
+    handlers.ringer = Some(Arc::new(actions::DesktopRinger(app_handle.clone())));
+    handlers.pointer_target = Some(Arc::new(pointer::Touchpad::default()));
+    let snippets_app = app_handle.clone();
+    handlers.on_snippets_changed = Some(Arc::new(move |_, ()| {
+        let _ = snippets_app.emit("snippets-changed", ());
+    }));
     let (save_folder, incoming) = (handlers.save_folder.clone(), handlers.incoming.clone());
     let on_state_change = session_state_listener(app_handle.clone(), stores.clone(), connected);
     let device = Device::new(stores, keys, handlers, Some(on_state_change))?;
@@ -974,11 +1706,11 @@ fn initialize_desktop_runtime(
         device_name: computer_name(),
         device,
         active_pairing: Mutex::new(None),
-        pending_answers,
+        pending_pair: Mutex::new(None),
         save_folder,
         incoming,
         clipboard,
-        batteries,
+        reports,
     })
 }
 
@@ -991,8 +1723,9 @@ fn main() {
         .init();
 
     tauri::Builder::default()
-        // Opening Continue again shows the one already running, which may be in the tray.
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        // A second launch focuses the running app and hands over any files (Send to).
+        .plugin(tauri_plugin_single_instance::init(|app, args, _| {
+            send_to::queue(app, args);
             tray::show_window(app)
         }))
         .plugin(tauri_plugin_autostart::init(
@@ -1013,8 +1746,6 @@ fn main() {
             let secrets_dir = app_data.join("secrets");
             let _ = std::fs::create_dir_all(&secrets_dir);
 
-            let _ = std::fs::remove_dir_all(pasted_dir(app.handle()));
-
             let download_dir = receiving::starting_folder(app.handle(), &app_data);
             let _ = std::fs::create_dir_all(&download_dir);
 
@@ -1028,8 +1759,15 @@ fn main() {
             )
             .expect("Failed to initialize Continue desktop runtime engine");
 
-            // quinn needs a running async runtime to open the endpoint, which `setup` doesn't have.
             let device = runtime_state.device.clone();
+            remove_old_pastes(app.handle(), &device);
+            let paused = paused_marker(app.handle()).is_some_and(|marker| marker.exists());
+            tauri::async_runtime::block_on(device.sessions.set_paused(paused));
+            look::watch(device.clone());
+            // Before listening, as connection handlers read it.
+            app.manage(runtime_state);
+            app.manage(CopiesWaiting::default());
+            // quinn needs a running async runtime to open the endpoint, which `setup` doesn't have.
             tauri::async_runtime::spawn(async move {
                 let listener = device
                     .listen()
@@ -1043,17 +1781,27 @@ fn main() {
                 }
             });
 
-            app.manage(runtime_state);
             let handle = app.handle().clone();
-            clipboard_watcher.start(move |text| send_copied_text(&handle, text));
+            clipboard_watcher.start(move |clip| send_copied(&handle, clip));
 
-            if let Err(error) = tray::create(app.handle()) {
+            if let Err(error) = tray::create(app.handle(), paused) {
                 tracing::warn!("No tray icon, so closing the window will quit: {error}");
             }
             start_at_login_by_default(app.handle(), &app_data);
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main") {
+                without_browser_keys(&window);
+            }
             if !std::env::args().any(|arg| arg == BACKGROUND_ARG) {
                 tray::show_window(app.handle());
             }
+            app.manage(send_to::FilesToSend::default());
+            app.manage(video::Watching::default());
+            app.manage(pointer::start(app.handle()));
+            drop_folder::watch(app.handle().clone());
+            app.manage(proximity::start(app.handle()));
+            send_to::queue(app.handle(), std::env::args().skip(1));
+            send_to::add_to_explorer();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1062,14 +1810,50 @@ fn main() {
             remove_trusted_peer,
             start_pairing,
             cancel_pairing,
+            confirm_pairing,
             pair_from_qr,
             get_permissions,
-            set_permission,
-            answer_permission,
-            pending_permission_questions,
+            set_allowed,
+            answer_call,
+            decline_call,
+            silence_call,
+            call_number,
+            media_command,
+            ring_phone,
             get_history,
             clear_history,
+            get_waiting,
+            get_snippets,
+            pin_snippet,
+            unpin_snippet,
+            send_later,
+            cancel_waiting,
             open_received,
+            thumbnail,
+            list_photos,
+            get_photo,
+            send_to::take_files_to_send,
+            video::start_mirror,
+            video::screen_input,
+            pointer::get_phone_side,
+            drop_folder::open_drop_folder,
+            proximity::get_lock_when_away,
+            actions::stop_ringing,
+            proximity::set_lock_when_away,
+            call_camera::set_call_camera,
+            call_camera::call_camera_available,
+            pointer::set_phone_side,
+            video::stop_mirror,
+            video::start_camera,
+            video::camera_control,
+            video::stop_camera,
+            list_phone_folder,
+            get_phone_file,
+            list_contacts,
+            search_phone,
+            list_conversations,
+            read_conversation,
+            send_sms,
             open_link,
             set_clipboard_sync,
             receiving::list_incoming,
@@ -1085,7 +1869,8 @@ fn main() {
             send_file_to_peer,
             send_clipboard_text,
             press_notification_button,
-            dismiss_notification
+            dismiss_notification,
+            mute_app
         ])
         // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
         .on_window_event(|window, event| {
