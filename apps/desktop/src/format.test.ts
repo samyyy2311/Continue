@@ -2,7 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { dayLabel, fileNameFromPath, formatBytes, formatRelativeTime, getFileCategory, linkIn } from "./format.ts";
+import {
+  dayLabel,
+  fileNameFromPath,
+  formatBytes,
+  formatRelativeTime,
+  getFileCategory,
+  linkIn,
+  linksIn,
+  oneTimeCode,
+} from "./format.ts";
 
 describe("formatBytes", () => {
   it("picks the largest unit below the value", () => {
@@ -72,5 +81,27 @@ describe("dayLabel", () => {
   it("names today and yesterday", () => {
     expect(dayLabel(new Date(2026, 9, 3, 1).getTime(), evening)).toBe("Today");
     expect(dayLabel(new Date(2026, 9, 2, 23).getTime(), evening)).toBe("Yesterday");
+  });
+});
+
+describe("oneTimeCode", () => {
+  it("finds the code in a text that says it has one", () => {
+    expect(oneTimeCode("Your verification code is 482913. Don't share it.")).toBe("482913");
+    expect(oneTimeCode("OTP: 7391 for your login")).toBe("7391");
+  });
+
+  it("leaves other numbers alone", () => {
+    expect(oneTimeCode("Meet at 1930 by the station")).toBeNull();
+    expect(oneTimeCode("Your code is ready, order 12345678901")).toBeNull();
+    expect(oneTimeCode("Call 555-0142 for your code")).toBeNull();
+  });
+});
+
+describe("linksIn", () => {
+  it("finds each link and drops the full stop after it", () => {
+    expect(linksIn("See https://example.com/a. Or http://x.org/b?c=1, thanks")).toEqual([
+      "https://example.com/a",
+      "http://x.org/b?c=1",
+    ]);
   });
 });

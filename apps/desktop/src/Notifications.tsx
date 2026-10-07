@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Send, X } from "lucide-react";
-import { dismissNotification, errorMessage, pressNotificationButton } from "./api.ts";
-import { formatRelativeTime } from "./format.ts";
+import { BellOff, Copy, Send, X } from "lucide-react";
+import { dismissNotification, errorMessage, muteApp, pressNotificationButton } from "./api.ts";
+import { formatRelativeTime, oneTimeCode } from "./format.ts";
 import type { PhoneNotification } from "./types.ts";
 
 /** The phone's notifications, newest first, with their buttons and a reply box where one takes text. */
@@ -24,6 +24,7 @@ function NotificationRow(props: { notification: PhoneNotification; onError: (mes
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [reply, setReply] = useState("");
   const { peerId, id } = notification;
+  const code = oneTimeCode(`${notification.title} ${notification.text}`);
 
   const press = (buttonId: string, text = "") =>
     pressNotificationButton(peerId, id, buttonId, text).catch((error) => onError(errorMessage(error)));
@@ -36,8 +37,18 @@ function NotificationRow(props: { notification: PhoneNotification; onError: (mes
         </span>
         <span className="list-title">{notification.title}</span>
         {notification.text && <span className="list-sub wrap">{notification.text}</span>}
-        {notification.buttons.length > 0 && replyingTo === null && (
+        {(code || notification.buttons.length > 0) && replyingTo === null && (
           <div className="notification-buttons">
+            {code && (
+              <button
+                type="button"
+                className="btn btn-tonal btn-small"
+                onClick={() => void navigator.clipboard.writeText(code)}
+              >
+                <Copy size={16} />
+                Copy {code}
+              </button>
+            )}
             {notification.buttons.map((button) => (
               <button
                 key={button.id}
@@ -75,6 +86,14 @@ function NotificationRow(props: { notification: PhoneNotification; onError: (mes
           </form>
         )}
       </div>
+      <button
+        type="button"
+        className="icon-btn"
+        title={`Stop showing ${notification.appName}`}
+        onClick={() => muteApp(peerId, notification.packageName).catch((error) => onError(errorMessage(error)))}
+      >
+        <BellOff size={18} />
+      </button>
       <button
         type="button"
         className="icon-btn"

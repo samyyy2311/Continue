@@ -1,27 +1,67 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-import { BatteryCharging, BatteryFull, BatteryLow, BatteryMedium, Check } from "lucide-react";
+import {
+  BatteryCharging,
+  BatteryFull,
+  BatteryLow,
+  BatteryMedium,
+  Check,
+  File,
+  FileArchive,
+  FileAudio,
+  FileCode,
+  FileImage,
+  FileText,
+  FileVideo,
+  Signal,
+  SignalHigh,
+  SignalLow,
+  SignalMedium,
+  SignalZero,
+  Wifi,
+  WifiHigh,
+  WifiLow,
+  WifiZero,
+} from "lucide-react";
+import { getFileCategory } from "./format.ts";
 import type { TrustedPeer } from "./types.ts";
 
-/** "Connected" or "Not connected", with the battery once a connected device reports it. */
+const SIGNAL_ICONS = [SignalZero, SignalLow, SignalMedium, SignalHigh, Signal];
+const WIFI_ICONS = [WifiZero, WifiLow, WifiLow, WifiHigh, Wifi];
+
 export function ConnectionStatus({ peer }: { peer: TrustedPeer }) {
-  const { isConnected, battery } = peer;
-  const percent = battery?.percent ?? 0;
-  const BatteryIcon = battery?.charging
+  const { isConnected, status } = peer;
+  const percent = status?.percent ?? 0;
+  const BatteryIcon = status?.charging
     ? BatteryCharging
     : percent <= 20
       ? BatteryLow
       : percent <= 60
         ? BatteryMedium
         : BatteryFull;
+  const CellIcon = status?.cellBars != null ? SIGNAL_ICONS[status.cellBars] : null;
+  const WifiIcon = status?.wifiBars != null ? WIFI_ICONS[status.wifiBars] : null;
   return (
     <span className={`status ${isConnected ? "online" : ""}`}>
       {isConnected ? "Connected" : "Not connected"}
-      {isConnected && battery && (
-        <span className="battery" aria-label={`Battery ${battery.percent}%${battery.charging ? ", charging" : ""}`}>
-          <BatteryIcon size={16} aria-hidden="true" />
-          {battery.percent}%
+      {isConnected && status && (
+        <span className="device-meters">
+          <span aria-label={`Battery ${status.percent}%${status.charging ? ", charging" : ""}`}>
+            <BatteryIcon size={16} aria-hidden="true" />
+            {status.percent}%
+          </span>
+          {CellIcon && (
+            <span title={status.carrier} aria-label={`${status.carrier || "Mobile"} signal ${status.cellBars} of 4`}>
+              <CellIcon size={16} aria-hidden="true" />
+              {status.network}
+            </span>
+          )}
+          {WifiIcon && (
+            <span aria-label={`Wi-Fi signal ${status.wifiBars} of 4`}>
+              <WifiIcon size={16} aria-hidden="true" />
+            </span>
+          )}
         </span>
       )}
     </span>
@@ -87,4 +127,24 @@ export function Switch(props: { checked: boolean; onChange: (checked: boolean) =
       <span />
     </button>
   );
+}
+
+export function getFileIcon(name: string) {
+  const category = getFileCategory(name);
+  switch (category) {
+    case "image":
+      return <FileImage size={18} />;
+    case "video":
+      return <FileVideo size={18} />;
+    case "audio":
+      return <FileAudio size={18} />;
+    case "archive":
+      return <FileArchive size={18} />;
+    case "code":
+      return <FileCode size={18} />;
+    case "document":
+      return <FileText size={18} />;
+    default:
+      return <File size={18} />;
+  }
 }

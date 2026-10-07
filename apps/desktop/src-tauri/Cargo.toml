@@ -5,6 +5,9 @@ edition = "2021"
 license = "GPL-3.0-only"
 publish = false
 
+[workspace]
+members = ["camera"]
+
 [build-dependencies]
 tauri-build = { version = "2.0.0", features = [] }
 
@@ -15,14 +18,16 @@ tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
-clipboard-rs = { version = "0.3", default-features = false }
+clipboard-rs = { version = "0.3", default-features = false, features = ["image"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+base64 = "0.22"
 percent-encoding = "2"
 whoami = { version = "2", default-features = false, features = ["std"] }
 # The OS store for device keys: Keychain, Windows Credential Manager, Secret Service.
 keyring = { version = "3.6", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
-tokio = { version = "1", features = ["sync", "time", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "sync", "time", "rt-multi-thread"] }
 protocol = { path = "../../../crates/protocol" }
 identity = { path = "../../../crates/identity" }
 pairing = { path = "../../../crates/pairing" }
@@ -31,8 +36,28 @@ permissions = { path = "../../../crates/permissions" }
 notifications = { path = "../../../crates/notifications" }
 history = { path = "../../../crates/history" }
 device = { path = "../../../crates/device" }
+discovery = { path = "../../../crates/discovery" }
 transfer = { path = "../../../crates/transfer" }
 parking_lot = "0.12"
+prost = "0.13"
 zeroize = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(windows)'.dependencies]
+continue-camera = { path = "camera" }
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+    "Devices_Bluetooth_Advertisement",
+    "Foundation_Collections",
+    "Storage_Streams",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_DataExchange",
+    "Win32_System_Power",
+    "Win32_System_Shutdown",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

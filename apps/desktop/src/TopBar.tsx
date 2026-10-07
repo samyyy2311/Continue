@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
-import { Copy, Minus, Settings, Square, X } from "lucide-react";
+import { Copy, Minus, Search, Settings, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@tauri-apps/api/core";
 import { MOD_KEY, type View } from "./types.ts";
@@ -49,6 +49,16 @@ export function TopBar(props: {
       </nav>
 
       <div className="topbar-end">
+        <button
+          type="button"
+          className="topbar-icon"
+          aria-current={view === "search" ? "page" : undefined}
+          onClick={() => onView("search")}
+          title="Search your phone"
+          aria-label="Search your phone"
+        >
+          <Search size={18} />
+        </button>
         <button
           type="button"
           className="topbar-icon"

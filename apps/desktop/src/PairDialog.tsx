@@ -11,6 +11,8 @@ import {
   onPairingFailed,
   pairFromCode,
   startPairing,
+  confirmPairing,
+  onPairingCheck,
 } from "./api.ts";
 import type { TrustedPeer } from "./types.ts";
 
@@ -30,7 +32,11 @@ function queuePairingCall<T>(call: () => Promise<T>): Promise<T> {
   return result;
 }
 
-type ShowState = { status: "starting" } | { status: "waiting"; code: string } | { status: "failed"; message: string };
+type ShowState =
+  | { status: "starting" }
+  | { status: "waiting"; code: string }
+  | { status: "checking"; digits: string }
+  | { status: "failed"; message: string };
 
 interface PairDialogProps {
   onPaired: (peer: TrustedPeer) => void;
@@ -101,6 +107,7 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
     const unlisteners = Promise.all([
       onPairingCompleted((peer) => active && onPaired(peer)),
       onPairingFailed((message) => active && setState({ status: "failed", message })),
+      onPairingCheck((digits) => active && setState({ status: "checking", digits })),
     ]);
 
     setState({ status: "starting" });
@@ -120,6 +127,29 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   };
+
+  if (state.status === "checking") {
+    const answer = (accept: boolean) =>
+      confirmPairing(accept)
+        .then(() => !accept && setAttempt((n) => n + 1))
+        .catch((error) => setState({ status: "failed", message: errorMessage(error) }));
+    return (
+      <div className="section">
+        <p className="supporting">Check that your phone shows the same six digits.</p>
+        <p className="pair-digits" aria-label={`Code ${state.digits.split("").join(" ")}`}>
+          {state.digits.slice(0, 3)} {state.digits.slice(3)}
+        </p>
+        <div className="dialog-actions">
+          <button type="button" className="btn btn-text" onClick={() => void answer(false)}>
+            Not mine
+          </button>
+          <button type="button" className="btn btn-filled" onClick={() => void answer(true)}>
+            Pair
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (state.status === "failed") {
     return (
@@ -142,7 +172,7 @@ function ShowCode({ onPaired }: { onPaired: (peer: TrustedPeer) => void }) {
         <ol className="steps">
           <li>Open Continue on your phone</li>
           <li>Tap Pair</li>
-          <li>Point the camera at this code</li>
+          <li>Point the camera at this code, or pick this computer under Nearby</li>
         </ol>
         <p className="waiting" role="status">
           {state.status === "waiting" ? "Waiting for your phone" : "Getting a code ready"}
