@@ -722,6 +722,7 @@ dependencies = [
  "history",
  "identity",
  "keyring",
+ "notifications",
  "pairing",
  "parking_lot",
  "percent-encoding",
@@ -1074,6 +1075,7 @@ dependencies = [
  "discovery",
  "history",
  "identity",
+ "notifications",
  "pairing",
  "permissions",
  "protocol",
@@ -2201,7 +2203,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 name = "identity"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "crypto",
  "ed25519-dalek",
  "limits",
@@ -3301,7 +3303,7 @@ dependencies = [
 name = "pairing"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "crypto",
  "ed25519-dalek",
  "identity",
