@@ -384,6 +384,7 @@ dependencies = [
  "protocol",
  "quinn",
  "rcgen",
+ "rusqlite",
  "rustls",
  "sha2",
  "thiserror 1.0.69",

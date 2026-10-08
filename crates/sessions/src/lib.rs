@@ -4,6 +4,7 @@
 pub mod auto_connect;
 pub mod backoff;
 pub mod capabilities_router;
+pub mod catalog;
 pub mod deck;
 pub mod device;
 pub mod error;
@@ -24,10 +25,12 @@ pub mod telemetry;
 pub use auto_connect::connect_paired_peers;
 pub use backoff::ReconnectPolicy;
 pub use capabilities_router::{
-    spawn_capabilities_dispatcher, DeckLayoutHandler, DeckTriggerHandler, MediaCommandHandler,
-    OnReceived, PcActionHandler, PermissionDecision, PermissionPrompt, PermissionRequest,
-    RemoteInputHandler, RingHandler, SessionCapabilityHandlers, PROMPT_TIMEOUT,
+    spawn_capabilities_dispatcher, CatalogQueryHandler, DeckLayoutHandler, DeckTriggerHandler,
+    MediaCommandHandler, OnReceived, PcActionHandler, PermissionDecision, PermissionPrompt,
+    PermissionRequest, RemoteInputHandler, RingHandler, SessionCapabilityHandlers,
+    ThumbnailRequestHandler, PROMPT_TIMEOUT,
 };
+pub use catalog::CatalogDispatcher;
 pub use deck::DeckDispatcher;
 pub use device::{clean_name, this_platform, PeerDevice, ThisDevice};
 pub use error::SessionError;

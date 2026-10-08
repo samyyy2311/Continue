@@ -13,6 +13,7 @@ use notifications::Body as NotificationBody;
 use protocol::CapabilityId;
 use transfer::{receive_file, send_file, ReceivedFile};
 
+use crate::catalog::CatalogDispatcher;
 use crate::deck::DeckDispatcher;
 use crate::device::{PeerDevice, ThisDevice};
 use crate::handoff::HandoffDispatcher;
@@ -70,6 +71,11 @@ pub type DeckLayoutHandler =
     Arc<dyn Fn(&str, protocol::v1::DeckLayoutSync) -> protocol::v1::DeckAck + Send + Sync>;
 pub type DeckTriggerHandler =
     Arc<dyn Fn(&str, protocol::v1::DeckTriggerEvent) -> protocol::v1::DeckAck + Send + Sync>;
+pub type CatalogQueryHandler =
+    Arc<dyn Fn(&str, protocol::v1::CatalogQuery) -> protocol::v1::CatalogResponse + Send + Sync>;
+pub type ThumbnailRequestHandler = Arc<
+    dyn Fn(&str, protocol::v1::ThumbnailRequest) -> protocol::v1::ThumbnailResponse + Send + Sync,
+>;
 
 /// Callbacks and configuration for active capabilities over a multiplexed session.
 #[derive(Clone)]
@@ -83,6 +89,7 @@ pub struct SessionCapabilityHandlers {
     pub pc_control_dispatcher: Arc<PcControlDispatcher>,
     pub remote_input_dispatcher: Arc<RemoteInputDispatcher>,
     pub deck_dispatcher: Arc<DeckDispatcher>,
+    pub catalog_dispatcher: Arc<CatalogDispatcher>,
     pub on_file_received: Option<OnReceived<ReceivedFile>>,
     pub on_clipboard_received: Option<OnReceived<ClipboardUpdate>>,
     /// Called with notifications the peer shows here, and with replies to and dismissals of
@@ -98,6 +105,8 @@ pub struct SessionCapabilityHandlers {
     pub on_remote_input: Option<RemoteInputHandler>,
     pub on_deck_layout_synced: Option<DeckLayoutHandler>,
     pub on_deck_tile_triggered: Option<DeckTriggerHandler>,
+    pub on_catalog_query: Option<CatalogQueryHandler>,
+    pub on_thumbnail_request: Option<ThumbnailRequestHandler>,
     /// How this device introduces itself to peers.
     pub this_device: ThisDevice,
     /// Called with what a peer says about itself each time a session starts.
@@ -123,6 +132,7 @@ impl SessionCapabilityHandlers {
             pc_control_dispatcher: Arc::new(PcControlDispatcher::new()),
             remote_input_dispatcher: Arc::new(RemoteInputDispatcher::new()),
             deck_dispatcher: Arc::new(DeckDispatcher::new()),
+            catalog_dispatcher: Arc::new(CatalogDispatcher::new()),
             on_file_received: None,
             on_clipboard_received: None,
             on_notification: None,
@@ -136,6 +146,8 @@ impl SessionCapabilityHandlers {
             on_remote_input: None,
             on_deck_layout_synced: None,
             on_deck_tile_triggered: None,
+            on_catalog_query: None,
+            on_thumbnail_request: None,
             this_device: ThisDevice::default(),
             on_device_info: None,
             on_device_status: None,
@@ -674,6 +686,60 @@ pub fn spawn_capabilities_dispatcher(
                             error!("Failed to process deck stream from {peer_fp}: {e}");
                         }
                     }
+                    CapabilityId::FILE_CATALOG => {
+                        debug!("Handling incoming file catalog stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::FILE_CATALOG, None).await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::FILE_CATALOG);
+                            }
+                        }
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::FILE_CATALOG, is_permitted);
+
+                        let on_query = handlers.on_catalog_query.clone();
+                        let on_thumb = handlers.on_thumbnail_request.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .catalog_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |q| {
+                                    if let Some(ref cb) = on_query {
+                                        cb(&peer, q)
+                                    } else {
+                                        protocol::v1::CatalogResponse {
+                                            items: Vec::new(),
+                                            total_count: 0,
+                                        }
+                                    }
+                                },
+                                |req| {
+                                    if let Some(ref cb) = on_thumb {
+                                        cb(&peer, req)
+                                    } else {
+                                        protocol::v1::ThumbnailResponse {
+                                            item_id: req.item_id,
+                                            image_data: Vec::new(),
+                                            mime_type: String::new(),
+                                            success: false,
+                                            error_message: "Thumbnail requests not handled".into(),
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process file catalog stream from {peer_fp}: {e}");
+                        }
+                    }
                     unknown => {
                         debug!("Received unsupported capability stream {unknown:?} from {peer_fp}");
                     }
@@ -840,6 +906,38 @@ impl SessionMultiplexer {
         let dispatcher = DeckDispatcher::new();
         dispatcher
             .trigger_tile(&mut send, &mut recv, trigger, query)
+            .await
+    }
+
+    pub async fn query_file_catalog_from_peer(
+        &self,
+        query: protocol::v1::CatalogQuery,
+        capability_query: &CapabilityQuery,
+    ) -> Result<protocol::v1::CatalogResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::FILE_CATALOG)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = CatalogDispatcher::new();
+        dispatcher
+            .query_catalog(&mut send, &mut recv, query, capability_query)
+            .await
+    }
+
+    pub async fn request_thumbnail_from_peer(
+        &self,
+        req: protocol::v1::ThumbnailRequest,
+        capability_query: &CapabilityQuery,
+    ) -> Result<protocol::v1::ThumbnailResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::FILE_CATALOG)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = CatalogDispatcher::new();
+        dispatcher
+            .request_thumbnail(&mut send, &mut recv, req, capability_query)
             .await
     }
 }

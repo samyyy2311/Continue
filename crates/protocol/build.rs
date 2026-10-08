@@ -25,6 +25,7 @@ fn main() {
         proto_dir.join("pc_control.proto"),
         proto_dir.join("remote_input.proto"),
         proto_dir.join("deck.proto"),
+        proto_dir.join("catalog.proto"),
     ];
 
     for file in &proto_files {

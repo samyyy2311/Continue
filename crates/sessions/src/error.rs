@@ -40,4 +40,7 @@ pub enum SessionError {
 
     #[error("Deck validation failed: {0}")]
     DeckValidation(String),
+
+    #[error("Catalog validation failed: {0}")]
+    CatalogValidation(String),
 }

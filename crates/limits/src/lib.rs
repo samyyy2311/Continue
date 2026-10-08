@@ -102,6 +102,20 @@ pub const MAX_DECK_TILE_ID_BYTES: usize = 128;
 /// Maximum UTF-8 byte length for a deck tile label.
 pub const MAX_DECK_LABEL_BYTES: usize = 256;
 
+// File catalog & thumbnails
+
+/// File catalog query and response message frame size.
+pub const MAX_FRAME_CATALOG_BYTES: usize = 256 * 1024;
+
+/// Thumbnail image response message frame size.
+pub const MAX_FRAME_THUMBNAIL_BYTES: usize = 1024 * 1024;
+
+/// Maximum items returned in a single catalog query page.
+pub const MAX_CATALOG_PAGE_SIZE: u32 = 250;
+
+/// Maximum UTF-8 byte length for a catalog item ID.
+pub const MAX_CATALOG_ITEM_ID_BYTES: usize = 128;
+
 // File transfer
 
 /// Maximum UTF-8 byte length of a transfer filename.
