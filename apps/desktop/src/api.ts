@@ -4,6 +4,8 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  CatalogResponse,
+  ClipboardHistoryItem,
   DeviceIdentity,
   Grant,
   HistoryEntry,
@@ -134,6 +136,54 @@ export const pressNotificationButton = (peerFingerprint: string, notificationId:
 /** Clears a notification on the phone too. */
 export const dismissNotification = (peerFingerprint: string, notificationId: string) =>
   invoke<void>("dismiss_notification", { peerFingerprint, notificationId });
+
+export const ringPeer = (peerFingerprint: string, active: boolean) =>
+  invoke<boolean>("ring_peer", { peerFingerprint, active });
+
+export const sendPcAction = (peerFingerprint: string, action: number) =>
+  invoke<boolean>("send_pc_action", { peerFingerprint, action });
+
+export const queryFileCatalog = (
+  peerFingerprint: string,
+  category: number,
+  limit: number = 50,
+  offset: number = 0,
+) =>
+  invoke<CatalogResponse>("query_file_catalog", {
+    peerFingerprint,
+    category,
+    limit,
+    offset,
+  });
+
+export const getCatalogThumbnail = (
+  peerFingerprint: string,
+  itemId: string,
+  maxEdge: number = 256,
+) =>
+  invoke<string>("get_catalog_thumbnail", {
+    peerFingerprint,
+    itemId,
+    maxEdge,
+  });
+
+export const mountCloudFiles = (peerFingerprint: string) =>
+  invoke<string>("mount_cloud_files", { peerFingerprint });
+
+export const openCloudFilesFolder = (peerFingerprint: string) =>
+  invoke<void>("open_cloud_files_folder", { peerFingerprint });
+
+export const getClipboardHistory = (limit: number = 50) =>
+  invoke<ClipboardHistoryItem[]>("get_clipboard_history", { limit });
+
+export const pinClipboardClip = (id: number, pinned: boolean) =>
+  invoke<boolean>("pin_clipboard_clip", { id, pinned });
+
+export const deleteClipboardClip = (id: number) =>
+  invoke<boolean>("delete_clipboard_clip", { id });
+
+export const clearClipboardHistory = () =>
+  invoke<number>("clear_clipboard_history");
 
 /** Commands reject with the backend's error string; anything else is unexpected. */
 export function errorMessage(error: unknown): string {

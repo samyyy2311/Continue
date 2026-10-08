@@ -4,6 +4,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
+  Bell,
+  BellOff,
   Check,
   CheckCheck,
   CircleAlert,
@@ -59,6 +61,7 @@ import {
   onNotificationRemoved,
   openLink,
   openReceived,
+  ringPeer,
   savePastedFile,
   setAutostart,
   setSaveFolder,
@@ -76,6 +79,8 @@ import {
   getFileCategory,
   linkIn,
 } from "./format.ts";
+import { CatalogDialog } from "./CatalogDialog.tsx";
+import { ClipboardHistoryDialog } from "./ClipboardHistoryDialog.tsx";
 import { NotificationList } from "./Notifications.tsx";
 import { PairDialog } from "./PairDialog.tsx";
 import {
@@ -215,6 +220,9 @@ export default function App() {
   // The last device picked is picked again next time.
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(() => readStored(PEER_KEY));
   const [showPairDialog, setShowPairDialog] = useState(false);
+  const [showCatalogDialog, setShowCatalogDialog] = useState(false);
+  const [showClipboardDialog, setShowClipboardDialog] = useState(false);
+  const [isRinging, setIsRinging] = useState(false);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -229,6 +237,24 @@ export default function App() {
   }, []);
 
   const showError = useCallback((message: string) => showToast(message, "error"), [showToast]);
+
+  const handleToggleRing = async () => {
+    if (!selectedPeer) return;
+    try {
+      const next = !isRinging;
+      const active = await ringPeer(selectedPeer.fingerprint, next);
+      setIsRinging(active);
+      if (active) {
+        showToast(`Ringing ${selectedPeer.displayName}...`);
+      }
+    } catch (err) {
+      showError(errorMessage(err));
+    }
+  };
+
+  useEffect(() => {
+    setIsRinging(false);
+  }, [selectedPeerId]);
 
   useEffect(() => {
     if (!toast) return;
@@ -763,6 +789,10 @@ export default function App() {
               onOpenPair={() => setShowPairDialog(true)}
               onChooseFiles={chooseFiles}
               onSendClipboard={handleSendClipboard}
+              onOpenCatalog={() => setShowCatalogDialog(true)}
+              onOpenClipboardHistory={() => setShowClipboardDialog(true)}
+              isRinging={isRinging}
+              onToggleRing={handleToggleRing}
               textInput={textInput}
               onTextInputChange={setTextInput}
               onSendText={handleSendText}
@@ -809,6 +839,7 @@ export default function App() {
               onAccentChange={setAccent}
               clipboardSync={clipboardSync}
               onClipboardSyncChange={setClipboardSync}
+              onOpenClipboardHistory={() => setShowClipboardDialog(true)}
               onError={showError}
               onOpenFolder={(folder) => rowActions.open(folder, false)}
             />
@@ -831,6 +862,21 @@ export default function App() {
       )}
 
       {showPairDialog && <PairDialog onPaired={handlePaired} onClose={() => setShowPairDialog(false)} />}
+
+      {showCatalogDialog && selectedPeer && (
+        <CatalogDialog
+          peer={selectedPeer}
+          onClose={() => setShowCatalogDialog(false)}
+          onError={showError}
+        />
+      )}
+
+      {showClipboardDialog && (
+        <ClipboardHistoryDialog
+          onClose={() => setShowClipboardDialog(false)}
+          onError={showError}
+        />
+      )}
 
       {toast && (
         <div className={`snackbar ${toast.tone}`} role={toast.tone === "error" ? "alert" : "status"}>
@@ -940,6 +986,10 @@ interface HomeViewProps {
   onOpenPair: () => void;
   onChooseFiles: () => void;
   onSendClipboard: () => void;
+  onOpenCatalog: () => void;
+  onOpenClipboardHistory: () => void;
+  isRinging: boolean;
+  onToggleRing: () => void;
   textInput: string;
   onTextInputChange: (val: string) => void;
   onSendText: () => void;
@@ -956,7 +1006,19 @@ interface HomeViewProps {
 }
 
 function HomeView(props: HomeViewProps) {
-  const { peer, peers, onSelectPeer, onOpenPair, onChooseFiles, onSendClipboard, textInput } = props;
+  const {
+    peer,
+    peers,
+    onSelectPeer,
+    onOpenPair,
+    onChooseFiles,
+    onSendClipboard,
+    onOpenCatalog,
+    onOpenClipboardHistory,
+    isRinging,
+    onToggleRing,
+    textInput,
+  } = props;
   const { onTextInputChange, onSendText, onConnect, onReconnect, onDisconnect, isConnecting } = props;
   const { activeTransfers, recentActivity, rowActions, onNavigateHistory, notifications, onError } = props;
 
@@ -992,9 +1054,20 @@ function HomeView(props: HomeViewProps) {
         </p>
         <div className="device-actions">
           {online ? (
-            <button type="button" className="btn btn-tonal" onClick={onDisconnect}>
-              Disconnect
-            </button>
+            <>
+              <button
+                type="button"
+                className={`btn ${isRinging ? "btn-danger" : "btn-tonal"}`}
+                onClick={onToggleRing}
+                title="Sound alarm on phone to locate it"
+              >
+                {isRinging ? <BellOff size={18} /> : <Bell size={18} />}
+                {isRinging ? "Stop alarm" : "Ring phone"}
+              </button>
+              <button type="button" className="btn btn-text" onClick={onDisconnect}>
+                Disconnect
+              </button>
+            </>
           ) : (
             <ManualConnect
               key={peer.fingerprint}
@@ -1039,6 +1112,22 @@ function HomeView(props: HomeViewProps) {
               >
                 <ClipboardPaste size={20} />
                 Send clipboard
+              </button>
+              <button
+                type="button"
+                className="btn btn-tonal btn-large"
+                onClick={onOpenCatalog}
+              >
+                <FolderOpen size={20} />
+                Browse device
+              </button>
+              <button
+                type="button"
+                className="btn btn-tonal btn-large"
+                onClick={onOpenClipboardHistory}
+              >
+                <History size={20} />
+                Clipboard history
               </button>
             </div>
           )}
@@ -1355,6 +1444,7 @@ interface SettingsViewProps {
   identity: DeviceIdentity | null;
   clipboardSync: boolean;
   onClipboardSyncChange: (on: boolean) => void;
+  onOpenClipboardHistory: () => void;
   onError: (message: string) => void;
   onOpenFolder: (folder: string) => void;
   theme: Theme;
@@ -1370,7 +1460,17 @@ const THEME_OPTIONS = [
 ] as const;
 
 function SettingsView(props: SettingsViewProps) {
-  const { identity, theme, accent, onThemeChange, onAccentChange, clipboardSync, onClipboardSyncChange, onError } = props;
+  const {
+    identity,
+    theme,
+    accent,
+    onThemeChange,
+    onAccentChange,
+    clipboardSync,
+    onClipboardSyncChange,
+    onOpenClipboardHistory,
+    onError,
+  } = props;
   const { onOpenFolder } = props;
   const [appVersion, setAppVersion] = useState("");
   const [startAtLogin, setStartAtLogin] = useState(false);
@@ -1491,6 +1591,15 @@ function SettingsView(props: SettingsViewProps) {
             </span>
           </div>
           <Switch labelledBy="clipboard-sync-label" checked={clipboardSync} onChange={onClipboardSyncChange} />
+        </li>
+        <li className="list-item">
+          <div className="list-text">
+            <span className="list-title">History</span>
+            <span className="list-sub">View, search, and pin saved clipboard snippets</span>
+          </div>
+          <button type="button" className="btn btn-tonal btn-small" onClick={onOpenClipboardHistory}>
+            View history
+          </button>
         </li>
       </ul>
 

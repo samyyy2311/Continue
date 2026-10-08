@@ -20,10 +20,13 @@ use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
+use capabilities::CapabilityQuery;
+use clipboard::history::ClipboardHistoryStore;
 use device::{ConnectError, Device, PairError, SendError, Stores};
 use history::{Direction, HistoryStore, Kind};
 use pairing::DeviceKeys;
 use permissions::PermissionState;
+use protocol::v1::{CatalogQuery, PcAction, PcActionRequest, RingRequest, ThumbnailRequest};
 use protocol::CapabilityId;
 use sessions::{PermissionDecision, SessionState};
 use transfer::TransferError;
@@ -107,6 +110,8 @@ pub struct DesktopRuntimeState {
     incoming: sessions::IncomingFiles,
     clipboard: ClipboardSync,
     batteries: Batteries,
+    clipboard_history: Arc<ClipboardHistoryStore>,
+    cloud_mounts: Arc<Mutex<HashMap<String, Arc<transfer::CloudFilesMount>>>>,
 }
 
 #[derive(Serialize)]
@@ -325,6 +330,7 @@ fn session_handlers(
     stores: &Stores,
     pending_answers: PendingAnswers,
     clipboard: ClipboardSync,
+    clipboard_history: Arc<ClipboardHistoryStore>,
     app_handle: &AppHandle,
 ) -> sessions::SessionCapabilityHandlers {
     let mut handlers = sessions::SessionCapabilityHandlers::new(download_dir)
@@ -365,11 +371,17 @@ fn session_handlers(
         );
     }));
 
-    let (app, texts) = (app_handle.clone(), stores.clone());
+    let (app, texts, history_store) = (app_handle.clone(), stores.clone(), clipboard_history);
     handlers.on_clipboard_received = Some(Arc::new(move |peer, update| {
         let text = String::from_utf8_lossy(&update.payload).into_owned();
         clipboard.write(text.clone());
         let name = texts.received_text(peer, &text).peer_name;
+        let _ = history_store.record_clip(
+            protocol::v1::ClipboardFormat::TextPlain,
+            &text,
+            &name,
+            None::<[&str; 0]>,
+        );
         notify_if_away(
             &app,
             &format!("Copied text from {}", shown_name(name.clone())),
@@ -847,7 +859,14 @@ struct SyncedTextDto {
 
 /// Sends what was just copied here to every connected device.
 fn send_copied_text(app: &AppHandle, text: String) {
-    let device = app.state::<DesktopRuntimeState>().device.clone();
+    let state = app.state::<DesktopRuntimeState>();
+    let _ = state.clipboard_history.record_clip(
+        protocol::v1::ClipboardFormat::TextPlain,
+        &text,
+        "This PC",
+        None::<[&str; 0]>,
+    );
+    let device = state.device.clone();
     let peers = device.stores.trust.list_peers().unwrap_or_default();
     for peer in peers
         .into_iter()
@@ -937,6 +956,282 @@ async fn push_text(device: &Device, peer: &str, text: String) -> Result<(), Stri
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogItemDto {
+    pub id: String,
+    pub name: String,
+    pub size_bytes: u64,
+    pub timestamp: u64,
+    pub mime_type: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogResponseDto {
+    pub items: Vec<CatalogItemDto>,
+    pub total_count: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardHistoryEntryDto {
+    pub id: i64,
+    pub timestamp_ms: u64,
+    pub content: String,
+    pub is_pinned: bool,
+    pub origin_device: String,
+}
+
+#[tauri::command]
+async fn ring_peer(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    active: bool,
+) -> Result<bool, String> {
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
+    let query = CapabilityQuery::negotiated(CapabilityId::RING_DEVICE, true);
+    let request = RingRequest {
+        active,
+        duration_secs: 30,
+        force_max_volume: true,
+    };
+    let ack = mux
+        .trigger_ring_on_peer(request, &query)
+        .await
+        .map_err(user_error("Couldn't ring device."))?;
+    Ok(ack.is_ringing)
+}
+
+#[tauri::command]
+async fn send_pc_action(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    action: i32,
+) -> Result<bool, String> {
+    let pc_action = match action {
+        0 => PcAction::LockWorkstation,
+        1 => PcAction::SleepSystem,
+        2 => PcAction::ShutdownSystem,
+        3 => PcAction::ToggleMute,
+        _ => return Err("Invalid PC action".to_string()),
+    };
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
+    let query = CapabilityQuery::negotiated(CapabilityId::PC_CONTROL, true);
+    let request = PcActionRequest {
+        action: pc_action as i32,
+        force: false,
+    };
+    let resp = mux
+        .send_pc_action_to_peer(request, &query)
+        .await
+        .map_err(user_error("Couldn't execute PC action."))?;
+    Ok(resp.success)
+}
+
+#[tauri::command]
+async fn query_file_catalog(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    category: i32,
+    limit: u32,
+    offset: u32,
+) -> Result<CatalogResponseDto, String> {
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
+    let query = CapabilityQuery::negotiated(CapabilityId::FILE_CATALOG, true);
+    let req = CatalogQuery {
+        category,
+        limit,
+        offset,
+    };
+    let resp = mux
+        .query_file_catalog_from_peer(req, &query)
+        .await
+        .map_err(user_error("Couldn't browse files on device."))?;
+    Ok(CatalogResponseDto {
+        items: resp
+            .items
+            .into_iter()
+            .map(|item| CatalogItemDto {
+                id: item.item_id,
+                name: item.file_name,
+                size_bytes: item.size_bytes,
+                timestamp: item.timestamp,
+                mime_type: item.mime_type,
+            })
+            .collect(),
+        total_count: resp.total_count,
+    })
+}
+
+#[tauri::command]
+async fn get_catalog_thumbnail(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    item_id: String,
+    max_edge: u32,
+) -> Result<String, String> {
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
+    let query = CapabilityQuery::negotiated(CapabilityId::FILE_CATALOG, true);
+    let req = ThumbnailRequest {
+        item_id,
+        max_dimension: max_edge,
+    };
+    let resp = mux
+        .request_thumbnail_from_peer(req, &query)
+        .await
+        .map_err(user_error("Couldn't load thumbnail."))?;
+    use base64::engine::general_purpose::STANDARD as BASE64;
+    use base64::Engine;
+    let b64 = BASE64.encode(&resp.image_data);
+    let mime = if resp.mime_type.is_empty() {
+        "image/jpeg"
+    } else {
+        &resp.mime_type
+    };
+    Ok(format!("data:{mime};base64,{b64}"))
+}
+
+#[tauri::command]
+async fn mount_cloud_files(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Result<String, String> {
+    let peer_name = state.device.stores.peer_name(&peer_fingerprint);
+    let base_dir = std::env::var("USERPROFILE")
+        .map(PathBuf::from)
+        .or_else(|_| app.path().home_dir())
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let mount_path = base_dir
+        .join("Continue")
+        .join(shown_name(peer_name.clone()));
+    let _ = std::fs::create_dir_all(&mount_path);
+
+    let config = transfer::CloudFilesConfig::new(
+        &mount_path,
+        "Continue",
+        shown_name(peer_name),
+        &peer_fingerprint,
+    );
+
+    let mount = Arc::new(transfer::CloudFilesMount::new(config));
+    if transfer::CloudFilesMount::is_supported() {
+        let _ = mount.register();
+
+        if let Some(mux) = state.device.sessions.get(&peer_fingerprint) {
+            let query = CapabilityQuery::negotiated(CapabilityId::FILE_CATALOG, true);
+            let req = CatalogQuery {
+                category: 0,
+                limit: 100,
+                offset: 0,
+            };
+            if let Ok(catalog) = mux.query_file_catalog_from_peer(req, &query).await {
+                let entries: Vec<transfer::CloudFilesEntry> = catalog
+                    .items
+                    .into_iter()
+                    .map(|item| {
+                        transfer::CloudFilesEntry::file(
+                            item.file_name,
+                            item.size_bytes,
+                            item.timestamp,
+                            item.item_id.into_bytes(),
+                        )
+                    })
+                    .collect();
+                let _ = mount.create_placeholders(&entries);
+            }
+        }
+    }
+
+    state.cloud_mounts.lock().insert(peer_fingerprint, mount);
+    let path_str = mount_path.to_string_lossy().into_owned();
+    let _ = app.opener().open_path(&path_str, None::<&str>);
+    Ok(path_str)
+}
+
+#[tauri::command]
+fn open_cloud_files_folder(
+    app: AppHandle,
+    state: State<DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Result<(), String> {
+    let peer_name = state.device.stores.peer_name(&peer_fingerprint);
+    let base_dir = std::env::var("USERPROFILE")
+        .map(PathBuf::from)
+        .or_else(|_| app.path().home_dir())
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let mount_path = base_dir.join("Continue").join(shown_name(peer_name));
+    app.opener()
+        .open_path(mount_path.to_string_lossy(), None::<&str>)
+        .map_err(user_error("Couldn't open folder."))
+}
+
+#[tauri::command]
+fn get_clipboard_history(
+    state: State<DesktopRuntimeState>,
+    limit: u32,
+) -> Result<Vec<ClipboardHistoryEntryDto>, String> {
+    let clips = state
+        .clipboard_history
+        .list_clips(limit.max(1))
+        .map_err(user_error("Couldn't load clipboard history."))?;
+    Ok(clips
+        .into_iter()
+        .map(|c| ClipboardHistoryEntryDto {
+            id: c.id,
+            timestamp_ms: c.timestamp_ms,
+            content: c.content,
+            is_pinned: c.is_pinned,
+            origin_device: c.origin_device,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn pin_clipboard_clip(
+    state: State<DesktopRuntimeState>,
+    id: i64,
+    pinned: bool,
+) -> Result<bool, String> {
+    state
+        .clipboard_history
+        .pin_clip(id, pinned)
+        .map_err(user_error("Couldn't pin clip."))
+}
+
+#[tauri::command]
+fn delete_clipboard_clip(state: State<DesktopRuntimeState>, id: i64) -> Result<bool, String> {
+    state
+        .clipboard_history
+        .delete_clip(id)
+        .map_err(user_error("Couldn't delete clip."))
+}
+
+#[tauri::command]
+fn clear_clipboard_history(state: State<DesktopRuntimeState>) -> Result<usize, String> {
+    state
+        .clipboard_history
+        .clear_unpinned()
+        .map_err(user_error("Couldn't clear clipboard history."))
+}
+
 fn initialize_desktop_runtime(
     app_handle: &AppHandle,
     db_path: &Path,
@@ -946,6 +1241,10 @@ fn initialize_desktop_runtime(
 ) -> Result<DesktopRuntimeState, Box<dyn std::error::Error>> {
     let stores = Stores::open(db_path)?;
     let keys = DeviceKeys::load_or_create(&secrets::device_key_store(secrets_dir)?)?;
+    let clipboard_history = Arc::new(ClipboardHistoryStore::open(
+        db_path.with_file_name("continue_clipboard.db"),
+    )?);
+    let cloud_mounts = Arc::new(Mutex::new(HashMap::new()));
 
     let pending_answers = PendingAnswers::default();
     let connected = Arc::new(tray::Connected::default());
@@ -954,6 +1253,7 @@ fn initialize_desktop_runtime(
         &stores,
         pending_answers.clone(),
         clipboard.clone(),
+        clipboard_history.clone(),
         app_handle,
     );
     handlers.on_device_info = Some(device_info_listener(
@@ -979,6 +1279,8 @@ fn initialize_desktop_runtime(
         incoming,
         clipboard,
         batteries,
+        clipboard_history,
+        cloud_mounts,
     })
 }
 
@@ -1085,7 +1387,17 @@ fn main() {
             send_file_to_peer,
             send_clipboard_text,
             press_notification_button,
-            dismiss_notification
+            dismiss_notification,
+            ring_peer,
+            send_pc_action,
+            query_file_catalog,
+            get_catalog_thumbnail,
+            mount_cloud_files,
+            open_cloud_files_folder,
+            get_clipboard_history,
+            pin_clipboard_clip,
+            delete_clipboard_clip,
+            clear_clipboard_history
         ])
         // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
         .on_window_event(|window, event| {

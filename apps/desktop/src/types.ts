@@ -112,6 +112,11 @@ export const PERMISSIONS: Record<number, { label: string; description: string }>
   1: { label: "Files", description: "Send files to this computer" },
   2: { label: "Text", description: "Send copied text and links" },
   3: { label: "Notifications", description: "Show its notifications here" },
+  8: { label: "Ring device", description: "Sound alarm to locate misplaced device" },
+  9: { label: "PC control", description: "Remote lock, sleep, or mute control" },
+  10: { label: "Remote typing", description: "Dictation and keyboard input from phone" },
+  11: { label: "Macro deck", description: "Custom quick action shortcuts from phone" },
+  12: { label: "File catalog", description: "Browse photos, documents, and mount files" },
 };
 
 /** A notification from the phone, to read and act on here. */
@@ -137,4 +142,33 @@ export const isMac =
 
 export const MOD_KEY = isMac ? "⌘" : "Ctrl+";
 export const MOD_SHIFT_KEY = isMac ? "⌘⇧" : "Ctrl+Shift+";
+
+export enum CatalogCategory {
+  Unspecified = 0,
+  Photos = 1,
+  Screenshots = 2,
+  Downloads = 3,
+  Documents = 4,
+}
+
+export interface CatalogItem {
+  id: string;
+  name: string;
+  sizeBytes: number;
+  timestamp: number;
+  mimeType: string;
+}
+
+export interface CatalogResponse {
+  items: CatalogItem[];
+  totalCount: number;
+}
+
+export interface ClipboardHistoryItem {
+  id: number;
+  timestampMs: number;
+  content: string;
+  isPinned: boolean;
+  originDevice: string;
+}
 
