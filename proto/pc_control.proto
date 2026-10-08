@@ -1,0 +1,30 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package continue.v1;
+
+enum PcAction {
+  PC_ACTION_LOCK_WORKSTATION = 0;
+  PC_ACTION_SLEEP_SYSTEM = 1;
+  PC_ACTION_SHUTDOWN_SYSTEM = 2;
+  PC_ACTION_TOGGLE_MUTE = 3;
+}
+
+message PcActionRequest {
+  PcAction action = 1;
+  bool force = 2;
+}
+
+message PcActionResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message PcControlEnvelope {
+  oneof payload {
+    PcActionRequest request = 1;
+    PcActionResponse response = 2;
+  }
+}

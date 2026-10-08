@@ -1,0 +1,24 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package continue.v1;
+
+message RingRequest {
+  bool active = 1;
+  uint32 duration_secs = 2;
+  bool force_max_volume = 3;
+}
+
+message RingAck {
+  bool is_ringing = 1;
+  string status_message = 2;
+}
+
+message RingEnvelope {
+  oneof payload {
+    RingRequest request = 1;
+    RingAck ack = 2;
+  }
+}

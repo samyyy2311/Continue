@@ -8,6 +8,7 @@ pub mod doctor;
 pub mod ephemeral;
 pub mod error;
 pub mod localsend;
+pub mod wol;
 
 pub use adb_browser::{
     AdbDiscoveryBrowser, AdbServiceType, DiscoveredAdbService, ADB_TLS_CONNECT_SERVICE,
@@ -24,3 +25,4 @@ pub use localsend::{
     LocalSendAnnouncement, LOCALSEND_DEFAULT_PORT, LOCALSEND_MULTICAST_IPV4,
     LOCALSEND_PROTOCOL_VERSION,
 };
+pub use wol::{create_magic_packet, parse_mac_address, send_wake_on_lan, WolError};

@@ -78,6 +78,12 @@ pub const MAX_HANDOFF_TITLE_BYTES: usize = 512;
 /// Telemetry messages (battery, radio state).
 pub const MAX_FRAME_TELEMETRY_BYTES: usize = 16 * 1024;
 
+/// Ring device / Find My Phone control messages.
+pub const MAX_FRAME_RING_BYTES: usize = 16 * 1024;
+
+/// PC remote control actions and response messages.
+pub const MAX_FRAME_PC_CONTROL_BYTES: usize = 16 * 1024;
+
 // File transfer
 
 /// Maximum UTF-8 byte length of a transfer filename.

@@ -21,6 +21,8 @@ fn main() {
         proto_dir.join("media_control.proto"),
         proto_dir.join("handoff.proto"),
         proto_dir.join("telemetry.proto"),
+        proto_dir.join("ring.proto"),
+        proto_dir.join("pc_control.proto"),
     ];
 
     for file in &proto_files {

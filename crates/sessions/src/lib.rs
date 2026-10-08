@@ -12,7 +12,9 @@ pub mod keepalive;
 pub mod listener;
 pub mod media_control;
 pub mod multiplexer;
+pub mod pc_control;
 pub mod registry;
+pub mod ring;
 pub mod session;
 pub mod state;
 pub mod telemetry;
@@ -20,8 +22,9 @@ pub mod telemetry;
 pub use auto_connect::connect_paired_peers;
 pub use backoff::ReconnectPolicy;
 pub use capabilities_router::{
-    spawn_capabilities_dispatcher, OnReceived, PermissionDecision, PermissionPrompt,
-    PermissionRequest, SessionCapabilityHandlers, PROMPT_TIMEOUT,
+    spawn_capabilities_dispatcher, MediaCommandHandler, OnReceived, PcActionHandler,
+    PermissionDecision, PermissionPrompt, PermissionRequest, RingHandler,
+    SessionCapabilityHandlers, PROMPT_TIMEOUT,
 };
 pub use device::{clean_name, this_platform, PeerDevice, ThisDevice};
 pub use error::SessionError;
@@ -34,7 +37,9 @@ pub use multiplexer::{
     close_code, open_capability_stream, read_capability_stream_header, IncomingCapabilityStream,
     SessionMultiplexer,
 };
+pub use pc_control::PcControlDispatcher;
 pub use registry::{Direction, RegistryConfig, SessionRegistry, StateListener, RESEND_WAIT};
+pub use ring::{RingDispatcher, DEFAULT_RING_DURATION_SECS};
 pub use session::Session;
 pub use state::SessionState;
 pub use telemetry::{TelemetryAlertEvaluator, TelemetryDispatcher};

@@ -19,6 +19,8 @@ impl CapabilityId {
     pub const MEDIA_CONTROL: Self = Self(5);
     pub const HANDOFF: Self = Self(6);
     pub const TELEMETRY: Self = Self(7);
+    pub const RING_DEVICE: Self = Self(8);
+    pub const PC_CONTROL: Self = Self(9);
 
     pub const fn new(id: u32) -> Self {
         Self(id)
@@ -38,6 +40,8 @@ impl CapabilityId {
             Self::MEDIA_CONTROL => Some("media_control"),
             Self::HANDOFF => Some("handoff"),
             Self::TELEMETRY => Some("telemetry"),
+            Self::RING_DEVICE => Some("ring_device"),
+            Self::PC_CONTROL => Some("pc_control"),
             _ => None,
         }
     }

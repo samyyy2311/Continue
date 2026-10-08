@@ -18,6 +18,8 @@ use crate::handoff::HandoffDispatcher;
 use crate::incoming::{IncomingFiles, SaveFolder};
 use crate::media_control::MediaControlDispatcher;
 use crate::multiplexer::{OnPeerUpdate, PeerUpdate, SessionMultiplexer};
+use crate::pc_control::PcControlDispatcher;
+use crate::ring::RingDispatcher;
 use crate::telemetry::TelemetryDispatcher;
 
 /// How long a question waits for the user before it counts as declined.
@@ -55,6 +57,11 @@ pub type MediaCommandHandler = Arc<
         + Send
         + Sync,
 >;
+pub type RingHandler =
+    Arc<dyn Fn(&str, protocol::v1::RingRequest) -> protocol::v1::RingAck + Send + Sync>;
+pub type PcActionHandler = Arc<
+    dyn Fn(&str, protocol::v1::PcActionRequest) -> protocol::v1::PcActionResponse + Send + Sync,
+>;
 
 /// Callbacks and configuration for active capabilities over a multiplexed session.
 #[derive(Clone)]
@@ -64,6 +71,8 @@ pub struct SessionCapabilityHandlers {
     pub media_control_dispatcher: Arc<MediaControlDispatcher>,
     pub handoff_dispatcher: Arc<HandoffDispatcher>,
     pub telemetry_dispatcher: Arc<TelemetryDispatcher>,
+    pub ring_dispatcher: Arc<RingDispatcher>,
+    pub pc_control_dispatcher: Arc<PcControlDispatcher>,
     pub on_file_received: Option<OnReceived<ReceivedFile>>,
     pub on_clipboard_received: Option<OnReceived<ClipboardUpdate>>,
     /// Called with notifications the peer shows here, and with replies to and dismissals of
@@ -74,6 +83,8 @@ pub struct SessionCapabilityHandlers {
     pub on_handoff_received: Option<OnReceived<protocol::v1::HandoffItem>>,
     pub on_handoff_dismissed: Option<OnReceived<String>>,
     pub on_telemetry_received: Option<OnReceived<protocol::v1::DeviceTelemetry>>,
+    pub on_ring_requested: Option<RingHandler>,
+    pub on_pc_action_requested: Option<PcActionHandler>,
     /// How this device introduces itself to peers.
     pub this_device: ThisDevice,
     /// Called with what a peer says about itself each time a session starts.
@@ -95,6 +106,8 @@ impl SessionCapabilityHandlers {
             media_control_dispatcher: Arc::new(MediaControlDispatcher::new()),
             handoff_dispatcher: Arc::new(HandoffDispatcher::new()),
             telemetry_dispatcher: Arc::new(TelemetryDispatcher::new()),
+            ring_dispatcher: Arc::new(RingDispatcher::new()),
+            pc_control_dispatcher: Arc::new(PcControlDispatcher::new()),
             on_file_received: None,
             on_clipboard_received: None,
             on_notification: None,
@@ -103,6 +116,8 @@ impl SessionCapabilityHandlers {
             on_handoff_received: None,
             on_handoff_dismissed: None,
             on_telemetry_received: None,
+            on_ring_requested: None,
+            on_pc_action_requested: None,
             this_device: ThisDevice::default(),
             on_device_info: None,
             on_device_status: None,
@@ -471,6 +486,86 @@ pub fn spawn_capabilities_dispatcher(
                             error!("Failed to process telemetry stream from {peer_fp}: {e}");
                         }
                     }
+                    CapabilityId::RING_DEVICE => {
+                        debug!("Handling incoming ring device stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::RING_DEVICE, None).await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::RING_DEVICE);
+                            }
+                        }
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::RING_DEVICE, is_permitted);
+
+                        let on_ring = handlers.on_ring_requested.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .ring_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |req| {
+                                    if let Some(ref cb) = on_ring {
+                                        cb(&peer, req)
+                                    } else {
+                                        protocol::v1::RingAck {
+                                            is_ringing: false,
+                                            status_message: "Ring request not handled".into(),
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process ring stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::PC_CONTROL => {
+                        debug!("Handling incoming PC control stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::PC_CONTROL, None).await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::PC_CONTROL);
+                            }
+                        }
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::PC_CONTROL, is_permitted);
+
+                        let on_action = handlers.on_pc_action_requested.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .pc_control_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |req| {
+                                    if let Some(ref cb) = on_action {
+                                        cb(&peer, req)
+                                    } else {
+                                        protocol::v1::PcActionResponse {
+                                            success: false,
+                                            error_message: "PC control action not handled".into(),
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process PC control stream from {peer_fp}: {e}");
+                        }
+                    }
                     unknown => {
                         debug!("Received unsupported capability stream {unknown:?} from {peer_fp}");
                     }
@@ -557,6 +652,38 @@ impl SessionMultiplexer {
         let dispatcher = MediaControlDispatcher::new();
         dispatcher
             .publish_status(&mut send, &mut recv, update, query)
+            .await
+    }
+
+    pub async fn trigger_ring_on_peer(
+        &self,
+        request: protocol::v1::RingRequest,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::RingAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::RING_DEVICE)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = RingDispatcher::new();
+        dispatcher
+            .trigger_ring(&mut send, &mut recv, request, query)
+            .await
+    }
+
+    pub async fn send_pc_action_to_peer(
+        &self,
+        request: protocol::v1::PcActionRequest,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::PcActionResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::PC_CONTROL)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = PcControlDispatcher::new();
+        dispatcher
+            .send_action(&mut send, &mut recv, request, query)
             .await
     }
 }
