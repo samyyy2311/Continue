@@ -954,24 +954,28 @@ export default function App() {
   return (
     <div className="shell">
       <nav className="rail" aria-label="Main">
-        <img src="/icon.svg" alt="Continue" className="rail-logo" />
-        <div className="rail-items">
-          {destinations.map((item, index) => (
-            <button
-              key={item.id}
-              type="button"
-              className="rail-item"
-              aria-current={view === item.id ? "page" : undefined}
-              onClick={() => setView(item.id)}
-              title={`${item.label} (${MOD_KEY}${index + 1})`}
-            >
-              <span className="rail-indicator">
-                {item.icon}
-                {item.badge !== null && <span className="rail-badge">{item.badge}</span>}
-              </span>
-              <span className="rail-label">{item.label}</span>
-            </button>
-          ))}
+        <div className="rail-top">
+          <div className="rail-logo" title="Continue">
+            <img src="/icon.svg" alt="Continue" style={{ width: 22, height: 22 }} />
+          </div>
+          <div className="rail-items">
+            {destinations.map((item, index) => (
+              <button
+                key={item.id}
+                type="button"
+                className="rail-item"
+                aria-current={view === item.id ? "page" : undefined}
+                onClick={() => setView(item.id)}
+                title={`${item.label} (${MOD_KEY}${index + 1})`}
+              >
+                <span className="rail-indicator">
+                  {item.icon}
+                  {item.badge !== null && <span className="rail-badge">{item.badge}</span>}
+                </span>
+                <span className="rail-label">{item.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </nav>
 
@@ -1297,30 +1301,29 @@ function HomeView(props: HomeViewProps) {
   return (
     <div className="home">
       <aside className="home-device">
-        <Smartphone size={56} strokeWidth={1.25} className={`device-icon ${online ? "online" : ""}`} />
-        <h1 className="display">{peer.displayName}</h1>
-        <ConnectionStatus peer={peer} />
-        <p className="supporting">
-          {online
-            ? "Drop or paste files anywhere in this window to send them."
-            : "It connects on its own when both are on the same Wi-Fi."}
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div className={`device-icon ${online ? "online" : ""}`}>
+            <Smartphone size={24} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+            <h2 className="title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {peer.displayName}
+            </h2>
+            <ConnectionStatus peer={peer} />
+          </div>
+        </div>
+
+        {peer.endpoint && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text-3)" }}>
+            <span className="mono" style={{ fontSize: 11 }}>{peer.endpoint}</span>
+          </div>
+        )}
+
         <div className="device-actions">
           {online ? (
-            <>
-              <button
-                type="button"
-                className={`btn ${isRinging ? "btn-danger" : "btn-tonal"}`}
-                onClick={onToggleRing}
-                title="Sound alarm on phone to locate it"
-              >
-                {isRinging ? <BellOff size={18} /> : <Bell size={18} />}
-                {isRinging ? "Stop alarm" : "Ring phone"}
-              </button>
-              <button type="button" className="btn btn-text" onClick={onDisconnect}>
-                Disconnect
-              </button>
-            </>
+            <button type="button" className="btn btn-tonal btn-small" onClick={onDisconnect}>
+              Disconnect
+            </button>
           ) : (
             <ManualConnect
               key={peer.fingerprint}
@@ -1331,20 +1334,24 @@ function HomeView(props: HomeViewProps) {
             />
           )}
         </div>
+
         {peers.length > 1 && (
-          <div className="chips" role="radiogroup" aria-label="Device">
-            {peers.map((p) => (
-              <button
-                key={p.fingerprint}
-                type="button"
-                role="radio"
-                aria-checked={p.fingerprint === peer.fingerprint}
-                className="chip"
-                onClick={() => onSelectPeer(p.fingerprint)}
-              >
-                {p.displayName}
-              </button>
-            ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+            <span className="label">Other devices</span>
+            <div className="chips" role="radiogroup" aria-label="Device">
+              {peers.map((p) => (
+                <button
+                  key={p.fingerprint}
+                  type="button"
+                  role="radio"
+                  aria-checked={p.fingerprint === peer.fingerprint}
+                  className="chip"
+                  onClick={() => onSelectPeer(p.fingerprint)}
+                >
+                  {p.displayName}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </aside>
@@ -1440,55 +1447,30 @@ function HomeView(props: HomeViewProps) {
           </section>
         )}
 
-        <section className="section">
-          {online ? (
-            <div className="send-actions">
-              <button type="button" className="btn btn-filled btn-large" onClick={onChooseFiles} title={`${MOD_KEY}O`}>
-                <Upload size={20} />
-                Send files
-              </button>
+        <section className="section" aria-label="Transfer and quick send">
+          <div className="send-actions">
+            <button
+              type="button"
+              className="btn btn-filled btn-large"
+              onClick={onChooseFiles}
+              title={`${MOD_KEY}O`}
+            >
+              <Upload size={18} />
+              {online ? "Send files" : `Queue files for ${peer.displayName}`}
+            </button>
+            {online && (
               <button
                 type="button"
                 className="btn btn-tonal btn-large"
                 onClick={onSendClipboard}
                 title={`${MOD_SHIFT_KEY}V`}
               >
-                <ClipboardPaste size={20} />
+                <ClipboardPaste size={18} />
                 Send clipboard
               </button>
-              <button
-                type="button"
-                className="btn btn-tonal btn-large"
-                onClick={onOpenCatalog}
-              >
-                <FolderOpen size={20} />
-                Browse device
-              </button>
-              <button
-                type="button"
-                className="btn btn-tonal btn-large"
-                onClick={onOpenClipboardHistory}
-              >
-                <History size={20} />
-                Clipboard history
-              </button>
-              <button
-                type="button"
-                className="btn btn-tonal btn-large"
-                onClick={onOpenDesktopStream}
-              >
-                <Monitor size={20} />
-                Desktop mode
-              </button>
-            </div>
-          ) : (
-            <div className="send-actions">
-              <button type="button" className="btn btn-filled btn-large" onClick={onChooseFiles} title={`${MOD_KEY}O`}>
-                <Upload size={20} />
-                Queue files
-              </button>
-            </div>
-          )}
+            )}
+          </div>
+
           <form
             className="composer"
             onSubmit={(e) => {
@@ -1499,7 +1481,7 @@ function HomeView(props: HomeViewProps) {
             <input
               value={textInput}
               onChange={(e) => onTextInputChange(e.target.value)}
-              placeholder={online ? `Send text to ${peer.displayName}` : `Queue text for ${peer.displayName}`}
+              placeholder={online ? `Send text or link to ${peer.displayName}...` : `Queue text for ${peer.displayName}...`}
               aria-label="Text to send"
             />
             {online && linkIn(textInput) && (
@@ -1513,16 +1495,79 @@ function HomeView(props: HomeViewProps) {
                     onTextInputChange("");
                   }
                 }}
-                title="Send link to continue on phone"
+                title="Send as active browser tab on phone"
               >
                 Handoff
               </button>
             )}
             <button type="submit" className="composer-send" disabled={!textInput.trim()} aria-label="Send">
-              <ArrowUp size={22} />
+              <ArrowUp size={20} />
             </button>
           </form>
         </section>
+
+        {online && (
+          <section className="continuity-hub" aria-label="Continuity features">
+            <span className="label">Continuity Suite</span>
+            <div className="continuity-deck">
+              <button
+                type="button"
+                className="capability-card"
+                onClick={onOpenCatalog}
+              >
+                <div className="capability-icon">
+                  <FolderOpen size={18} />
+                </div>
+                <div>
+                  <div className="capability-title">Browse Device</div>
+                  <div className="capability-sub">Photos, docs & explorer mount</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                className="capability-card"
+                onClick={onOpenDesktopStream}
+              >
+                <div className="capability-icon">
+                  <Monitor size={18} />
+                </div>
+                <div>
+                  <div className="capability-title">Desktop Mode</div>
+                  <div className="capability-sub">Stream apps & DeX workspace</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                className="capability-card"
+                onClick={onOpenClipboardHistory}
+              >
+                <div className="capability-icon">
+                  <History size={18} />
+                </div>
+                <div>
+                  <div className="capability-title">Clipboard History</div>
+                  <div className="capability-sub">Search pinned text & links</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                className="capability-card"
+                onClick={onToggleRing}
+              >
+                <div className="capability-icon" style={isRinging ? { color: "var(--error)" } : undefined}>
+                  {isRinging ? <BellOff size={18} /> : <Bell size={18} />}
+                </div>
+                <div>
+                  <div className="capability-title">{isRinging ? "Stop Alarm" : "Find Device"}</div>
+                  <div className="capability-sub">{isRinging ? "Alarm is sounding" : "Play sound to locate"}</div>
+                </div>
+              </button>
+            </div>
+          </section>
+        )}
 
         {online && notifications.length > 0 && (
           <section className="section">

@@ -40,9 +40,9 @@ export function HandoffCard({ item, peerName, onOpen, onDismiss }: HandoffCardPr
         justifyContent: "space-between",
         gap: 16,
         padding: "16px 20px",
-        borderRadius: 20,
+        borderRadius: "var(--radius-lg)",
         background: "var(--accent-soft)",
-        border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
+        border: "1px solid color-mix(in srgb, var(--accent) 25%, transparent)",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, flex: 1 }}>
@@ -50,9 +50,9 @@ export function HandoffCard({ item, peerName, onOpen, onDismiss }: HandoffCardPr
           style={{
             display: "grid",
             placeItems: "center",
-            width: 40,
-            height: 40,
-            borderRadius: 12,
+            width: 36,
+            height: 36,
+            borderRadius: "var(--radius-sm)",
             background: "var(--accent)",
             color: "var(--on-accent)",
             flexShrink: 0,
