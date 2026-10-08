@@ -33,12 +33,25 @@ pub struct LocalSendAnnouncement {
 }
 
 impl LocalSendAnnouncement {
-    pub fn new(alias: impl Into<String>, fingerprint: impl Into<String>, port: u16, is_desktop: bool) -> Self {
+    pub fn new(
+        alias: impl Into<String>,
+        fingerprint: impl Into<String>,
+        port: u16,
+        is_desktop: bool,
+    ) -> Self {
         Self {
             alias: alias.into(),
             version: LOCALSEND_PROTOCOL_VERSION.to_string(),
-            device_model: Some(if is_desktop { "Desktop PC".into() } else { "Mobile Device".into() }),
-            device_type: Some(if is_desktop { "desktop".into() } else { "mobile".into() }),
+            device_model: Some(if is_desktop {
+                "Desktop PC".into()
+            } else {
+                "Mobile Device".into()
+            }),
+            device_type: Some(if is_desktop {
+                "desktop".into()
+            } else {
+                "mobile".into()
+            }),
             fingerprint: fingerprint.into(),
             port,
             protocol: "https".to_string(),
@@ -63,7 +76,8 @@ mod tests {
 
     #[test]
     fn announcement_roundtrip_matches_localsend_v2_spec() {
-        let announcement = LocalSendAnnouncement::new("Continue-Desktop", "continue-fp-01", 53317, true);
+        let announcement =
+            LocalSendAnnouncement::new("Continue-Desktop", "continue-fp-01", 53317, true);
         let bytes = announcement.to_bytes().expect("serialize");
 
         let json_str = std::str::from_utf8(&bytes).unwrap();

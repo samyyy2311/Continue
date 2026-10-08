@@ -3,9 +3,7 @@
 
 use capabilities::{evaluate_capability, CapabilityQuery};
 use limits::MAX_FRAME_TELEMETRY_BYTES;
-use protocol::v1::{
-    telemetry_envelope::Payload, DeviceTelemetry, TelemetryAck, TelemetryEnvelope,
-};
+use protocol::v1::{telemetry_envelope::Payload, DeviceTelemetry, TelemetryAck, TelemetryEnvelope};
 use transport::{read_msg, write_msg};
 
 use crate::error::SessionError;
@@ -105,9 +103,9 @@ impl TelemetryAlertEvaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use protocol::CapabilityId;
     use protocol::v1::{BatteryState, ChargingType, RadioState};
+    use protocol::CapabilityId;
+    use std::collections::HashSet;
     use transport::{create_client_endpoint, create_server_endpoint, TransportCertificate};
 
     fn test_query(authorized: bool) -> CapabilityQuery {

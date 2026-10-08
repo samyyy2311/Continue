@@ -37,15 +37,9 @@ pub enum QueuedPayload {
         mime_type: Option<String>,
     },
     /// Clipboard content to sync.
-    Clipboard {
-        content: Vec<u8>,
-        mime_type: String,
-    },
+    Clipboard { content: Vec<u8>, mime_type: String },
     /// Handoff item (e.g. active tab URL).
-    Handoff {
-        uri: String,
-        title: Option<String>,
-    },
+    Handoff { uri: String, title: Option<String> },
 }
 
 /// Individual item held in the offline queue.
@@ -192,10 +186,7 @@ impl OfflineTransferQueue {
     /// Number of items pending for a specific peer.
     pub fn pending_count_for_peer(&self, peer_fingerprint: &str) -> usize {
         let inner = self.inner.lock().unwrap();
-        inner
-            .queues
-            .get(peer_fingerprint)
-            .map_or(0, |q| q.len())
+        inner.queues.get(peer_fingerprint).map_or(0, |q| q.len())
     }
 
     /// Total items pending across all peers.

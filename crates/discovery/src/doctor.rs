@@ -128,12 +128,30 @@ mod tests {
 
     #[test]
     fn classifies_interface_kinds() {
-        assert_eq!(classify_ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))), InterfaceKind::Loopback);
-        assert_eq!(classify_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 1, 2))), InterfaceKind::LinkLocal);
-        assert_eq!(classify_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 50))), InterfaceKind::PrivateLan);
-        assert_eq!(classify_ip(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 15))), InterfaceKind::PrivateLan);
-        assert_eq!(classify_ip(IpAddr::V4(Ipv4Addr::new(172, 28, 0, 1))), InterfaceKind::VirtualOrVpn);
-        assert_eq!(classify_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))), InterfaceKind::Public);
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
+            InterfaceKind::Loopback
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 1, 2))),
+            InterfaceKind::LinkLocal
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 50))),
+            InterfaceKind::PrivateLan
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 15))),
+            InterfaceKind::PrivateLan
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(172, 28, 0, 1))),
+            InterfaceKind::VirtualOrVpn
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))),
+            InterfaceKind::Public
+        );
     }
 
     #[test]

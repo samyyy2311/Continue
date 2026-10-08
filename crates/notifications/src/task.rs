@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use protocol::v1::NotificationPost;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskCompletionReport {
@@ -13,7 +13,12 @@ pub struct TaskCompletionReport {
 }
 
 impl TaskCompletionReport {
-    pub fn new(task_name: impl Into<String>, duration: Duration, success: bool, exit_code: Option<i32>) -> Self {
+    pub fn new(
+        task_name: impl Into<String>,
+        duration: Duration,
+        success: bool,
+        exit_code: Option<i32>,
+    ) -> Self {
         Self {
             task_name: task_name.into(),
             duration,
@@ -59,12 +64,8 @@ mod tests {
 
     #[test]
     fn formats_successful_task_notification() {
-        let report = TaskCompletionReport::new(
-            "cargo build",
-            Duration::from_millis(4200),
-            true,
-            Some(0),
-        );
+        let report =
+            TaskCompletionReport::new("cargo build", Duration::from_millis(4200), true, Some(0));
 
         let post = report.to_notification_post();
         assert_eq!(post.title, "Task: cargo build");
@@ -74,12 +75,8 @@ mod tests {
 
     #[test]
     fn formats_failed_task_notification() {
-        let report = TaskCompletionReport::new(
-            "test suite",
-            Duration::from_millis(1500),
-            false,
-            Some(1),
-        );
+        let report =
+            TaskCompletionReport::new("test suite", Duration::from_millis(1500), false, Some(1));
 
         let post = report.to_notification_post();
         assert_eq!(post.title, "Task: test suite");

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Contributors to the Continue project
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::error::TransferError;
 use crate::sanitizer::sanitize_filename;
@@ -133,11 +133,7 @@ impl LocalSendBridgeSessionManager {
         Ok(file)
     }
 
-    pub fn mark_completed(
-        &mut self,
-        session_id: &str,
-        file_id: &str,
-    ) -> Result<(), TransferError> {
+    pub fn mark_completed(&mut self, session_id: &str, file_id: &str) -> Result<(), TransferError> {
         let session = self
             .sessions
             .get_mut(session_id)
@@ -188,13 +184,17 @@ mod tests {
         assert!(resp.files.contains_key("f1"));
         let token = resp.files.get("f1").unwrap();
 
-        let verified = manager.verify_upload(&resp.session_id, "f1", token).unwrap();
+        let verified = manager
+            .verify_upload(&resp.session_id, "f1", token)
+            .unwrap();
         // Filename traversal components stripped to safe basename
         assert_eq!(verified.sanitized_name, "payload.sh");
         assert_eq!(verified.size, 1024);
 
         // Verification fails with invalid token
-        assert!(manager.verify_upload(&resp.session_id, "f1", "bad-tok").is_err());
+        assert!(manager
+            .verify_upload(&resp.session_id, "f1", "bad-tok")
+            .is_err());
     }
 
     #[test]
@@ -228,7 +228,11 @@ mod tests {
         manager.mark_completed(&resp.session_id, "img-01").unwrap();
 
         let verified = manager
-            .verify_upload(&resp.session_id, "img-01", resp.files.get("img-01").unwrap())
+            .verify_upload(
+                &resp.session_id,
+                "img-01",
+                resp.files.get("img-01").unwrap(),
+            )
             .unwrap();
         assert!(verified.completed);
     }

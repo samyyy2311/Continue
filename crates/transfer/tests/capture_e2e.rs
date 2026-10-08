@@ -4,17 +4,16 @@
 use std::net::SocketAddr;
 use transport::{create_client_endpoint, create_server_endpoint, TransportCertificate};
 
-use protocol::v1::{
-    CameraCaptureDestination, CameraCaptureMode, CameraCaptureRequest,
-};
+use protocol::v1::{CameraCaptureDestination, CameraCaptureMode, CameraCaptureRequest};
 use transfer::{
-    format_as_clipboard_dibv5, request_camera_capture, respond_camera_capture,
-    CameraCaptureSource, TransferError,
+    format_as_clipboard_dibv5, request_camera_capture, respond_camera_capture, CameraCaptureSource,
+    TransferError,
 };
 
 #[tokio::test]
 async fn camera_capture_e2e_photo_success() {
-    let temp_dir = std::env::temp_dir().join(format!("continue_capture_test_{}", rand::random::<u32>()));
+    let temp_dir =
+        std::env::temp_dir().join(format!("continue_capture_test_{}", rand::random::<u32>()));
     let phone_dir = temp_dir.join("phone");
     let pc_dir = temp_dir.join("pc");
     tokio::fs::create_dir_all(&phone_dir).await.unwrap();
@@ -22,7 +21,9 @@ async fn camera_capture_e2e_photo_success() {
 
     let captured_image = phone_dir.join("IMG_20261008_013000.jpg");
     let image_data = vec![0xEEu8; 96 * 1024];
-    tokio::fs::write(&captured_image, &image_data).await.unwrap();
+    tokio::fs::write(&captured_image, &image_data)
+        .await
+        .unwrap();
 
     let server_cert = TransportCertificate::generate().unwrap();
     let client_cert = TransportCertificate::generate().unwrap();
@@ -104,7 +105,8 @@ async fn camera_capture_e2e_photo_success() {
 
 #[tokio::test]
 async fn camera_capture_handles_remote_busy() {
-    let temp_dir = std::env::temp_dir().join(format!("continue_capture_test_{}", rand::random::<u32>()));
+    let temp_dir =
+        std::env::temp_dir().join(format!("continue_capture_test_{}", rand::random::<u32>()));
     tokio::fs::create_dir_all(&temp_dir).await.unwrap();
 
     let server_cert = TransportCertificate::generate().unwrap();
@@ -117,10 +119,12 @@ async fn camera_capture_handles_remote_busy() {
         .build_pinned_client_tls(server_cert.spki_hash)
         .unwrap();
 
-    let server_endpoint = create_server_endpoint("127.0.0.1:0".parse().unwrap(), server_tls).unwrap();
+    let server_endpoint =
+        create_server_endpoint("127.0.0.1:0".parse().unwrap(), server_tls).unwrap();
     let bound_addr = server_endpoint.local_addr().unwrap();
 
-    let client_endpoint = create_client_endpoint("127.0.0.1:0".parse().unwrap(), client_tls).unwrap();
+    let client_endpoint =
+        create_client_endpoint("127.0.0.1:0".parse().unwrap(), client_tls).unwrap();
 
     let phone_handle = tokio::spawn(async move {
         let incoming = server_endpoint.accept().await.expect("accept");
@@ -130,9 +134,7 @@ async fn camera_capture_handles_remote_busy() {
         let result = respond_camera_capture(
             &mut send_stream,
             &mut recv_stream,
-            |_req: CameraCaptureRequest| async move {
-                Err(TransferError::CaptureBusy)
-            },
+            |_req: CameraCaptureRequest| async move { Err(TransferError::CaptureBusy) },
         )
         .await;
 

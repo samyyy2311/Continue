@@ -249,10 +249,7 @@ mod tests {
         store.set_lockdown(true);
         assert!(store.is_locked_down());
 
-        assert_eq!(
-            store.query_state(peer, cap).unwrap(),
-            PermissionState::Deny
-        );
+        assert_eq!(store.query_state(peer, cap).unwrap(), PermissionState::Deny);
         assert_eq!(
             store.query_state(peer, CapabilityId::CLIPBOARD).unwrap(),
             PermissionState::Deny

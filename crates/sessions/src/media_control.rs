@@ -106,10 +106,10 @@ impl MediaControlDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use protocol::CapabilityId;
     use protocol::v1::{MediaMetadata, MediaPlaybackCommand, MediaPlaybackState};
-    use transport::{create_client_endpoint, create_server_endpoint, TransportCertificate};
+    use protocol::CapabilityId;
     use std::collections::HashSet;
+    use transport::{create_client_endpoint, create_server_endpoint, TransportCertificate};
 
     fn test_query(authorized: bool) -> CapabilityQuery {
         let mut caps = HashSet::new();

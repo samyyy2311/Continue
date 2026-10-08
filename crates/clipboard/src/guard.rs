@@ -19,7 +19,10 @@ where
 {
     for format in available_formats {
         let name = format.as_ref();
-        if SENSITIVE_FORMATS.iter().any(|&s| name.eq_ignore_ascii_case(s)) {
+        if SENSITIVE_FORMATS
+            .iter()
+            .any(|&s| name.eq_ignore_ascii_case(s))
+        {
             return SensitiveGuardDecision::DropSensitive;
         }
     }

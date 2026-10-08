@@ -25,4 +25,3 @@ pub use queue::{OfflineTransferQueue, QueuedPayload, QueuedTransfer};
 pub use receiver::{receive_file, ReceivedFile};
 pub use sanitizer::sanitize_filename;
 pub use sender::{compute_file_sha256, send_file};
-

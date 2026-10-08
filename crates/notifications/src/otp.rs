@@ -23,7 +23,9 @@ pub fn extract_otp(title: &str, body: &str) -> Option<String> {
         return None;
     }
 
-    for token in body.split(|c: char| c.is_whitespace() || c == ':' || c == '.' || c == ',' || c == '#' || c == '-') {
+    for token in body.split(|c: char| {
+        c.is_whitespace() || c == ':' || c == '.' || c == ',' || c == '#' || c == '-'
+    }) {
         let trimmed = token.trim_matches(|c: char| !c.is_ascii_digit());
         if trimmed.len() >= 4 && trimmed.len() <= 8 && trimmed.chars().all(|c| c.is_ascii_digit()) {
             return Some(trimmed.to_string());
@@ -58,7 +60,10 @@ mod tests {
         let code = extract_otp("Google", "G-839201 is your verification code.");
         assert_eq!(code, Some("839201".to_string()));
 
-        let code2 = extract_otp("Bank Alert", "Your one-time OTP is 582194 for account login.");
+        let code2 = extract_otp(
+            "Bank Alert",
+            "Your one-time OTP is 582194 for account login.",
+        );
         assert_eq!(code2, Some("582194".to_string()));
     }
 

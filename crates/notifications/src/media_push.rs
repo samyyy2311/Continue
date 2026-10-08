@@ -71,7 +71,9 @@ impl MediaPushItem {
 pub fn parse_media_push_action(action_id: &str) -> Option<(MediaPushAction, &str)> {
     if let Some(media_id) = action_id.strip_prefix(&format!("{}:", ACTION_COPY_MEDIA_CLIPBOARD)) {
         Some((MediaPushAction::CopyToClipboard, media_id))
-    } else if let Some(media_id) = action_id.strip_prefix(&format!("{}:", ACTION_SAVE_MEDIA_DOWNLOADS)) {
+    } else if let Some(media_id) =
+        action_id.strip_prefix(&format!("{}:", ACTION_SAVE_MEDIA_DOWNLOADS))
+    {
         Some((MediaPushAction::SaveToDownloads, media_id))
     } else {
         None
@@ -119,10 +121,16 @@ mod tests {
     #[test]
     fn parses_media_push_action_payload() {
         let parsed_copy = parse_media_push_action("copy_media_clipboard:sc-123");
-        assert_eq!(parsed_copy, Some((MediaPushAction::CopyToClipboard, "sc-123")));
+        assert_eq!(
+            parsed_copy,
+            Some((MediaPushAction::CopyToClipboard, "sc-123"))
+        );
 
         let parsed_save = parse_media_push_action("save_media_downloads:img-99");
-        assert_eq!(parsed_save, Some((MediaPushAction::SaveToDownloads, "img-99")));
+        assert_eq!(
+            parsed_save,
+            Some((MediaPushAction::SaveToDownloads, "img-99"))
+        );
 
         let parsed_unknown = parse_media_push_action("unrelated_action:sc-123");
         assert_eq!(parsed_unknown, None);

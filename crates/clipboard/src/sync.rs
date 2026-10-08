@@ -70,7 +70,8 @@ impl ClipboardSynchronizer {
             return Err(ClipboardError::SensitiveExcluded);
         }
 
-        self.send_update(stream, recv_stream, format, payload, query).await
+        self.send_update(stream, recv_stream, format, payload, query)
+            .await
     }
 
     pub async fn send_update(

@@ -143,10 +143,15 @@ pub async fn request_camera_capture(
     };
 
     let raw_name = if resp.file_name.is_empty() {
-        format!("{}_{}.{}", match CameraCaptureMode::try_from(request.mode) {
-            Ok(CameraCaptureMode::DocumentScan) => "scan",
-            _ => "photo",
-        }, resp.capture_id, default_ext)
+        format!(
+            "{}_{}.{}",
+            match CameraCaptureMode::try_from(request.mode) {
+                Ok(CameraCaptureMode::DocumentScan) => "scan",
+                _ => "photo",
+            },
+            resp.capture_id,
+            default_ext
+        )
     } else {
         resp.file_name
     };
@@ -239,17 +244,17 @@ where
     P: FnOnce(CameraCaptureRequest) -> Fut,
     Fut: Future<Output = Result<CameraCaptureSource, TransferError>>,
 {
-    let req: CameraCaptureRequest =
-        read_msg(recv_stream, MAX_FRAME_MEDIA_CAPTURE_BYTES).await?;
+    let req: CameraCaptureRequest = read_msg(recv_stream, MAX_FRAME_MEDIA_CAPTURE_BYTES).await?;
 
     let source = match provider(req.clone()).await {
         Ok(source) => source,
         Err(e) => {
             let (status, reason) = match &e {
                 TransferError::CaptureBusy => (CameraCaptureStatus::Busy, "Camera is busy".into()),
-                TransferError::CaptureUnsupported => {
-                    (CameraCaptureStatus::Unsupported, "Camera unavailable".into())
-                }
+                TransferError::CaptureUnsupported => (
+                    CameraCaptureStatus::Unsupported,
+                    "Camera unavailable".into(),
+                ),
                 TransferError::CaptureRejected(r) => (CameraCaptureStatus::Declined, r.clone()),
                 other => (CameraCaptureStatus::Error, other.to_string()),
             };

@@ -6,7 +6,10 @@ pub enum ContextAction {
     OpenUrl(String),
     CopyOtp(String),
     CallPhone(String),
-    TrackPackage { carrier: &'static str, tracking_number: String },
+    TrackPackage {
+        carrier: &'static str,
+        tracking_number: String,
+    },
 }
 
 pub fn classify_context(text: &str) -> Option<ContextAction> {
@@ -45,7 +48,10 @@ fn detect_url(s: &str) -> Option<String> {
 }
 
 fn detect_tracking(s: &str) -> Option<ContextAction> {
-    let raw: String = s.chars().filter(|c| !c.is_whitespace() && *c != '-').collect();
+    let raw: String = s
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect();
 
     if raw.len() == 18
         && raw[..2].eq_ignore_ascii_case("1Z")
@@ -80,7 +86,8 @@ fn detect_tracking(s: &str) -> Option<ContextAction> {
 fn detect_otp(s: &str) -> Option<String> {
     let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
 
-    if s.chars().all(|c| c.is_ascii_digit() || c == '-' || c.is_whitespace())
+    if s.chars()
+        .all(|c| c.is_ascii_digit() || c == '-' || c.is_whitespace())
         && digits.len() >= 4
         && digits.len() <= 8
     {
@@ -95,7 +102,10 @@ fn detect_otp(s: &str) -> Option<String> {
     if has_keyword {
         for token in s.split(|c: char| c.is_whitespace() || c == ':' || c == '.' || c == ',') {
             let token_digits: String = token.chars().filter(|c| c.is_ascii_digit()).collect();
-            if token_digits.len() >= 4 && token_digits.len() <= 8 && token_digits == token.trim_matches(|c: char| !c.is_ascii_digit()) {
+            if token_digits.len() >= 4
+                && token_digits.len() <= 8
+                && token_digits == token.trim_matches(|c: char| !c.is_ascii_digit())
+            {
                 return Some(token_digits);
             }
         }
@@ -105,13 +115,23 @@ fn detect_otp(s: &str) -> Option<String> {
 }
 
 fn detect_phone(s: &str) -> Option<String> {
-    let valid_start = s.starts_with('+') || s.starts_with('(') || s.chars().next().is_some_and(|c| c.is_ascii_digit());
+    let valid_start = s.starts_with('+')
+        || s.starts_with('(')
+        || s.chars().next().is_some_and(|c| c.is_ascii_digit());
     if !valid_start {
         return None;
     }
 
     let digits = s.chars().filter(|c| c.is_ascii_digit()).count();
-    let valid_chars = s.chars().all(|c| c.is_ascii_digit() || c == '+' || c == '-' || c == '(' || c == ')' || c == '.' || c.is_whitespace());
+    let valid_chars = s.chars().all(|c| {
+        c.is_ascii_digit()
+            || c == '+'
+            || c == '-'
+            || c == '('
+            || c == ')'
+            || c == '.'
+            || c.is_whitespace()
+    });
 
     if valid_chars && (7..=15).contains(&digits) && s.len() <= 24 {
         return Some(s.to_string());
@@ -128,7 +148,9 @@ mod tests {
     fn classifies_urls() {
         assert_eq!(
             classify_context("https://github.com/thtbee/nectarlink"),
-            Some(ContextAction::OpenUrl("https://github.com/thtbee/nectarlink".to_string()))
+            Some(ContextAction::OpenUrl(
+                "https://github.com/thtbee/nectarlink".to_string()
+            ))
         );
     }
 
@@ -169,7 +191,10 @@ mod tests {
 
     #[test]
     fn ignores_regular_text() {
-        assert_eq!(classify_context("Regular sentence without actionable tokens."), None);
+        assert_eq!(
+            classify_context("Regular sentence without actionable tokens."),
+            None
+        );
         assert_eq!(classify_context(""), None);
     }
 }
