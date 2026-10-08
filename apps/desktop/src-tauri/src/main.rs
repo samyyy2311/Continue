@@ -117,6 +117,43 @@ pub struct DesktopRuntimeState {
     active_handoffs: Arc<Mutex<HashMap<String, HandoffItemDto>>>,
     offline_queue: Arc<transfer::queue::OfflineTransferQueue>,
     drop_folder: Arc<Mutex<Option<PathBuf>>>,
+    active_desktop_streams: Arc<Mutex<HashMap<String, DesktopStreamSession>>>,
+}
+
+#[derive(Clone)]
+pub struct DesktopStreamSession {
+    pub session_id: String,
+    pub peer_fingerprint: String,
+    pub package_name: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub dpi: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopStreamInfoDto {
+    pub session_id: String,
+    pub peer_fingerprint: String,
+    pub package_name: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub dpi: u32,
+    pub status: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopInputDto {
+    pub session_id: String,
+    pub event_type: String,
+    pub x: u32,
+    pub y: u32,
+    pub button: Option<u32>,
+    pub key_code: Option<u32>,
+    pub scroll_dx: Option<i32>,
+    pub scroll_dy: Option<i32>,
+    pub key_text: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -344,6 +381,7 @@ fn shown_name(name: String) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn session_handlers(
     download_dir: PathBuf,
     stores: &Stores,
@@ -351,6 +389,7 @@ fn session_handlers(
     clipboard: ClipboardSync,
     clipboard_history: Arc<ClipboardHistoryStore>,
     active_handoffs: Arc<Mutex<HashMap<String, HandoffItemDto>>>,
+    active_desktop_streams: Arc<Mutex<HashMap<String, DesktopStreamSession>>>,
     app_handle: &AppHandle,
 ) -> sessions::SessionCapabilityHandlers {
     let mut handlers = sessions::SessionCapabilityHandlers::new(download_dir)
@@ -470,6 +509,35 @@ fn session_handlers(
     handlers.on_handoff_dismissed = Some(Arc::new(move |_peer, handoff_id| {
         handoffs_store.lock().remove(&handoff_id);
         let _ = app.emit("handoff-dismissed", handoff_id);
+    }));
+
+    let (streams_for_ctl, app_for_ctl) = (active_desktop_streams.clone(), app_handle.clone());
+    handlers.on_desktop_control = Some(Arc::new(move |_peer, ctl| {
+        if ctl.action == protocol::v1::DesktopControlAction::DesktopControlStop as i32 {
+            streams_for_ctl.lock().remove(&ctl.session_id);
+            let _ = app_for_ctl.emit("desktop-stream-stopped", &ctl.session_id);
+        }
+        protocol::v1::DesktopStreamAck {
+            session_id: ctl.session_id,
+            success: true,
+            error_message: String::new(),
+        }
+    }));
+
+    let app_for_frame = app_handle.clone();
+    handlers.on_desktop_frame = Some(Arc::new(move |_peer, frame| {
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&frame.data);
+        let _ = app_for_frame.emit(
+            "desktop-stream-frame",
+            serde_json::json!({
+                "sessionId": frame.session_id,
+                "frameIndex": frame.frame_index,
+                "timestampUs": frame.timestamp_us,
+                "isKeyframe": frame.is_keyframe,
+                "data": b64,
+            }),
+        );
     }));
 
     handlers
@@ -829,6 +897,7 @@ fn get_permissions(
         CapabilityId::FILE_TRANSFER,
         CapabilityId::CLIPBOARD,
         CapabilityId::NOTIFICATIONS,
+        CapabilityId::DESKTOP_STREAM,
     ]
     .into_iter()
     .map(|capability| {
@@ -1560,6 +1629,189 @@ fn set_drop_folder(
     Ok(())
 }
 
+#[tauri::command]
+async fn start_desktop_stream(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    package_name: Option<String>,
+    width: u32,
+    height: u32,
+    dpi: u32,
+) -> Result<DesktopStreamInfoDto, String> {
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| "Peer is not connected".to_string())?;
+
+    if state.device.stores.permissions.is_locked_down() {
+        return Err("Device is in lockdown mode".into());
+    }
+    let grant = state
+        .device
+        .stores
+        .permissions
+        .query_state(&peer_fingerprint, CapabilityId::DESKTOP_STREAM)
+        .unwrap_or(PermissionState::Allow);
+    if grant == PermissionState::Deny {
+        return Err("Desktop streaming capability is blocked for this peer".into());
+    }
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let session_id = format!("dstream-{now_ms}");
+
+    let req = protocol::v1::DesktopStreamStartRequest {
+        session_id: session_id.clone(),
+        target_package_name: package_name.clone().unwrap_or_default(),
+        requested_width: width,
+        requested_height: height,
+        requested_dpi: dpi,
+        max_fps: 60,
+        preferred_codec: protocol::v1::StreamCodec::H264 as i32,
+    };
+
+    let query = CapabilityQuery::negotiated(CapabilityId::DESKTOP_STREAM, true);
+    let resp = mux
+        .start_desktop_stream_on_peer(req, &query)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let info = DesktopStreamInfoDto {
+        session_id: session_id.clone(),
+        peer_fingerprint: peer_fingerprint.clone(),
+        package_name: package_name.clone(),
+        width: if resp.actual_width > 0 {
+            resp.actual_width
+        } else {
+            width
+        },
+        height: if resp.actual_height > 0 {
+            resp.actual_height
+        } else {
+            height
+        },
+        dpi: if resp.actual_dpi > 0 {
+            resp.actual_dpi
+        } else {
+            dpi
+        },
+        status: "active".into(),
+    };
+
+    let session = DesktopStreamSession {
+        session_id: session_id.clone(),
+        peer_fingerprint,
+        package_name,
+        width: info.width,
+        height: info.height,
+        dpi: info.dpi,
+    };
+
+    state.active_desktop_streams.lock().insert(session_id, session);
+    let _ = app.emit("desktop-stream-started", &info);
+
+    Ok(info)
+}
+
+#[tauri::command]
+async fn stop_desktop_stream(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    session_id: String,
+) -> Result<(), String> {
+    let session = state.active_desktop_streams.lock().remove(&session_id);
+
+    if let Some(sess) = session {
+        if let Some(mux) = state.device.sessions.get(&sess.peer_fingerprint) {
+            let ctl = protocol::v1::DesktopStreamControl {
+                session_id: session_id.clone(),
+                action: protocol::v1::DesktopControlAction::DesktopControlStop as i32,
+                new_width: 0,
+                new_height: 0,
+                new_dpi: 0,
+            };
+            let query = CapabilityQuery::negotiated(CapabilityId::DESKTOP_STREAM, true);
+            let _ = mux.send_desktop_control_to_peer(ctl, &query).await;
+        }
+        let _ = app.emit("desktop-stream-stopped", &session_id);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn send_desktop_input(
+    state: State<'_, DesktopRuntimeState>,
+    event: DesktopInputDto,
+) -> Result<(), String> {
+    let peer_fingerprint = {
+        let lock = state.active_desktop_streams.lock();
+        let sess = lock
+            .get(&event.session_id)
+            .ok_or("Stream session not found")?;
+        sess.peer_fingerprint.clone()
+    };
+
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| "Peer is not connected".to_string())?;
+
+    let event_type = match event.event_type.as_str() {
+        "pointer_down" => protocol::v1::DesktopInputEventType::DesktopInputPointerDown as i32,
+        "pointer_up" => protocol::v1::DesktopInputEventType::DesktopInputPointerUp as i32,
+        "pointer_move" => protocol::v1::DesktopInputEventType::DesktopInputPointerMove as i32,
+        "scroll" => protocol::v1::DesktopInputEventType::DesktopInputScroll as i32,
+        "key_down" => protocol::v1::DesktopInputEventType::DesktopInputKeyDown as i32,
+        "key_up" => protocol::v1::DesktopInputEventType::DesktopInputKeyUp as i32,
+        _ => protocol::v1::DesktopInputEventType::DesktopInputUnspecified as i32,
+    };
+
+    let input_event = protocol::v1::DesktopInputEvent {
+        session_id: event.session_id,
+        event_type,
+        x: event.x,
+        y: event.y,
+        button: event.button.unwrap_or(0),
+        key_code: event.key_code.unwrap_or(0),
+        scroll_dx: event.scroll_dx.unwrap_or(0),
+        scroll_dy: event.scroll_dy.unwrap_or(0),
+        key_text: event.key_text.unwrap_or_default(),
+    };
+
+    let query = CapabilityQuery::negotiated(CapabilityId::DESKTOP_STREAM, true);
+    mux.send_desktop_input_to_peer(input_event, &query)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_active_desktop_streams(
+    state: State<'_, DesktopRuntimeState>,
+) -> Vec<DesktopStreamInfoDto> {
+    state
+        .active_desktop_streams
+        .lock()
+        .values()
+        .map(|s| DesktopStreamInfoDto {
+            session_id: s.session_id.clone(),
+            peer_fingerprint: s.peer_fingerprint.clone(),
+            package_name: s.package_name.clone(),
+            width: s.width,
+            height: s.height,
+            dpi: s.dpi,
+            status: "active".into(),
+        })
+        .collect()
+}
+
 fn initialize_desktop_runtime(
     app_handle: &AppHandle,
     db_path: &Path,
@@ -1576,6 +1828,8 @@ fn initialize_desktop_runtime(
     let active_handoffs = Arc::new(Mutex::new(HashMap::new()));
     let offline_queue = Arc::new(OfflineTransferQueue::new());
     let drop_folder: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
+    let active_desktop_streams: Arc<Mutex<HashMap<String, DesktopStreamSession>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let (offline_queue_for_drop, drop_folder_for_loop, app_for_drop) = (
         offline_queue.clone(),
@@ -1630,6 +1884,7 @@ fn initialize_desktop_runtime(
         clipboard.clone(),
         clipboard_history.clone(),
         active_handoffs.clone(),
+        active_desktop_streams.clone(),
         app_handle,
     );
     handlers.on_device_info = Some(device_info_listener(
@@ -1660,6 +1915,7 @@ fn initialize_desktop_runtime(
         active_handoffs,
         offline_queue,
         drop_folder,
+        active_desktop_streams,
     })
 }
 
@@ -1789,7 +2045,11 @@ fn main() {
             set_lockdown_mode,
             is_lockdown_mode,
             get_drop_folder,
-            set_drop_folder
+            set_drop_folder,
+            start_desktop_stream,
+            stop_desktop_stream,
+            send_desktop_input,
+            get_active_desktop_streams
         ])
         // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
         .on_window_event(|window, event| {

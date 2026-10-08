@@ -116,6 +116,17 @@ pub const MAX_CATALOG_PAGE_SIZE: u32 = 250;
 /// Maximum UTF-8 byte length for a catalog item ID.
 pub const MAX_CATALOG_ITEM_ID_BYTES: usize = 128;
 
+// Desktop & App Streaming
+
+/// Maximum frame size for desktop streaming envelopes (frames, input, controls).
+pub const MAX_FRAME_DESKTOP_STREAM_BYTES: usize = 2 * 1024 * 1024;
+
+/// Maximum UTF-8 byte length for a stream session ID.
+pub const MAX_STREAM_SESSION_ID_BYTES: usize = 64;
+
+/// Maximum UTF-8 byte length for a target package name.
+pub const MAX_STREAM_PACKAGE_NAME_BYTES: usize = 256;
+
 // File transfer
 
 /// Maximum UTF-8 byte length of a transfer filename.

@@ -15,6 +15,7 @@ use transfer::{receive_file, send_file, ReceivedFile};
 
 use crate::catalog::CatalogDispatcher;
 use crate::deck::DeckDispatcher;
+use crate::desktop_stream::DesktopStreamDispatcher;
 use crate::device::{PeerDevice, ThisDevice};
 use crate::handoff::HandoffDispatcher;
 use crate::incoming::{IncomingFiles, SaveFolder};
@@ -76,6 +77,27 @@ pub type CatalogQueryHandler =
 pub type ThumbnailRequestHandler = Arc<
     dyn Fn(&str, protocol::v1::ThumbnailRequest) -> protocol::v1::ThumbnailResponse + Send + Sync,
 >;
+pub type DesktopStreamStartHandler = Arc<
+    dyn Fn(
+            &str,
+            protocol::v1::DesktopStreamStartRequest,
+        ) -> protocol::v1::DesktopStreamStartResponse
+        + Send
+        + Sync,
+>;
+pub type DesktopInputHandler = Arc<
+    dyn Fn(&str, protocol::v1::DesktopInputEvent) -> protocol::v1::DesktopStreamAck
+        + Send
+        + Sync,
+>;
+pub type DesktopControlHandler = Arc<
+    dyn Fn(&str, protocol::v1::DesktopStreamControl) -> protocol::v1::DesktopStreamAck
+        + Send
+        + Sync,
+>;
+pub type DesktopStreamFrameHandler = Arc<
+    dyn Fn(&str, protocol::v1::DesktopStreamFrame) + Send + Sync,
+>;
 
 /// Callbacks and configuration for active capabilities over a multiplexed session.
 #[derive(Clone)]
@@ -90,6 +112,7 @@ pub struct SessionCapabilityHandlers {
     pub remote_input_dispatcher: Arc<RemoteInputDispatcher>,
     pub deck_dispatcher: Arc<DeckDispatcher>,
     pub catalog_dispatcher: Arc<CatalogDispatcher>,
+    pub desktop_stream_dispatcher: Arc<DesktopStreamDispatcher>,
     pub on_file_received: Option<OnReceived<ReceivedFile>>,
     pub on_clipboard_received: Option<OnReceived<ClipboardUpdate>>,
     /// Called with notifications the peer shows here, and with replies to and dismissals of
@@ -107,6 +130,10 @@ pub struct SessionCapabilityHandlers {
     pub on_deck_tile_triggered: Option<DeckTriggerHandler>,
     pub on_catalog_query: Option<CatalogQueryHandler>,
     pub on_thumbnail_request: Option<ThumbnailRequestHandler>,
+    pub on_desktop_stream_start: Option<DesktopStreamStartHandler>,
+    pub on_desktop_input: Option<DesktopInputHandler>,
+    pub on_desktop_control: Option<DesktopControlHandler>,
+    pub on_desktop_frame: Option<DesktopStreamFrameHandler>,
     /// How this device introduces itself to peers.
     pub this_device: ThisDevice,
     /// Called with what a peer says about itself each time a session starts.
@@ -133,6 +160,7 @@ impl SessionCapabilityHandlers {
             remote_input_dispatcher: Arc::new(RemoteInputDispatcher::new()),
             deck_dispatcher: Arc::new(DeckDispatcher::new()),
             catalog_dispatcher: Arc::new(CatalogDispatcher::new()),
+            desktop_stream_dispatcher: Arc::new(DesktopStreamDispatcher::new()),
             on_file_received: None,
             on_clipboard_received: None,
             on_notification: None,
@@ -148,6 +176,10 @@ impl SessionCapabilityHandlers {
             on_deck_tile_triggered: None,
             on_catalog_query: None,
             on_thumbnail_request: None,
+            on_desktop_stream_start: None,
+            on_desktop_input: None,
+            on_desktop_control: None,
+            on_desktop_frame: None,
             this_device: ThisDevice::default(),
             on_device_info: None,
             on_device_status: None,
@@ -740,6 +772,88 @@ pub fn spawn_capabilities_dispatcher(
                             error!("Failed to process file catalog stream from {peer_fp}: {e}");
                         }
                     }
+                    CapabilityId::DESKTOP_STREAM => {
+                        debug!("Handling incoming desktop stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::DESKTOP_STREAM, None)
+                                .await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::DESKTOP_STREAM);
+                            }
+                        }
+
+                        let query = CapabilityQuery::negotiated(
+                            CapabilityId::DESKTOP_STREAM,
+                            is_permitted,
+                        );
+
+                        let on_start = handlers.on_desktop_stream_start.clone();
+                        let on_input = handlers.on_desktop_input.clone();
+                        let on_ctl = handlers.on_desktop_control.clone();
+                        let on_frame = handlers.on_desktop_frame.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .desktop_stream_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |req| {
+                                    if let Some(ref cb) = on_start {
+                                        cb(&peer, req)
+                                    } else {
+                                        protocol::v1::DesktopStreamStartResponse {
+                                            session_id: req.session_id,
+                                            status: protocol::v1::DesktopStreamStatus::Unsupported
+                                                as i32,
+                                            error_message:
+                                                "Desktop streaming not supported on this host"
+                                                    .into(),
+                                            actual_width: 0,
+                                            actual_height: 0,
+                                            actual_dpi: 0,
+                                            selected_codec: 0,
+                                            display_id: 0,
+                                        }
+                                    }
+                                },
+                                |input| {
+                                    if let Some(ref cb) = on_input {
+                                        cb(&peer, input)
+                                    } else {
+                                        protocol::v1::DesktopStreamAck {
+                                            session_id: input.session_id,
+                                            success: false,
+                                            error_message: "Desktop input not handled".into(),
+                                        }
+                                    }
+                                },
+                                |ctl| {
+                                    if let Some(ref cb) = on_ctl {
+                                        cb(&peer, ctl)
+                                    } else {
+                                        protocol::v1::DesktopStreamAck {
+                                            session_id: ctl.session_id,
+                                            success: false,
+                                            error_message: "Desktop control not handled".into(),
+                                        }
+                                    }
+                                },
+                                |frame| {
+                                    if let Some(ref cb) = on_frame {
+                                        cb(&peer, frame);
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process desktop stream from {peer_fp}: {e}");
+                        }
+                    }
                     unknown => {
                         debug!("Received unsupported capability stream {unknown:?} from {peer_fp}");
                     }
@@ -970,6 +1084,54 @@ impl SessionMultiplexer {
         let dispatcher = HandoffDispatcher::new();
         dispatcher
             .dismiss_handoff(&mut send, &mut recv, handoff_id, query)
+            .await
+    }
+
+    pub async fn start_desktop_stream_on_peer(
+        &self,
+        req: protocol::v1::DesktopStreamStartRequest,
+        capability_query: &CapabilityQuery,
+    ) -> Result<protocol::v1::DesktopStreamStartResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::DESKTOP_STREAM)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = DesktopStreamDispatcher::new();
+        dispatcher
+            .start_stream(&mut send, &mut recv, req, capability_query)
+            .await
+    }
+
+    pub async fn send_desktop_input_to_peer(
+        &self,
+        event: protocol::v1::DesktopInputEvent,
+        capability_query: &CapabilityQuery,
+    ) -> Result<protocol::v1::DesktopStreamAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::DESKTOP_STREAM)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = DesktopStreamDispatcher::new();
+        dispatcher
+            .send_input_event(&mut send, &mut recv, event, capability_query)
+            .await
+    }
+
+    pub async fn send_desktop_control_to_peer(
+        &self,
+        ctl: protocol::v1::DesktopStreamControl,
+        capability_query: &CapabilityQuery,
+    ) -> Result<protocol::v1::DesktopStreamAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::DESKTOP_STREAM)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = DesktopStreamDispatcher::new();
+        dispatcher
+            .send_control(&mut send, &mut recv, ctl, capability_query)
             .await
     }
 }

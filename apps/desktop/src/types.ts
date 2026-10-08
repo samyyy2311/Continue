@@ -118,7 +118,38 @@ export const PERMISSIONS: Record<number, { label: string; description: string }>
   10: { label: "Remote typing", description: "Dictation and keyboard input from phone" },
   11: { label: "Macro deck", description: "Custom quick action shortcuts from phone" },
   12: { label: "File catalog", description: "Browse photos, documents, and mount files" },
+  13: { label: "Desktop stream", description: "Stream phone apps or desktop workspace to PC" },
 };
+
+export interface DesktopStreamInfo {
+  sessionId: string;
+  peerFingerprint: string;
+  packageName?: string;
+  width: number;
+  height: number;
+  dpi: number;
+  status: string;
+}
+
+export interface DesktopInputEventDto {
+  sessionId: string;
+  eventType: "pointer_down" | "pointer_up" | "pointer_move" | "scroll" | "key_down" | "key_up";
+  x: number;
+  y: number;
+  button?: number;
+  keyCode?: number;
+  scrollDx?: number;
+  scrollDy?: number;
+  keyText?: string;
+}
+
+export interface DesktopStreamFrameEvent {
+  sessionId: string;
+  frameIndex: number;
+  timestampUs: number;
+  isKeyframe: boolean;
+  data: string;
+}
 
 /** A notification from the phone, to read and act on here. */
 export interface PhoneNotification {

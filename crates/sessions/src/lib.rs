@@ -6,6 +6,7 @@ pub mod backoff;
 pub mod capabilities_router;
 pub mod catalog;
 pub mod deck;
+pub mod desktop_stream;
 pub mod device;
 pub mod error;
 pub mod handoff;
@@ -26,12 +27,14 @@ pub use auto_connect::connect_paired_peers;
 pub use backoff::ReconnectPolicy;
 pub use capabilities_router::{
     spawn_capabilities_dispatcher, CatalogQueryHandler, DeckLayoutHandler, DeckTriggerHandler,
-    MediaCommandHandler, OnReceived, PcActionHandler, PermissionDecision, PermissionPrompt,
-    PermissionRequest, RemoteInputHandler, RingHandler, SessionCapabilityHandlers,
-    ThumbnailRequestHandler, PROMPT_TIMEOUT,
+    DesktopControlHandler, DesktopInputHandler, DesktopStreamFrameHandler,
+    DesktopStreamStartHandler, MediaCommandHandler, OnReceived, PcActionHandler, PermissionDecision,
+    PermissionPrompt, PermissionRequest, RemoteInputHandler, RingHandler,
+    SessionCapabilityHandlers, ThumbnailRequestHandler, PROMPT_TIMEOUT,
 };
 pub use catalog::CatalogDispatcher;
 pub use deck::DeckDispatcher;
+pub use desktop_stream::DesktopStreamDispatcher;
 pub use device::{clean_name, this_platform, PeerDevice, ThisDevice};
 pub use error::SessionError;
 pub use handoff::HandoffDispatcher;

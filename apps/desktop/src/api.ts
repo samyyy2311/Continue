@@ -6,6 +6,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   CatalogResponse,
   ClipboardHistoryItem,
+  DesktopInputEventDto,
+  DesktopStreamFrameEvent,
+  DesktopStreamInfo,
   DeviceIdentity,
   Grant,
   HandoffItem,
@@ -253,6 +256,45 @@ export const onQueuedTransfersChanged = (handler: (peerId: string) => void): Pro
 
 export const onLockdownChanged = (handler: (active: boolean) => void): Promise<UnlistenFn> =>
   listen<boolean>("lockdown-changed", (event) => handler(event.payload));
+
+export const startDesktopStream = (
+  peerFingerprint: string,
+  packageName?: string,
+  width: number = 1920,
+  height: number = 1080,
+  dpi: number = 240,
+) =>
+  invoke<DesktopStreamInfo>("start_desktop_stream", {
+    peerFingerprint,
+    packageName,
+    width,
+    height,
+    dpi,
+  });
+
+export const stopDesktopStream = (sessionId: string) =>
+  invoke<void>("stop_desktop_stream", { sessionId });
+
+export const sendDesktopInput = (event: DesktopInputEventDto) =>
+  invoke<void>("send_desktop_input", { event });
+
+export const getActiveDesktopStreams = () =>
+  invoke<DesktopStreamInfo[]>("get_active_desktop_streams");
+
+export const onDesktopStreamStarted = (
+  handler: (info: DesktopStreamInfo) => void,
+): Promise<UnlistenFn> =>
+  listen<DesktopStreamInfo>("desktop-stream-started", (event) => handler(event.payload));
+
+export const onDesktopStreamStopped = (
+  handler: (sessionId: string) => void,
+): Promise<UnlistenFn> =>
+  listen<string>("desktop-stream-stopped", (event) => handler(event.payload));
+
+export const onDesktopStreamFrame = (
+  handler: (frame: DesktopStreamFrameEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<DesktopStreamFrameEvent>("desktop-stream-frame", (event) => handler(event.payload));
 
 /** Commands reject with the backend's error string; anything else is unexpected. */
 export function errorMessage(error: unknown): string {

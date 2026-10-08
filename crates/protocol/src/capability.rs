@@ -24,6 +24,7 @@ impl CapabilityId {
     pub const REMOTE_INPUT: Self = Self(10);
     pub const DECK: Self = Self(11);
     pub const FILE_CATALOG: Self = Self(12);
+    pub const DESKTOP_STREAM: Self = Self(13);
 
     pub const fn new(id: u32) -> Self {
         Self(id)
@@ -48,6 +49,7 @@ impl CapabilityId {
             Self::REMOTE_INPUT => Some("remote_input"),
             Self::DECK => Some("deck"),
             Self::FILE_CATALOG => Some("file_catalog"),
+            Self::DESKTOP_STREAM => Some("desktop_stream"),
             _ => None,
         }
     }

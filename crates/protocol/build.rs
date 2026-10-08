@@ -26,6 +26,7 @@ fn main() {
         proto_dir.join("remote_input.proto"),
         proto_dir.join("deck.proto"),
         proto_dir.join("catalog.proto"),
+        proto_dir.join("desktop_stream.proto"),
     ];
 
     for file in &proto_files {

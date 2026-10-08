@@ -26,6 +26,7 @@ import {
   Info,
   Laptop,
   Loader,
+  Monitor,
   Plus,
   Search,
   Send,
@@ -99,6 +100,7 @@ import {
 } from "./format.ts";
 import { CatalogDialog } from "./CatalogDialog.tsx";
 import { ClipboardHistoryDialog } from "./ClipboardHistoryDialog.tsx";
+import { DesktopStreamDialog } from "./DesktopStreamDialog.tsx";
 import { HandoffCard } from "./HandoffCard.tsx";
 import { NotificationList } from "./Notifications.tsx";
 import { PairDialog } from "./PairDialog.tsx";
@@ -243,6 +245,7 @@ export default function App() {
   const [showPairDialog, setShowPairDialog] = useState(false);
   const [showCatalogDialog, setShowCatalogDialog] = useState(false);
   const [showClipboardDialog, setShowClipboardDialog] = useState(false);
+  const [showDesktopStreamDialog, setShowDesktopStreamDialog] = useState(false);
   const [isRinging, setIsRinging] = useState(false);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [connecting, setConnecting] = useState<string | null>(null);
@@ -984,6 +987,7 @@ export default function App() {
               onSendClipboard={handleSendClipboard}
               onOpenCatalog={() => setShowCatalogDialog(true)}
               onOpenClipboardHistory={() => setShowClipboardDialog(true)}
+              onOpenDesktopStream={() => setShowDesktopStreamDialog(true)}
               isRinging={isRinging}
               onToggleRing={handleToggleRing}
               textInput={textInput}
@@ -1077,6 +1081,14 @@ export default function App() {
         <CatalogDialog
           peer={selectedPeer}
           onClose={() => setShowCatalogDialog(false)}
+          onError={showError}
+        />
+      )}
+
+      {showDesktopStreamDialog && selectedPeer && (
+        <DesktopStreamDialog
+          peer={selectedPeer}
+          onClose={() => setShowDesktopStreamDialog(false)}
           onError={showError}
         />
       )}
@@ -1211,6 +1223,7 @@ interface HomeViewProps {
   onSendClipboard: () => void;
   onOpenCatalog: () => void;
   onOpenClipboardHistory: () => void;
+  onOpenDesktopStream: () => void;
   isRinging: boolean;
   onToggleRing: () => void;
   textInput: string;
@@ -1246,6 +1259,7 @@ function HomeView(props: HomeViewProps) {
     onSendClipboard,
     onOpenCatalog,
     onOpenClipboardHistory,
+    onOpenDesktopStream,
     isRinging,
     onToggleRing,
     textInput,
@@ -1457,6 +1471,14 @@ function HomeView(props: HomeViewProps) {
               >
                 <History size={20} />
                 Clipboard history
+              </button>
+              <button
+                type="button"
+                className="btn btn-tonal btn-large"
+                onClick={onOpenDesktopStream}
+              >
+                <Monitor size={20} />
+                Desktop mode
               </button>
             </div>
           ) : (

@@ -43,4 +43,7 @@ pub enum SessionError {
 
     #[error("Catalog validation failed: {0}")]
     CatalogValidation(String),
+
+    #[error("Desktop stream validation failed: {0}")]
+    DesktopStreamValidation(String),
 }
