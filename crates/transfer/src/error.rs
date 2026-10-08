@@ -67,4 +67,10 @@ pub enum TransferError {
 
     #[error("Transfer queue full: {0}")]
     QueueFull(String),
+
+    #[error("Cloud files provider error: {0}")]
+    CloudFiles(String),
+
+    #[error("Cloud files not supported on this platform")]
+    UnsupportedPlatform,
 }

@@ -4,6 +4,7 @@
 //! Streaming file transfer, one QUIC stream per file.
 
 pub mod capture;
+pub mod cloud_files;
 pub mod drop_folder;
 pub mod error;
 pub mod localsend_bridge;
@@ -16,6 +17,9 @@ pub mod sender;
 pub use capture::{
     format_as_clipboard_dibv5, request_camera_capture, respond_camera_capture, CameraCaptureSource,
     CapturedMedia,
+};
+pub use cloud_files::{
+    CloudFilesConfig, CloudFilesEntry, CloudFilesMount, FetchDataRequest, HydrationState,
 };
 pub use drop_folder::{guess_mime_type, is_ignorable_file, DropFolderConfig, DropFolderWatcher};
 pub use error::TransferError;
