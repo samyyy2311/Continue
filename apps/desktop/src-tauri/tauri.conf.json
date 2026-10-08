@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Continue",
         "width": 1040,
         "height": 720,
@@ -19,7 +20,7 @@
         "minHeight": 520,
         "resizable": true,
         "fullscreen": false,
-        "visible": false
+        "visible": true
       }
     ],
     "security": {

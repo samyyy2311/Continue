@@ -1988,7 +1988,13 @@ fn main() {
                 tracing::warn!("No tray icon, so closing the window will quit: {error}");
             }
             start_at_login_by_default(app.handle(), &app_data);
-            if !std::env::args().any(|arg| arg == BACKGROUND_ARG) {
+            if std::env::args().any(|arg| arg == BACKGROUND_ARG) {
+                tracing::info!("Startup: in background mode (--background)");
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            } else {
+                tracing::info!("Startup: in foreground mode, calling tray::show_window");
                 tray::show_window(app.handle());
             }
             Ok(())
