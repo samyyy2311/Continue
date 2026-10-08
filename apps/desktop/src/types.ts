@@ -192,3 +192,11 @@ export interface HandoffItem {
   timestampMs: number;
 }
 
+export interface QueuedTransfer {
+  id: string;
+  peerId: string;
+  kind: "file" | "text" | "handoff";
+  label: string;
+  queuedAt: number;
+}
+

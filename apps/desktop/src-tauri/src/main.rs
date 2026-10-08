@@ -29,6 +29,8 @@ use permissions::PermissionState;
 use protocol::v1::{CatalogQuery, PcAction, PcActionRequest, RingRequest, ThumbnailRequest};
 use protocol::CapabilityId;
 use sessions::{PermissionDecision, SessionState};
+use transfer::drop_folder::{DropFolderConfig, DropFolderWatcher};
+use transfer::queue::{OfflineTransferQueue, QueuedPayload, QueuedTransfer};
 use transfer::TransferError;
 
 /// Logs what actually went wrong and gives the UI a sentence a person can act on.
@@ -113,6 +115,8 @@ pub struct DesktopRuntimeState {
     clipboard_history: Arc<ClipboardHistoryStore>,
     cloud_mounts: Arc<Mutex<HashMap<String, Arc<transfer::CloudFilesMount>>>>,
     active_handoffs: Arc<Mutex<HashMap<String, HandoffItemDto>>>,
+    offline_queue: Arc<transfer::queue::OfflineTransferQueue>,
+    drop_folder: Arc<Mutex<Option<PathBuf>>>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -609,6 +613,56 @@ fn pending_permission_questions(state: State<DesktopRuntimeState>) -> Vec<Permis
     questions
 }
 
+async fn flush_offline_transfers(
+    app: &AppHandle,
+    state: &DesktopRuntimeState,
+    peer_fingerprint: &str,
+) {
+    let queued = state.offline_queue.drain_for_peer(peer_fingerprint);
+    if queued.is_empty() {
+        return;
+    }
+    let _ = app.emit("queued-transfers-changed", peer_fingerprint);
+    for item in queued {
+        match item.payload {
+            QueuedPayload::File { path, .. } => {
+                let location = Some(path.to_string_lossy().into_owned());
+                let _ = state
+                    .device
+                    .send_file(peer_fingerprint, &path, location, None::<fn(u64, u64)>)
+                    .await;
+            }
+            QueuedPayload::Clipboard { content, .. } => {
+                if let Ok(text) = String::from_utf8(content) {
+                    let _ = push_text(&state.device, peer_fingerprint, text).await;
+                }
+            }
+            QueuedPayload::Handoff { uri, title } => {
+                if let Some(mux) = state.device.sessions.get(peer_fingerprint) {
+                    let query = CapabilityQuery::negotiated(CapabilityId::HANDOFF, true);
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    let handoff_item = protocol::v1::HandoffItem {
+                        handoff_id: format!("h-{now_ms}"),
+                        source_device_id: computer_name(),
+                        handoff_type: 1,
+                        title: title.unwrap_or_else(|| uri.clone()),
+                        uri,
+                        scroll_ratio: 0.0,
+                        cursor_position: 0,
+                        timestamp_ms: now_ms,
+                        extra_payload: Vec::new(),
+                    };
+                    let _ = mux.broadcast_handoff_to_peer(handoff_item, &query).await;
+                }
+            }
+        }
+    }
+    let _ = app.emit("queued-transfers-changed", peer_fingerprint);
+}
+
 fn session_state_listener(
     app_handle: AppHandle,
     stores: Stores,
@@ -633,6 +687,14 @@ fn session_state_listener(
                     "displayName": name,
                 }),
             );
+            let app = app_handle.clone();
+            let peer_fp = peer.to_string();
+            tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                if let Some(state) = app.try_state::<DesktopRuntimeState>() {
+                    flush_offline_transfers(&app, &state, &peer_fp).await;
+                }
+            });
         }
     })
 }
@@ -1345,6 +1407,159 @@ async fn open_handoff(
     Ok(())
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedTransferDto {
+    pub id: String,
+    pub peer_id: String,
+    pub kind: String,
+    pub label: String,
+    pub queued_at: u64,
+}
+
+impl From<&QueuedTransfer> for QueuedTransferDto {
+    fn from(q: &QueuedTransfer) -> Self {
+        let (kind, label) = match &q.payload {
+            QueuedPayload::File { relative_name, .. } => {
+                ("file".to_string(), relative_name.clone())
+            }
+            QueuedPayload::Clipboard { content, .. } => {
+                let text = String::from_utf8_lossy(content).to_string();
+                ("text".to_string(), text)
+            }
+            QueuedPayload::Handoff { uri, title } => {
+                ("handoff".to_string(), title.clone().unwrap_or_else(|| uri.clone()))
+            }
+        };
+        Self {
+            id: q.id.clone(),
+            peer_id: q.peer_fingerprint.clone(),
+            kind,
+            label,
+            queued_at: q.queued_at,
+        }
+    }
+}
+
+#[tauri::command]
+fn queue_offline_file(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    file_path: String,
+) -> Result<String, String> {
+    let path = PathBuf::from(&file_path);
+    let relative_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
+    let payload = QueuedPayload::File {
+        path,
+        relative_name,
+        mime_type: None,
+    };
+    let id = state
+        .offline_queue
+        .enqueue(&peer_fingerprint, payload)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("queued-transfers-changed", &peer_fingerprint);
+    Ok(id)
+}
+
+#[tauri::command]
+fn queue_offline_text(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    text: String,
+) -> Result<String, String> {
+    let payload = QueuedPayload::Clipboard {
+        content: text.into_bytes(),
+        mime_type: "text/plain".to_string(),
+    };
+    let id = state
+        .offline_queue
+        .enqueue(&peer_fingerprint, payload)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("queued-transfers-changed", &peer_fingerprint);
+    Ok(id)
+}
+
+#[tauri::command]
+fn get_queued_transfers(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Vec<QueuedTransferDto> {
+    state
+        .offline_queue
+        .peek_for_peer(&peer_fingerprint)
+        .iter()
+        .map(QueuedTransferDto::from)
+        .collect()
+}
+
+#[tauri::command]
+fn remove_queued_transfer(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    item_id: String,
+) -> bool {
+    let removed = state.offline_queue.remove_item(&peer_fingerprint, &item_id);
+    if removed {
+        let _ = app.emit("queued-transfers-changed", &peer_fingerprint);
+    }
+    removed
+}
+
+#[tauri::command]
+fn clear_queued_transfers(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> usize {
+    let cleared = state.offline_queue.clear_peer(&peer_fingerprint);
+    if cleared > 0 {
+        let _ = app.emit("queued-transfers-changed", &peer_fingerprint);
+    }
+    cleared
+}
+
+#[tauri::command]
+fn set_lockdown_mode(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    active: bool,
+) {
+    state.device.stores.permissions.set_lockdown(active);
+    let _ = app.emit("lockdown-changed", active);
+}
+
+#[tauri::command]
+fn is_lockdown_mode(state: State<'_, DesktopRuntimeState>) -> bool {
+    state.device.stores.permissions.is_locked_down()
+}
+
+#[tauri::command]
+fn get_drop_folder(state: State<'_, DesktopRuntimeState>) -> Option<String> {
+    state
+        .drop_folder
+        .lock()
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn set_drop_folder(
+    state: State<'_, DesktopRuntimeState>,
+    folder_path: Option<String>,
+) -> Result<(), String> {
+    let mut lock = state.drop_folder.lock();
+    *lock = folder_path.map(PathBuf::from);
+    Ok(())
+}
+
 fn initialize_desktop_runtime(
     app_handle: &AppHandle,
     db_path: &Path,
@@ -1359,6 +1574,52 @@ fn initialize_desktop_runtime(
     )?);
     let cloud_mounts = Arc::new(Mutex::new(HashMap::new()));
     let active_handoffs = Arc::new(Mutex::new(HashMap::new()));
+    let offline_queue = Arc::new(OfflineTransferQueue::new());
+    let drop_folder: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
+
+    let (offline_queue_for_drop, drop_folder_for_loop, app_for_drop) = (
+        offline_queue.clone(),
+        drop_folder.clone(),
+        app_handle.clone(),
+    );
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+            let folder_opt = drop_folder_for_loop.lock().clone();
+            if let Some(folder) = folder_opt {
+                if folder.is_dir() {
+                    if let Some(state) = app_for_drop.try_state::<DesktopRuntimeState>() {
+                        let connected_peer = state
+                            .device
+                            .stores
+                            .trust
+                            .list_peers()
+                            .ok()
+                            .and_then(|peers| {
+                                peers
+                                    .into_iter()
+                                    .find(|p| state.device.sessions.get(&p.fingerprint).is_some())
+                            });
+                        if let Some(peer) = connected_peer {
+                            let config = DropFolderConfig::new(
+                                folder.clone(),
+                                peer.fingerprint.clone(),
+                            );
+                            let watcher = DropFolderWatcher::new(
+                                config,
+                                offline_queue_for_drop.clone(),
+                            );
+                            if let Ok(enqueued) = watcher.scan_directory() {
+                                if !enqueued.is_empty() {
+                                    flush_offline_transfers(&app_for_drop, &state, &peer.fingerprint).await;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
 
     let pending_answers = PendingAnswers::default();
     let connected = Arc::new(tray::Connected::default());
@@ -1397,6 +1658,8 @@ fn initialize_desktop_runtime(
         clipboard_history,
         cloud_mounts,
         active_handoffs,
+        offline_queue,
+        drop_folder,
     })
 }
 
@@ -1517,7 +1780,16 @@ fn main() {
             get_active_handoffs,
             broadcast_handoff,
             dismiss_handoff,
-            open_handoff
+            open_handoff,
+            queue_offline_file,
+            queue_offline_text,
+            get_queued_transfers,
+            remove_queued_transfer,
+            clear_queued_transfers,
+            set_lockdown_mode,
+            is_lockdown_mode,
+            get_drop_folder,
+            set_drop_folder
         ])
         // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
         .on_window_event(|window, event| {

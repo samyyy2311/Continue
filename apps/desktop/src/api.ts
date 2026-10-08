@@ -15,6 +15,7 @@ import type {
   PermissionAnswer,
   PermissionQuestion,
   PhoneNotification,
+  QueuedTransfer,
   TrustedPeer,
 } from "./types.ts";
 
@@ -219,6 +220,39 @@ export const onHandoffReceived = (handler: (item: HandoffItem) => void): Promise
 
 export const onHandoffDismissed = (handler: (handoffId: string) => void): Promise<UnlistenFn> =>
   listen<string>("handoff-dismissed", (event) => handler(event.payload));
+
+export const queueOfflineFile = (peerFingerprint: string, filePath: string) =>
+  invoke<string>("queue_offline_file", { peerFingerprint, filePath });
+
+export const queueOfflineText = (peerFingerprint: string, text: string) =>
+  invoke<string>("queue_offline_text", { peerFingerprint, text });
+
+export const getQueuedTransfers = (peerFingerprint: string) =>
+  invoke<QueuedTransfer[]>("get_queued_transfers", { peerFingerprint });
+
+export const removeQueuedTransfer = (peerFingerprint: string, itemId: string) =>
+  invoke<boolean>("remove_queued_transfer", { peerFingerprint, itemId });
+
+export const clearQueuedTransfers = (peerFingerprint: string) =>
+  invoke<number>("clear_queued_transfers", { peerFingerprint });
+
+export const setLockdownMode = (active: boolean) =>
+  invoke<void>("set_lockdown_mode", { active });
+
+export const isLockdownMode = () =>
+  invoke<boolean>("is_lockdown_mode");
+
+export const getDropFolder = () =>
+  invoke<string | null>("get_drop_folder");
+
+export const setDropFolder = (folderPath: string | null) =>
+  invoke<void>("set_drop_folder", { folderPath });
+
+export const onQueuedTransfersChanged = (handler: (peerId: string) => void): Promise<UnlistenFn> =>
+  listen<string>("queued-transfers-changed", (event) => handler(event.payload));
+
+export const onLockdownChanged = (handler: (active: boolean) => void): Promise<UnlistenFn> =>
+  listen<boolean>("lockdown-changed", (event) => handler(event.payload));
 
 /** Commands reject with the backend's error string; anything else is unexpected. */
 export function errorMessage(error: unknown): string {

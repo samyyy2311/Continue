@@ -10,6 +10,7 @@ import {
   CheckCheck,
   CircleAlert,
   ClipboardPaste,
+  Clock,
   Code,
   Copy,
   File,
@@ -29,6 +30,7 @@ import {
   Search,
   Send,
   Settings,
+  ShieldAlert,
   Smartphone,
   Trash2,
   Type,
@@ -45,6 +47,7 @@ import {
   broadcastHandoff,
   cancelIncoming,
   clearHistory,
+  clearQueuedTransfers,
   connectToPeer,
   disconnectPeer,
   dismissHandoff,
@@ -53,23 +56,32 @@ import {
   getActiveHandoffs,
   getAutostart,
   getDeviceIdentity,
+  getDropFolder,
   getHistory,
+  getQueuedTransfers,
   getSaveFolder,
   getPermissions,
   getTrustedPeers,
+  isLockdownMode,
   listIncoming,
   onHandoffDismissed,
   onHandoffReceived,
   onIncomingEnded,
   onIncomingProgress,
+  onLockdownChanged,
   onNotificationPosted,
   onNotificationRemoved,
+  onQueuedTransfersChanged,
   openHandoff,
   openLink,
   openReceived,
+  queueOfflineFile,
+  queueOfflineText,
   ringPeer,
   savePastedFile,
   setAutostart,
+  setDropFolder,
+  setLockdownMode,
   setSaveFolder,
   setClipboardSyncEnabled,
   removeTrustedPeer,
@@ -107,6 +119,7 @@ import {
   type PeerPermission,
   type PhoneNotification,
   PERMISSIONS,
+  type QueuedTransfer,
   type Theme,
   type Toast,
   type TrustedPeer,
@@ -238,6 +251,9 @@ export default function App() {
   const [textInput, setTextInput] = useState("");
   const [notifications, setNotifications] = useState<PhoneNotification[]>([]);
   const [handoffs, setHandoffs] = useState<HandoffItem[]>([]);
+  const [isLockdown, setIsLockdown] = useState(false);
+  const [dropFolder, setDropFolderState] = useState<string | null>(null);
+  const [queuedTransfers, setQueuedTransfers] = useState<QueuedTransfer[]>([]);
 
   const selectedPeer = peers?.find((p) => p.fingerprint === selectedPeerId) ?? peers?.[0] ?? null;
 
@@ -318,12 +334,21 @@ export default function App() {
       return;
     }
     let active = true;
-    Promise.all([getDeviceIdentity(), getTrustedPeers(), getHistory(), getActiveHandoffs()])
-      .then(([loadedIdentity, loadedPeers, history, loadedHandoffs]) => {
+    Promise.all([
+      getDeviceIdentity(),
+      getTrustedPeers(),
+      getHistory(),
+      getActiveHandoffs(),
+      isLockdownMode(),
+      getDropFolder(),
+    ])
+      .then(([loadedIdentity, loadedPeers, history, loadedHandoffs, lockdownState, folderState]) => {
         if (!active) return;
         setIdentity(loadedIdentity);
         setPeers(loadedPeers);
         setHandoffs(loadedHandoffs);
+        setIsLockdown(lockdownState);
+        setDropFolderState(folderState);
         // Anything sent or coming in since the window opened stays on top.
         setActivity((live) => [...live, ...history.map(fromHistory)]);
       })
@@ -332,6 +357,14 @@ export default function App() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (selectedPeer) {
+      getQueuedTransfers(selectedPeer.fingerprint).then(setQueuedTransfers).catch(() => {});
+    } else {
+      setQueuedTransfers([]);
+    }
+  }, [selectedPeer?.fingerprint]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -461,6 +494,16 @@ export default function App() {
           setHandoffs((prev) => prev.filter((h) => h.handoffId !== handoffId));
         });
         keep(unHandoffDismiss);
+
+        const unLockdown = await onLockdownChanged((active) => setIsLockdown(active));
+        keep(unLockdown);
+
+        const unQueue = await onQueuedTransfersChanged((peerId) => {
+          if (selectedPeerId === peerId) {
+            getQueuedTransfers(peerId).then(setQueuedTransfers).catch(() => {});
+          }
+        });
+        keep(unQueue);
       } catch (error) {
         showError(errorMessage(error));
       }
@@ -612,30 +655,65 @@ export default function App() {
       setDragCount(null);
       if (payload.type === "drop" && payload.paths.length > 0) {
         setView("transfer");
-        sendFilesRef.current(payload.paths);
+        if (selectedPeer?.isConnected) {
+          sendFilesRef.current(payload.paths);
+        } else if (selectedPeer) {
+          const peer = selectedPeer;
+          (async () => {
+            for (const p of payload.paths) {
+              await queueOfflineFile(peer.fingerprint, p);
+            }
+            const updated = await getQueuedTransfers(peer.fingerprint);
+            setQueuedTransfers(updated);
+            showToast(`Queued ${payload.paths.length} file(s) for ${peer.displayName}`);
+          })();
+        }
       }
     });
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  }, [selectedPeer]);
 
   const chooseFiles = async () => {
-    if (!readyPeer()) return;
+    if (!selectedPeer) {
+      showError("Pair your phone first.");
+      return;
+    }
     const picked = await openFileDialog({ multiple: true, directory: false });
     if (picked) {
       const paths = Array.isArray(picked) ? picked : [picked];
-      sendFiles(paths);
+      if (selectedPeer.isConnected) {
+        sendFiles(paths);
+      } else {
+        for (const p of paths) {
+          await queueOfflineFile(selectedPeer.fingerprint, p);
+        }
+        const updated = await getQueuedTransfers(selectedPeer.fingerprint);
+        setQueuedTransfers(updated);
+        showToast(`Queued ${paths.length} file(s) for ${selectedPeer.displayName}`);
+      }
     }
   };
 
   const handleSendText = async () => {
     const text = textInput.trim();
-    const peer = readyPeer();
-    if (!peer || !text) return;
+    if (!selectedPeer || !text) return;
     setTextInput("");
-    const sent = await sendText(peer, text);
-    if (!sent) setTextInput(text);
+    if (selectedPeer.isConnected) {
+      const sent = await sendText(selectedPeer, text);
+      if (!sent) setTextInput(text);
+    } else {
+      try {
+        await queueOfflineText(selectedPeer.fingerprint, text);
+        const updated = await getQueuedTransfers(selectedPeer.fingerprint);
+        setQueuedTransfers(updated);
+        showToast(`Queued text for ${selectedPeer.displayName}`);
+      } catch (error) {
+        showError(errorMessage(error));
+        setTextInput(text);
+      }
+    }
   };
 
   const handleSendClipboard = async () => {
@@ -659,18 +737,79 @@ export default function App() {
     const files = Array.from(data.files);
     const text = data.getData("text/plain").trim();
     if (files.length === 0 && !text) return;
-    const peer = readyPeer();
-    if (!peer) return;
-    if (files.length === 0) {
-      await sendText(peer, text);
-      return;
-    }
-    for (const file of files) {
-      try {
-        await sendFile(peer, await savePastedFile(file, pastedName(file)));
-      } catch (error) {
-        showError(errorMessage(error));
+    if (!selectedPeer) return;
+    if (selectedPeer.isConnected) {
+      if (files.length === 0) {
+        await sendText(selectedPeer, text);
+        return;
       }
+      for (const file of files) {
+        try {
+          await sendFile(selectedPeer, await savePastedFile(file, pastedName(file)));
+        } catch (error) {
+          showError(errorMessage(error));
+        }
+      }
+    } else {
+      if (text) {
+        await queueOfflineText(selectedPeer.fingerprint, text);
+      }
+      for (const file of files) {
+        try {
+          const saved = await savePastedFile(file, pastedName(file));
+          await queueOfflineFile(selectedPeer.fingerprint, saved);
+        } catch (error) {
+          showError(errorMessage(error));
+        }
+      }
+      const updated = await getQueuedTransfers(selectedPeer.fingerprint);
+      setQueuedTransfers(updated);
+      showToast(`Queued for ${selectedPeer.displayName}`);
+    }
+  };
+
+  const handleClearQueuedTransfers = async () => {
+    if (!selectedPeer) return;
+    try {
+      await clearQueuedTransfers(selectedPeer.fingerprint);
+      setQueuedTransfers([]);
+      showToast("Cleared queued transfers");
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
+  const handleToggleLockdown = async () => {
+    try {
+      const next = !isLockdown;
+      await setLockdownMode(next);
+      setIsLockdown(next);
+      showToast(next ? "Lockdown active: all capabilities paused" : "Lockdown turned off");
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
+  const handleChooseDropFolder = async () => {
+    try {
+      const picked = await openFileDialog({ directory: true, multiple: false });
+      if (typeof picked === "string") {
+        await setDropFolder(picked);
+        setDropFolderState(picked);
+        showToast("Drop folder configured");
+      }
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
+  const handleClearDropFolder = async () => {
+    try {
+      await setDropFolder(null);
+      setDropFolderState(null);
+      showToast("Drop folder disabled");
+    } catch (error) {
+      showError(errorMessage(error));
     }
   };
 
@@ -864,6 +1003,10 @@ export default function App() {
               onError={showError}
               rowActions={rowActions}
               onNavigateHistory={() => setView("history")}
+              isLockdown={isLockdown}
+              onToggleLockdown={handleToggleLockdown}
+              queuedTransfers={queuedTransfers}
+              onClearQueuedTransfers={handleClearQueuedTransfers}
             />
           )}
 
@@ -900,6 +1043,11 @@ export default function App() {
               onOpenClipboardHistory={() => setShowClipboardDialog(true)}
               onError={showError}
               onOpenFolder={(folder) => rowActions.open(folder, false)}
+              isLockdown={isLockdown}
+              onToggleLockdown={handleToggleLockdown}
+              dropFolder={dropFolder}
+              onChooseDropFolder={handleChooseDropFolder}
+              onClearDropFolder={handleClearDropFolder}
             />
           )}
         </div>
@@ -910,9 +1058,13 @@ export default function App() {
           <div className="drop-target">
             <Upload size={40} strokeWidth={1.5} className="text-accent" />
             <p className="headline">
-              {selectedPeer?.isConnected ? `Drop to send to ${selectedPeer.displayName}` : "Connect your phone first"}
+              {selectedPeer
+                ? selectedPeer.isConnected
+                  ? `Drop to send to ${selectedPeer.displayName}`
+                  : `Drop to queue for ${selectedPeer.displayName}`
+                : "Connect your phone first"}
             </p>
-            {selectedPeer?.isConnected && dragCount > 0 && (
+            {selectedPeer && dragCount > 0 && (
               <p className="supporting">{dragCount === 1 ? "1 file" : `${dragCount} files`}</p>
             )}
           </div>
@@ -1078,6 +1230,10 @@ interface HomeViewProps {
   onNavigateHistory: () => void;
   notifications: PhoneNotification[];
   onError: (message: string) => void;
+  isLockdown: boolean;
+  onToggleLockdown: () => void;
+  queuedTransfers: QueuedTransfer[];
+  onClearQueuedTransfers: () => void;
 }
 
 function HomeView(props: HomeViewProps) {
@@ -1097,6 +1253,10 @@ function HomeView(props: HomeViewProps) {
     onOpenHandoff,
     onDismissHandoff,
     onBroadcastHandoff,
+    isLockdown,
+    onToggleLockdown,
+    queuedTransfers,
+    onClearQueuedTransfers,
   } = props;
   const { onTextInputChange, onSendText, onConnect, onReconnect, onDisconnect, isConnecting } = props;
   const { activeTransfers, recentActivity, rowActions, onNavigateHistory, notifications, onError } = props;
@@ -1176,6 +1336,80 @@ function HomeView(props: HomeViewProps) {
       </aside>
 
       <div className="home-main">
+        {isLockdown && (
+          <section className="section" aria-label="Lockdown active">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 16,
+                padding: "14px 18px",
+                borderRadius: 16,
+                background: "color-mix(in srgb, var(--error) 12%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--error) 30%, transparent)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
+                <ShieldAlert size={22} style={{ color: "var(--error)", flexShrink: 0 }} />
+                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                  <span className="list-title" style={{ fontWeight: 600, fontSize: 14 }}>
+                    Lockdown mode active
+                  </span>
+                  <span className="list-sub wrap" style={{ fontSize: 13 }}>
+                    All permissions and transfers are paused.
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-tonal btn-small"
+                onClick={onToggleLockdown}
+              >
+                Turn off
+              </button>
+            </div>
+          </section>
+        )}
+
+        {queuedTransfers.length > 0 && (
+          <section className="section" aria-label="Queued transfers">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 16,
+                padding: "14px 18px",
+                borderRadius: 16,
+                background: "var(--fill)",
+                border: "1px solid var(--line)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
+                <Clock size={20} style={{ color: "var(--text-2)", flexShrink: 0 }} />
+                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                  <span className="list-title" style={{ fontWeight: 600, fontSize: 14 }}>
+                    {queuedTransfers.length === 1
+                      ? "1 item queued"
+                      : `${queuedTransfers.length} items queued`}
+                  </span>
+                  <span className="list-sub" style={{ fontSize: 13 }}>
+                    Will send automatically when {peer.displayName} connects.
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-tonal btn-small"
+                onClick={onClearQueuedTransfers}
+              >
+                Clear
+              </button>
+            </div>
+          </section>
+        )}
+
         {online && handoffs.length > 0 && (
           <section className="section" aria-label="Continue where you left off">
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1193,7 +1427,7 @@ function HomeView(props: HomeViewProps) {
         )}
 
         <section className="section">
-          {online && (
+          {online ? (
             <div className="send-actions">
               <button type="button" className="btn btn-filled btn-large" onClick={onChooseFiles} title={`${MOD_KEY}O`}>
                 <Upload size={20} />
@@ -1225,9 +1459,16 @@ function HomeView(props: HomeViewProps) {
                 Clipboard history
               </button>
             </div>
+          ) : (
+            <div className="send-actions">
+              <button type="button" className="btn btn-filled btn-large" onClick={onChooseFiles} title={`${MOD_KEY}O`}>
+                <Upload size={20} />
+                Queue files
+              </button>
+            </div>
           )}
           <form
-            className={`composer ${online ? "" : "disabled"}`}
+            className="composer"
             onSubmit={(e) => {
               e.preventDefault();
               onSendText();
@@ -1236,9 +1477,8 @@ function HomeView(props: HomeViewProps) {
             <input
               value={textInput}
               onChange={(e) => onTextInputChange(e.target.value)}
-              placeholder={online ? `Send text to ${peer.displayName}` : "Connect to send text"}
+              placeholder={online ? `Send text to ${peer.displayName}` : `Queue text for ${peer.displayName}`}
               aria-label="Text to send"
-              disabled={!online}
             />
             {online && linkIn(textInput) && (
               <button
@@ -1256,7 +1496,7 @@ function HomeView(props: HomeViewProps) {
                 Handoff
               </button>
             )}
-            <button type="submit" className="composer-send" disabled={!online || !textInput.trim()} aria-label="Send">
+            <button type="submit" className="composer-send" disabled={!textInput.trim()} aria-label="Send">
               <ArrowUp size={22} />
             </button>
           </form>
@@ -1562,6 +1802,11 @@ interface SettingsViewProps {
   accent: AccentName;
   onThemeChange: (theme: Theme) => void;
   onAccentChange: (accent: AccentName) => void;
+  isLockdown: boolean;
+  onToggleLockdown: () => void;
+  dropFolder: string | null;
+  onChooseDropFolder: () => void;
+  onClearDropFolder: () => void;
 }
 
 const THEME_OPTIONS = [
@@ -1581,6 +1826,11 @@ function SettingsView(props: SettingsViewProps) {
     onClipboardSyncChange,
     onOpenClipboardHistory,
     onError,
+    isLockdown,
+    onToggleLockdown,
+    dropFolder,
+    onChooseDropFolder,
+    onClearDropFolder,
   } = props;
   const { onOpenFolder } = props;
   const [appVersion, setAppVersion] = useState("");
@@ -1686,6 +1936,55 @@ function SettingsView(props: SettingsViewProps) {
               Change
             </button>
           </div>
+        </li>
+        <li className="list-item">
+          <div className="list-text">
+            <span className="list-title">Drop folder</span>
+            <span className="list-sub wrap" title={dropFolder ?? undefined}>
+              {dropFolder
+                ? dropFolder
+                : "Files added to this folder are sent automatically to connected devices."}
+            </span>
+          </div>
+          <div className="list-trailing">
+            {dropFolder ? (
+              <>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="Open drop folder"
+                  onClick={() => onOpenFolder(dropFolder)}
+                >
+                  <FolderOpen size={18} />
+                </button>
+                <button type="button" className="btn btn-tonal btn-small" onClick={onChooseDropFolder}>
+                  Change
+                </button>
+                <button type="button" className="btn btn-text btn-small" onClick={onClearDropFolder}>
+                  Disable
+                </button>
+              </>
+            ) : (
+              <button type="button" className="btn btn-tonal btn-small" onClick={onChooseDropFolder}>
+                Choose folder
+              </button>
+            )}
+          </div>
+        </li>
+      </ul>
+
+      <h2 className="label">Privacy & security</h2>
+      <ul className="list">
+        <li className="list-item">
+          <div className="list-text">
+            <span className="list-title" id="lockdown-mode-label">
+              Lockdown mode
+            </span>
+            <span className="list-sub wrap">
+              Pause all incoming and outgoing transfers and capability requests immediately.
+            </span>
+          </div>
+          <Switch labelledBy="lockdown-mode-label" checked={isLockdown} onChange={onToggleLockdown} />
         </li>
       </ul>
 
