@@ -4,10 +4,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
+  Bell,
+  BellOff,
   Check,
   CheckCheck,
   CircleAlert,
   ClipboardPaste,
+  Clock,
   Code,
   Copy,
   File,
@@ -23,10 +26,12 @@ import {
   Info,
   Laptop,
   Loader,
+  Monitor,
   Plus,
   Search,
   Send,
   Settings,
+  ShieldAlert,
   Smartphone,
   Trash2,
   Type,
@@ -40,27 +45,44 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import { ButtonGroup, ConnectionStatus, ProgressBar, Switch } from "./components.tsx";
 import {
+  broadcastHandoff,
   cancelIncoming,
   clearHistory,
+  clearQueuedTransfers,
   connectToPeer,
   disconnectPeer,
+  dismissHandoff,
   reconnectPeer,
   errorMessage,
+  getActiveHandoffs,
   getAutostart,
   getDeviceIdentity,
+  getDropFolder,
   getHistory,
+  getQueuedTransfers,
   getSaveFolder,
   getPermissions,
   getTrustedPeers,
+  isLockdownMode,
   listIncoming,
+  onHandoffDismissed,
+  onHandoffReceived,
   onIncomingEnded,
   onIncomingProgress,
+  onLockdownChanged,
   onNotificationPosted,
   onNotificationRemoved,
+  onQueuedTransfersChanged,
+  openHandoff,
   openLink,
   openReceived,
+  queueOfflineFile,
+  queueOfflineText,
+  ringPeer,
   savePastedFile,
   setAutostart,
+  setDropFolder,
+  setLockdownMode,
   setSaveFolder,
   setClipboardSyncEnabled,
   removeTrustedPeer,
@@ -76,6 +98,10 @@ import {
   getFileCategory,
   linkIn,
 } from "./format.ts";
+import { CatalogDialog } from "./CatalogDialog.tsx";
+import { ClipboardHistoryDialog } from "./ClipboardHistoryDialog.tsx";
+import { DesktopStreamDialog } from "./DesktopStreamDialog.tsx";
+import { HandoffCard } from "./HandoffCard.tsx";
 import { NotificationList } from "./Notifications.tsx";
 import { PairDialog } from "./PairDialog.tsx";
 import {
@@ -86,6 +112,7 @@ import {
   type HistoryEntry,
   GRANT_OPTIONS,
   type Grant,
+  type HandoffItem,
   type HistoryFilter,
   type IncomingTransfer,
   isMac,
@@ -94,6 +121,7 @@ import {
   type PeerPermission,
   type PhoneNotification,
   PERMISSIONS,
+  type QueuedTransfer,
   type Theme,
   type Toast,
   type TrustedPeer,
@@ -215,12 +243,20 @@ export default function App() {
   // The last device picked is picked again next time.
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(() => readStored(PEER_KEY));
   const [showPairDialog, setShowPairDialog] = useState(false);
+  const [showCatalogDialog, setShowCatalogDialog] = useState(false);
+  const [showClipboardDialog, setShowClipboardDialog] = useState(false);
+  const [showDesktopStreamDialog, setShowDesktopStreamDialog] = useState(false);
+  const [isRinging, setIsRinging] = useState(false);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [dragCount, setDragCount] = useState<number | null>(null);
   const [textInput, setTextInput] = useState("");
   const [notifications, setNotifications] = useState<PhoneNotification[]>([]);
+  const [handoffs, setHandoffs] = useState<HandoffItem[]>([]);
+  const [isLockdown, setIsLockdown] = useState(false);
+  const [dropFolder, setDropFolderState] = useState<string | null>(null);
+  const [queuedTransfers, setQueuedTransfers] = useState<QueuedTransfer[]>([]);
 
   const selectedPeer = peers?.find((p) => p.fingerprint === selectedPeerId) ?? peers?.[0] ?? null;
 
@@ -229,6 +265,24 @@ export default function App() {
   }, []);
 
   const showError = useCallback((message: string) => showToast(message, "error"), [showToast]);
+
+  const handleToggleRing = async () => {
+    if (!selectedPeer) return;
+    try {
+      const next = !isRinging;
+      const active = await ringPeer(selectedPeer.fingerprint, next);
+      setIsRinging(active);
+      if (active) {
+        showToast(`Ringing ${selectedPeer.displayName}...`);
+      }
+    } catch (err) {
+      showError(errorMessage(err));
+    }
+  };
+
+  useEffect(() => {
+    setIsRinging(false);
+  }, [selectedPeerId]);
 
   useEffect(() => {
     if (!toast) return;
@@ -283,11 +337,21 @@ export default function App() {
       return;
     }
     let active = true;
-    Promise.all([getDeviceIdentity(), getTrustedPeers(), getHistory()])
-      .then(([loadedIdentity, loadedPeers, history]) => {
+    Promise.all([
+      getDeviceIdentity(),
+      getTrustedPeers(),
+      getHistory(),
+      getActiveHandoffs(),
+      isLockdownMode(),
+      getDropFolder(),
+    ])
+      .then(([loadedIdentity, loadedPeers, history, loadedHandoffs, lockdownState, folderState]) => {
         if (!active) return;
         setIdentity(loadedIdentity);
         setPeers(loadedPeers);
+        setHandoffs(loadedHandoffs);
+        setIsLockdown(lockdownState);
+        setDropFolderState(folderState);
         // Anything sent or coming in since the window opened stays on top.
         setActivity((live) => [...live, ...history.map(fromHistory)]);
       })
@@ -296,6 +360,14 @@ export default function App() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (selectedPeer) {
+      getQueuedTransfers(selectedPeer.fingerprint).then(setQueuedTransfers).catch(() => {});
+    } else {
+      setQueuedTransfers([]);
+    }
+  }, [selectedPeer?.fingerprint]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -414,6 +486,27 @@ export default function App() {
             }),
         );
         keep(unSynced);
+
+        const unHandoffRecv = await onHandoffReceived((item) => {
+          setHandoffs((prev) => [item, ...prev.filter((h) => h.handoffId !== item.handoffId)]);
+          showToast(`Continue from ${item.sourceDeviceId || "device"}`);
+        });
+        keep(unHandoffRecv);
+
+        const unHandoffDismiss = await onHandoffDismissed((handoffId) => {
+          setHandoffs((prev) => prev.filter((h) => h.handoffId !== handoffId));
+        });
+        keep(unHandoffDismiss);
+
+        const unLockdown = await onLockdownChanged((active) => setIsLockdown(active));
+        keep(unLockdown);
+
+        const unQueue = await onQueuedTransfersChanged((peerId) => {
+          if (selectedPeerId === peerId) {
+            getQueuedTransfers(peerId).then(setQueuedTransfers).catch(() => {});
+          }
+        });
+        keep(unQueue);
       } catch (error) {
         showError(errorMessage(error));
       }
@@ -565,30 +658,65 @@ export default function App() {
       setDragCount(null);
       if (payload.type === "drop" && payload.paths.length > 0) {
         setView("transfer");
-        sendFilesRef.current(payload.paths);
+        if (selectedPeer?.isConnected) {
+          sendFilesRef.current(payload.paths);
+        } else if (selectedPeer) {
+          const peer = selectedPeer;
+          (async () => {
+            for (const p of payload.paths) {
+              await queueOfflineFile(peer.fingerprint, p);
+            }
+            const updated = await getQueuedTransfers(peer.fingerprint);
+            setQueuedTransfers(updated);
+            showToast(`Queued ${payload.paths.length} file(s) for ${peer.displayName}`);
+          })();
+        }
       }
     });
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  }, [selectedPeer]);
 
   const chooseFiles = async () => {
-    if (!readyPeer()) return;
+    if (!selectedPeer) {
+      showError("Pair your phone first.");
+      return;
+    }
     const picked = await openFileDialog({ multiple: true, directory: false });
     if (picked) {
       const paths = Array.isArray(picked) ? picked : [picked];
-      sendFiles(paths);
+      if (selectedPeer.isConnected) {
+        sendFiles(paths);
+      } else {
+        for (const p of paths) {
+          await queueOfflineFile(selectedPeer.fingerprint, p);
+        }
+        const updated = await getQueuedTransfers(selectedPeer.fingerprint);
+        setQueuedTransfers(updated);
+        showToast(`Queued ${paths.length} file(s) for ${selectedPeer.displayName}`);
+      }
     }
   };
 
   const handleSendText = async () => {
     const text = textInput.trim();
-    const peer = readyPeer();
-    if (!peer || !text) return;
+    if (!selectedPeer || !text) return;
     setTextInput("");
-    const sent = await sendText(peer, text);
-    if (!sent) setTextInput(text);
+    if (selectedPeer.isConnected) {
+      const sent = await sendText(selectedPeer, text);
+      if (!sent) setTextInput(text);
+    } else {
+      try {
+        await queueOfflineText(selectedPeer.fingerprint, text);
+        const updated = await getQueuedTransfers(selectedPeer.fingerprint);
+        setQueuedTransfers(updated);
+        showToast(`Queued text for ${selectedPeer.displayName}`);
+      } catch (error) {
+        showError(errorMessage(error));
+        setTextInput(text);
+      }
+    }
   };
 
   const handleSendClipboard = async () => {
@@ -612,18 +740,79 @@ export default function App() {
     const files = Array.from(data.files);
     const text = data.getData("text/plain").trim();
     if (files.length === 0 && !text) return;
-    const peer = readyPeer();
-    if (!peer) return;
-    if (files.length === 0) {
-      await sendText(peer, text);
-      return;
-    }
-    for (const file of files) {
-      try {
-        await sendFile(peer, await savePastedFile(file, pastedName(file)));
-      } catch (error) {
-        showError(errorMessage(error));
+    if (!selectedPeer) return;
+    if (selectedPeer.isConnected) {
+      if (files.length === 0) {
+        await sendText(selectedPeer, text);
+        return;
       }
+      for (const file of files) {
+        try {
+          await sendFile(selectedPeer, await savePastedFile(file, pastedName(file)));
+        } catch (error) {
+          showError(errorMessage(error));
+        }
+      }
+    } else {
+      if (text) {
+        await queueOfflineText(selectedPeer.fingerprint, text);
+      }
+      for (const file of files) {
+        try {
+          const saved = await savePastedFile(file, pastedName(file));
+          await queueOfflineFile(selectedPeer.fingerprint, saved);
+        } catch (error) {
+          showError(errorMessage(error));
+        }
+      }
+      const updated = await getQueuedTransfers(selectedPeer.fingerprint);
+      setQueuedTransfers(updated);
+      showToast(`Queued for ${selectedPeer.displayName}`);
+    }
+  };
+
+  const handleClearQueuedTransfers = async () => {
+    if (!selectedPeer) return;
+    try {
+      await clearQueuedTransfers(selectedPeer.fingerprint);
+      setQueuedTransfers([]);
+      showToast("Cleared queued transfers");
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
+  const handleToggleLockdown = async () => {
+    try {
+      const next = !isLockdown;
+      await setLockdownMode(next);
+      setIsLockdown(next);
+      showToast(next ? "Lockdown active: all capabilities paused" : "Lockdown turned off");
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
+  const handleChooseDropFolder = async () => {
+    try {
+      const picked = await openFileDialog({ directory: true, multiple: false });
+      if (typeof picked === "string") {
+        await setDropFolder(picked);
+        setDropFolderState(picked);
+        showToast("Drop folder configured");
+      }
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
+  const handleClearDropFolder = async () => {
+    try {
+      await setDropFolder(null);
+      setDropFolderState(null);
+      showToast("Drop folder disabled");
+    } catch (error) {
+      showError(errorMessage(error));
     }
   };
 
@@ -636,12 +825,45 @@ export default function App() {
     }
   };
 
+  const handleOpenHandoff = async (item: HandoffItem) => {
+    try {
+      const peerId = item.peerId || selectedPeer?.fingerprint || "";
+      await openHandoff(peerId, item.handoffId, item.uri);
+      setHandoffs((prev) => prev.filter((h) => h.handoffId !== item.handoffId));
+      showToast("Opened in browser");
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
+  const handleDismissHandoff = async (item: HandoffItem) => {
+    try {
+      const peerId = item.peerId || selectedPeer?.fingerprint || "";
+      await dismissHandoff(peerId, item.handoffId);
+      setHandoffs((prev) => prev.filter((h) => h.handoffId !== item.handoffId));
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
+  const handleBroadcastHandoff = async (url: string) => {
+    const peer = readyPeer();
+    if (!peer) return;
+    try {
+      await broadcastHandoff(peer.fingerprint, url, url, 1, 0);
+      showToast(`Sent to ${peer.displayName} to continue reading`);
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
   const rowActions: RowActions = {
     retry: retryItem,
     copy: copyToClipboard,
     open: (path, reveal) => openReceived(path, reveal).catch((error) => showError(errorMessage(error))),
     openLink: (url) => openLink(url).catch((error) => showError(errorMessage(error))),
     cancelIncoming: (transferId) => cancelIncoming(transferId).catch((error) => showError(errorMessage(error))),
+    handoffLink: handleBroadcastHandoff,
   };
 
   const chooseFilesRef = useRef(chooseFiles);
@@ -732,24 +954,28 @@ export default function App() {
   return (
     <div className="shell">
       <nav className="rail" aria-label="Main">
-        <img src="/icon.svg" alt="Continue" className="rail-logo" />
-        <div className="rail-items">
-          {destinations.map((item, index) => (
-            <button
-              key={item.id}
-              type="button"
-              className="rail-item"
-              aria-current={view === item.id ? "page" : undefined}
-              onClick={() => setView(item.id)}
-              title={`${item.label} (${MOD_KEY}${index + 1})`}
-            >
-              <span className="rail-indicator">
-                {item.icon}
-                {item.badge !== null && <span className="rail-badge">{item.badge}</span>}
-              </span>
-              <span className="rail-label">{item.label}</span>
-            </button>
-          ))}
+        <div className="rail-top">
+          <div className="rail-logo" title="Continue">
+            <img src="/icon.svg" alt="Continue" style={{ width: 22, height: 22 }} />
+          </div>
+          <div className="rail-items">
+            {destinations.map((item, index) => (
+              <button
+                key={item.id}
+                type="button"
+                className="rail-item"
+                aria-current={view === item.id ? "page" : undefined}
+                onClick={() => setView(item.id)}
+                title={`${item.label} (${MOD_KEY}${index + 1})`}
+              >
+                <span className="rail-indicator">
+                  {item.icon}
+                  {item.badge !== null && <span className="rail-badge">{item.badge}</span>}
+                </span>
+                <span className="rail-label">{item.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </nav>
 
@@ -763,9 +989,18 @@ export default function App() {
               onOpenPair={() => setShowPairDialog(true)}
               onChooseFiles={chooseFiles}
               onSendClipboard={handleSendClipboard}
+              onOpenCatalog={() => setShowCatalogDialog(true)}
+              onOpenClipboardHistory={() => setShowClipboardDialog(true)}
+              onOpenDesktopStream={() => setShowDesktopStreamDialog(true)}
+              isRinging={isRinging}
+              onToggleRing={handleToggleRing}
               textInput={textInput}
               onTextInputChange={setTextInput}
               onSendText={handleSendText}
+              handoffs={handoffs.filter((h) => !h.peerId || !selectedPeer || h.peerId === selectedPeer.fingerprint)}
+              onOpenHandoff={handleOpenHandoff}
+              onDismissHandoff={handleDismissHandoff}
+              onBroadcastHandoff={handleBroadcastHandoff}
               onConnect={(address) => selectedPeer && handleConnect(selectedPeer, address)}
               onReconnect={() => selectedPeer && handleReconnect(selectedPeer)}
               onDisconnect={() => selectedPeer && handleDisconnect(selectedPeer)}
@@ -776,6 +1011,10 @@ export default function App() {
               onError={showError}
               rowActions={rowActions}
               onNavigateHistory={() => setView("history")}
+              isLockdown={isLockdown}
+              onToggleLockdown={handleToggleLockdown}
+              queuedTransfers={queuedTransfers}
+              onClearQueuedTransfers={handleClearQueuedTransfers}
             />
           )}
 
@@ -809,8 +1048,14 @@ export default function App() {
               onAccentChange={setAccent}
               clipboardSync={clipboardSync}
               onClipboardSyncChange={setClipboardSync}
+              onOpenClipboardHistory={() => setShowClipboardDialog(true)}
               onError={showError}
               onOpenFolder={(folder) => rowActions.open(folder, false)}
+              isLockdown={isLockdown}
+              onToggleLockdown={handleToggleLockdown}
+              dropFolder={dropFolder}
+              onChooseDropFolder={handleChooseDropFolder}
+              onClearDropFolder={handleClearDropFolder}
             />
           )}
         </div>
@@ -821,9 +1066,13 @@ export default function App() {
           <div className="drop-target">
             <Upload size={40} strokeWidth={1.5} className="text-accent" />
             <p className="headline">
-              {selectedPeer?.isConnected ? `Drop to send to ${selectedPeer.displayName}` : "Connect your phone first"}
+              {selectedPeer
+                ? selectedPeer.isConnected
+                  ? `Drop to send to ${selectedPeer.displayName}`
+                  : `Drop to queue for ${selectedPeer.displayName}`
+                : "Connect your phone first"}
             </p>
-            {selectedPeer?.isConnected && dragCount > 0 && (
+            {selectedPeer && dragCount > 0 && (
               <p className="supporting">{dragCount === 1 ? "1 file" : `${dragCount} files`}</p>
             )}
           </div>
@@ -831,6 +1080,29 @@ export default function App() {
       )}
 
       {showPairDialog && <PairDialog onPaired={handlePaired} onClose={() => setShowPairDialog(false)} />}
+
+      {showCatalogDialog && selectedPeer && (
+        <CatalogDialog
+          peer={selectedPeer}
+          onClose={() => setShowCatalogDialog(false)}
+          onError={showError}
+        />
+      )}
+
+      {showDesktopStreamDialog && selectedPeer && (
+        <DesktopStreamDialog
+          peer={selectedPeer}
+          onClose={() => setShowDesktopStreamDialog(false)}
+          onError={showError}
+        />
+      )}
+
+      {showClipboardDialog && (
+        <ClipboardHistoryDialog
+          onClose={() => setShowClipboardDialog(false)}
+          onError={showError}
+        />
+      )}
 
       {toast && (
         <div className={`snackbar ${toast.tone}`} role={toast.tone === "error" ? "alert" : "status"}>
@@ -849,6 +1121,7 @@ interface RowActions {
   open: (path: string, reveal: boolean) => void;
   openLink: (url: string) => void;
   cancelIncoming: (transferId: string) => void;
+  handoffLink?: (url: string) => void;
 }
 
 /** Under a day heading (`underDay`), older rows show the time rather than repeat the day. */
@@ -924,9 +1197,21 @@ function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: bo
           </button>
         )}
         {link && (
-          <button type="button" className="btn btn-tonal btn-small" onClick={() => actions.openLink(link)}>
-            Open link
-          </button>
+          <>
+            <button type="button" className="btn btn-tonal btn-small" onClick={() => actions.openLink(link)}>
+              Open link
+            </button>
+            {actions.handoffLink && (
+              <button
+                type="button"
+                className="btn btn-tonal btn-small"
+                onClick={() => actions.handoffLink!(link)}
+                title="Continue reading on device"
+              >
+                Handoff
+              </button>
+            )}
+          </>
         )}
       </div>
     </li>
@@ -940,9 +1225,18 @@ interface HomeViewProps {
   onOpenPair: () => void;
   onChooseFiles: () => void;
   onSendClipboard: () => void;
+  onOpenCatalog: () => void;
+  onOpenClipboardHistory: () => void;
+  onOpenDesktopStream: () => void;
+  isRinging: boolean;
+  onToggleRing: () => void;
   textInput: string;
   onTextInputChange: (val: string) => void;
   onSendText: () => void;
+  handoffs: HandoffItem[];
+  onOpenHandoff: (item: HandoffItem) => void;
+  onDismissHandoff: (item: HandoffItem) => void;
+  onBroadcastHandoff: (url: string) => void;
   onConnect: (address: string) => void;
   onReconnect: () => void;
   onDisconnect: () => void;
@@ -953,10 +1247,35 @@ interface HomeViewProps {
   onNavigateHistory: () => void;
   notifications: PhoneNotification[];
   onError: (message: string) => void;
+  isLockdown: boolean;
+  onToggleLockdown: () => void;
+  queuedTransfers: QueuedTransfer[];
+  onClearQueuedTransfers: () => void;
 }
 
 function HomeView(props: HomeViewProps) {
-  const { peer, peers, onSelectPeer, onOpenPair, onChooseFiles, onSendClipboard, textInput } = props;
+  const {
+    peer,
+    peers,
+    onSelectPeer,
+    onOpenPair,
+    onChooseFiles,
+    onSendClipboard,
+    onOpenCatalog,
+    onOpenClipboardHistory,
+    onOpenDesktopStream,
+    isRinging,
+    onToggleRing,
+    textInput,
+    handoffs,
+    onOpenHandoff,
+    onDismissHandoff,
+    onBroadcastHandoff,
+    isLockdown,
+    onToggleLockdown,
+    queuedTransfers,
+    onClearQueuedTransfers,
+  } = props;
   const { onTextInputChange, onSendText, onConnect, onReconnect, onDisconnect, isConnecting } = props;
   const { activeTransfers, recentActivity, rowActions, onNavigateHistory, notifications, onError } = props;
 
@@ -982,17 +1301,27 @@ function HomeView(props: HomeViewProps) {
   return (
     <div className="home">
       <aside className="home-device">
-        <Smartphone size={56} strokeWidth={1.25} className={`device-icon ${online ? "online" : ""}`} />
-        <h1 className="display">{peer.displayName}</h1>
-        <ConnectionStatus peer={peer} />
-        <p className="supporting">
-          {online
-            ? "Drop or paste files anywhere in this window to send them."
-            : "It connects on its own when both are on the same Wi-Fi."}
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div className={`device-icon ${online ? "online" : ""}`}>
+            <Smartphone size={24} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+            <h2 className="title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {peer.displayName}
+            </h2>
+            <ConnectionStatus peer={peer} />
+          </div>
+        </div>
+
+        {peer.endpoint && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text-3)" }}>
+            <span className="mono" style={{ fontSize: 11 }}>{peer.endpoint}</span>
+          </div>
+        )}
+
         <div className="device-actions">
           {online ? (
-            <button type="button" className="btn btn-tonal" onClick={onDisconnect}>
+            <button type="button" className="btn btn-tonal btn-small" onClick={onDisconnect}>
               Disconnect
             </button>
           ) : (
@@ -1005,45 +1334,145 @@ function HomeView(props: HomeViewProps) {
             />
           )}
         </div>
+
         {peers.length > 1 && (
-          <div className="chips" role="radiogroup" aria-label="Device">
-            {peers.map((p) => (
-              <button
-                key={p.fingerprint}
-                type="button"
-                role="radio"
-                aria-checked={p.fingerprint === peer.fingerprint}
-                className="chip"
-                onClick={() => onSelectPeer(p.fingerprint)}
-              >
-                {p.displayName}
-              </button>
-            ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+            <span className="label">Other devices</span>
+            <div className="chips" role="radiogroup" aria-label="Device">
+              {peers.map((p) => (
+                <button
+                  key={p.fingerprint}
+                  type="button"
+                  role="radio"
+                  aria-checked={p.fingerprint === peer.fingerprint}
+                  className="chip"
+                  onClick={() => onSelectPeer(p.fingerprint)}
+                >
+                  {p.displayName}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </aside>
 
       <div className="home-main">
-        <section className="section">
-          {online && (
-            <div className="send-actions">
-              <button type="button" className="btn btn-filled btn-large" onClick={onChooseFiles} title={`${MOD_KEY}O`}>
-                <Upload size={20} />
-                Send files
+        {isLockdown && (
+          <section className="section" aria-label="Lockdown active">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 16,
+                padding: "14px 18px",
+                borderRadius: 16,
+                background: "color-mix(in srgb, var(--error) 12%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--error) 30%, transparent)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
+                <ShieldAlert size={22} style={{ color: "var(--error)", flexShrink: 0 }} />
+                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                  <span className="list-title" style={{ fontWeight: 600, fontSize: 14 }}>
+                    Lockdown mode active
+                  </span>
+                  <span className="list-sub wrap" style={{ fontSize: 13 }}>
+                    All permissions and transfers are paused.
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-tonal btn-small"
+                onClick={onToggleLockdown}
+              >
+                Turn off
               </button>
+            </div>
+          </section>
+        )}
+
+        {queuedTransfers.length > 0 && (
+          <section className="section" aria-label="Queued transfers">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 16,
+                padding: "14px 18px",
+                borderRadius: 16,
+                background: "var(--fill)",
+                border: "1px solid var(--line)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flex: 1 }}>
+                <Clock size={20} style={{ color: "var(--text-2)", flexShrink: 0 }} />
+                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                  <span className="list-title" style={{ fontWeight: 600, fontSize: 14 }}>
+                    {queuedTransfers.length === 1
+                      ? "1 item queued"
+                      : `${queuedTransfers.length} items queued`}
+                  </span>
+                  <span className="list-sub" style={{ fontSize: 13 }}>
+                    Will send automatically when {peer.displayName} connects.
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-tonal btn-small"
+                onClick={onClearQueuedTransfers}
+              >
+                Clear
+              </button>
+            </div>
+          </section>
+        )}
+
+        {online && handoffs.length > 0 && (
+          <section className="section" aria-label="Continue where you left off">
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {handoffs.map((item) => (
+                <HandoffCard
+                  key={item.handoffId}
+                  item={item}
+                  peerName={peer.displayName}
+                  onOpen={onOpenHandoff}
+                  onDismiss={onDismissHandoff}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="section" aria-label="Transfer and quick send">
+          <div className="send-actions">
+            <button
+              type="button"
+              className="btn btn-filled btn-large"
+              onClick={onChooseFiles}
+              title={`${MOD_KEY}O`}
+            >
+              <Upload size={18} />
+              {online ? "Send files" : `Queue files for ${peer.displayName}`}
+            </button>
+            {online && (
               <button
                 type="button"
                 className="btn btn-tonal btn-large"
                 onClick={onSendClipboard}
                 title={`${MOD_SHIFT_KEY}V`}
               >
-                <ClipboardPaste size={20} />
+                <ClipboardPaste size={18} />
                 Send clipboard
               </button>
-            </div>
-          )}
+            )}
+          </div>
+
           <form
-            className={`composer ${online ? "" : "disabled"}`}
+            className="composer"
             onSubmit={(e) => {
               e.preventDefault();
               onSendText();
@@ -1052,15 +1481,93 @@ function HomeView(props: HomeViewProps) {
             <input
               value={textInput}
               onChange={(e) => onTextInputChange(e.target.value)}
-              placeholder={online ? `Send text to ${peer.displayName}` : "Connect to send text"}
+              placeholder={online ? `Send text or link to ${peer.displayName}...` : `Queue text for ${peer.displayName}...`}
               aria-label="Text to send"
-              disabled={!online}
             />
-            <button type="submit" className="composer-send" disabled={!online || !textInput.trim()} aria-label="Send">
-              <ArrowUp size={22} />
+            {online && linkIn(textInput) && (
+              <button
+                type="button"
+                className="btn btn-tonal btn-small"
+                onClick={() => {
+                  const link = linkIn(textInput);
+                  if (link) {
+                    onBroadcastHandoff(link);
+                    onTextInputChange("");
+                  }
+                }}
+                title="Send as active browser tab on phone"
+              >
+                Handoff
+              </button>
+            )}
+            <button type="submit" className="composer-send" disabled={!textInput.trim()} aria-label="Send">
+              <ArrowUp size={20} />
             </button>
           </form>
         </section>
+
+        {online && (
+          <section className="continuity-hub" aria-label="Continuity features">
+            <span className="label">Continuity Suite</span>
+            <div className="continuity-deck">
+              <button
+                type="button"
+                className="capability-card"
+                onClick={onOpenCatalog}
+              >
+                <div className="capability-icon">
+                  <FolderOpen size={18} />
+                </div>
+                <div>
+                  <div className="capability-title">Browse Device</div>
+                  <div className="capability-sub">Photos, docs & explorer mount</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                className="capability-card"
+                onClick={onOpenDesktopStream}
+              >
+                <div className="capability-icon">
+                  <Monitor size={18} />
+                </div>
+                <div>
+                  <div className="capability-title">Desktop Mode</div>
+                  <div className="capability-sub">Stream apps & DeX workspace</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                className="capability-card"
+                onClick={onOpenClipboardHistory}
+              >
+                <div className="capability-icon">
+                  <History size={18} />
+                </div>
+                <div>
+                  <div className="capability-title">Clipboard History</div>
+                  <div className="capability-sub">Search pinned text & links</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                className="capability-card"
+                onClick={onToggleRing}
+              >
+                <div className="capability-icon" style={isRinging ? { color: "var(--error)" } : undefined}>
+                  {isRinging ? <BellOff size={18} /> : <Bell size={18} />}
+                </div>
+                <div>
+                  <div className="capability-title">{isRinging ? "Stop Alarm" : "Find Device"}</div>
+                  <div className="capability-sub">{isRinging ? "Alarm is sounding" : "Play sound to locate"}</div>
+                </div>
+              </button>
+            </div>
+          </section>
+        )}
 
         {online && notifications.length > 0 && (
           <section className="section">
@@ -1355,12 +1862,18 @@ interface SettingsViewProps {
   identity: DeviceIdentity | null;
   clipboardSync: boolean;
   onClipboardSyncChange: (on: boolean) => void;
+  onOpenClipboardHistory: () => void;
   onError: (message: string) => void;
   onOpenFolder: (folder: string) => void;
   theme: Theme;
   accent: AccentName;
   onThemeChange: (theme: Theme) => void;
   onAccentChange: (accent: AccentName) => void;
+  isLockdown: boolean;
+  onToggleLockdown: () => void;
+  dropFolder: string | null;
+  onChooseDropFolder: () => void;
+  onClearDropFolder: () => void;
 }
 
 const THEME_OPTIONS = [
@@ -1370,7 +1883,22 @@ const THEME_OPTIONS = [
 ] as const;
 
 function SettingsView(props: SettingsViewProps) {
-  const { identity, theme, accent, onThemeChange, onAccentChange, clipboardSync, onClipboardSyncChange, onError } = props;
+  const {
+    identity,
+    theme,
+    accent,
+    onThemeChange,
+    onAccentChange,
+    clipboardSync,
+    onClipboardSyncChange,
+    onOpenClipboardHistory,
+    onError,
+    isLockdown,
+    onToggleLockdown,
+    dropFolder,
+    onChooseDropFolder,
+    onClearDropFolder,
+  } = props;
   const { onOpenFolder } = props;
   const [appVersion, setAppVersion] = useState("");
   const [startAtLogin, setStartAtLogin] = useState(false);
@@ -1476,6 +2004,55 @@ function SettingsView(props: SettingsViewProps) {
             </button>
           </div>
         </li>
+        <li className="list-item">
+          <div className="list-text">
+            <span className="list-title">Drop folder</span>
+            <span className="list-sub wrap" title={dropFolder ?? undefined}>
+              {dropFolder
+                ? dropFolder
+                : "Files added to this folder are sent automatically to connected devices."}
+            </span>
+          </div>
+          <div className="list-trailing">
+            {dropFolder ? (
+              <>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="Open drop folder"
+                  onClick={() => onOpenFolder(dropFolder)}
+                >
+                  <FolderOpen size={18} />
+                </button>
+                <button type="button" className="btn btn-tonal btn-small" onClick={onChooseDropFolder}>
+                  Change
+                </button>
+                <button type="button" className="btn btn-text btn-small" onClick={onClearDropFolder}>
+                  Disable
+                </button>
+              </>
+            ) : (
+              <button type="button" className="btn btn-tonal btn-small" onClick={onChooseDropFolder}>
+                Choose folder
+              </button>
+            )}
+          </div>
+        </li>
+      </ul>
+
+      <h2 className="label">Privacy & security</h2>
+      <ul className="list">
+        <li className="list-item">
+          <div className="list-text">
+            <span className="list-title" id="lockdown-mode-label">
+              Lockdown mode
+            </span>
+            <span className="list-sub wrap">
+              Pause all incoming and outgoing transfers and capability requests immediately.
+            </span>
+          </div>
+          <Switch labelledBy="lockdown-mode-label" checked={isLockdown} onChange={onToggleLockdown} />
+        </li>
       </ul>
 
       <h2 className="label">Clipboard</h2>
@@ -1491,6 +2068,15 @@ function SettingsView(props: SettingsViewProps) {
             </span>
           </div>
           <Switch labelledBy="clipboard-sync-label" checked={clipboardSync} onChange={onClipboardSyncChange} />
+        </li>
+        <li className="list-item">
+          <div className="list-text">
+            <span className="list-title">History</span>
+            <span className="list-sub">View, search, and pin saved clipboard snippets</span>
+          </div>
+          <button type="button" className="btn btn-tonal btn-small" onClick={onOpenClipboardHistory}>
+            View history
+          </button>
         </li>
       </ul>
 

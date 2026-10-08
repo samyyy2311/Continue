@@ -32,6 +32,9 @@ notifications = { path = "../../../crates/notifications" }
 history = { path = "../../../crates/history" }
 device = { path = "../../../crates/device" }
 transfer = { path = "../../../crates/transfer" }
+clipboard = { path = "../../../crates/clipboard" }
+capabilities = { path = "../../../crates/capabilities" }
+base64 = "0.22"
 parking_lot = "0.12"
 zeroize = "1"
 tracing = "0.1"

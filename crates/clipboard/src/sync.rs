@@ -50,6 +50,30 @@ impl ClipboardSynchronizer {
         lock.contains(hash)
     }
 
+    pub async fn send_guarded_update<I, S>(
+        &self,
+        stream: &mut quinn::SendStream,
+        recv_stream: &mut quinn::RecvStream,
+        format: ClipboardFormat,
+        payload: Vec<u8>,
+        available_formats: I,
+        query: &CapabilityQuery,
+    ) -> Result<ClipboardAck, ClipboardError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        if matches!(
+            crate::guard::evaluate_clipboard_formats(available_formats),
+            crate::guard::SensitiveGuardDecision::DropSensitive
+        ) {
+            return Err(ClipboardError::SensitiveExcluded);
+        }
+
+        self.send_update(stream, recv_stream, format, payload, query)
+            .await
+    }
+
     pub async fn send_update(
         &self,
         stream: &mut quinn::SendStream,

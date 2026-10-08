@@ -20,12 +20,17 @@ use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
+use capabilities::CapabilityQuery;
+use clipboard::history::ClipboardHistoryStore;
 use device::{ConnectError, Device, PairError, SendError, Stores};
 use history::{Direction, HistoryStore, Kind};
 use pairing::DeviceKeys;
 use permissions::PermissionState;
+use protocol::v1::{CatalogQuery, PcAction, PcActionRequest, RingRequest, ThumbnailRequest};
 use protocol::CapabilityId;
 use sessions::{PermissionDecision, SessionState};
+use transfer::drop_folder::{DropFolderConfig, DropFolderWatcher};
+use transfer::queue::{OfflineTransferQueue, QueuedPayload, QueuedTransfer};
 use transfer::TransferError;
 
 /// Logs what actually went wrong and gives the UI a sentence a person can act on.
@@ -107,6 +112,62 @@ pub struct DesktopRuntimeState {
     incoming: sessions::IncomingFiles,
     clipboard: ClipboardSync,
     batteries: Batteries,
+    clipboard_history: Arc<ClipboardHistoryStore>,
+    cloud_mounts: Arc<Mutex<HashMap<String, Arc<transfer::CloudFilesMount>>>>,
+    active_handoffs: Arc<Mutex<HashMap<String, HandoffItemDto>>>,
+    offline_queue: Arc<transfer::queue::OfflineTransferQueue>,
+    drop_folder: Arc<Mutex<Option<PathBuf>>>,
+    active_desktop_streams: Arc<Mutex<HashMap<String, DesktopStreamSession>>>,
+}
+
+#[derive(Clone)]
+pub struct DesktopStreamSession {
+    pub session_id: String,
+    pub peer_fingerprint: String,
+    pub package_name: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub dpi: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopStreamInfoDto {
+    pub session_id: String,
+    pub peer_fingerprint: String,
+    pub package_name: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub dpi: u32,
+    pub status: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopInputDto {
+    pub session_id: String,
+    pub event_type: String,
+    pub x: u32,
+    pub y: u32,
+    pub button: Option<u32>,
+    pub key_code: Option<u32>,
+    pub scroll_dx: Option<i32>,
+    pub scroll_dy: Option<i32>,
+    pub key_text: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffItemDto {
+    pub handoff_id: String,
+    pub peer_id: String,
+    pub source_device_id: String,
+    pub handoff_type: i32,
+    pub title: String,
+    pub uri: String,
+    pub scroll_ratio: f32,
+    pub cursor_position: u64,
+    pub timestamp_ms: u64,
 }
 
 #[derive(Serialize)]
@@ -320,11 +381,15 @@ fn shown_name(name: String) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn session_handlers(
     download_dir: PathBuf,
     stores: &Stores,
     pending_answers: PendingAnswers,
     clipboard: ClipboardSync,
+    clipboard_history: Arc<ClipboardHistoryStore>,
+    active_handoffs: Arc<Mutex<HashMap<String, HandoffItemDto>>>,
+    active_desktop_streams: Arc<Mutex<HashMap<String, DesktopStreamSession>>>,
     app_handle: &AppHandle,
 ) -> sessions::SessionCapabilityHandlers {
     let mut handlers = sessions::SessionCapabilityHandlers::new(download_dir)
@@ -365,11 +430,17 @@ fn session_handlers(
         );
     }));
 
-    let (app, texts) = (app_handle.clone(), stores.clone());
+    let (app, texts, history_store) = (app_handle.clone(), stores.clone(), clipboard_history);
     handlers.on_clipboard_received = Some(Arc::new(move |peer, update| {
         let text = String::from_utf8_lossy(&update.payload).into_owned();
         clipboard.write(text.clone());
         let name = texts.received_text(peer, &text).peer_name;
+        let _ = history_store.record_clip(
+            protocol::v1::ClipboardFormat::TextPlain,
+            &text,
+            &name,
+            None::<[&str; 0]>,
+        );
         notify_if_away(
             &app,
             &format!("Copied text from {}", shown_name(name.clone())),
@@ -415,6 +486,58 @@ fn session_handlers(
         }
         // Only the phone carries out button presses.
         notifications::Body::Action(_) => {}
+    }));
+
+    let (app, handoffs_store) = (app_handle.clone(), active_handoffs.clone());
+    handlers.on_handoff_received = Some(Arc::new(move |peer, item| {
+        let dto = HandoffItemDto {
+            handoff_id: item.handoff_id.clone(),
+            peer_id: peer.to_string(),
+            source_device_id: item.source_device_id,
+            handoff_type: item.handoff_type,
+            title: item.title,
+            uri: item.uri,
+            scroll_ratio: item.scroll_ratio,
+            cursor_position: item.cursor_position,
+            timestamp_ms: item.timestamp_ms,
+        };
+        handoffs_store.lock().insert(item.handoff_id.clone(), dto.clone());
+        let _ = app.emit("handoff-received", dto);
+    }));
+
+    let (app, handoffs_store) = (app_handle.clone(), active_handoffs);
+    handlers.on_handoff_dismissed = Some(Arc::new(move |_peer, handoff_id| {
+        handoffs_store.lock().remove(&handoff_id);
+        let _ = app.emit("handoff-dismissed", handoff_id);
+    }));
+
+    let (streams_for_ctl, app_for_ctl) = (active_desktop_streams.clone(), app_handle.clone());
+    handlers.on_desktop_control = Some(Arc::new(move |_peer, ctl| {
+        if ctl.action == protocol::v1::DesktopControlAction::DesktopControlStop as i32 {
+            streams_for_ctl.lock().remove(&ctl.session_id);
+            let _ = app_for_ctl.emit("desktop-stream-stopped", &ctl.session_id);
+        }
+        protocol::v1::DesktopStreamAck {
+            session_id: ctl.session_id,
+            success: true,
+            error_message: String::new(),
+        }
+    }));
+
+    let app_for_frame = app_handle.clone();
+    handlers.on_desktop_frame = Some(Arc::new(move |_peer, frame| {
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&frame.data);
+        let _ = app_for_frame.emit(
+            "desktop-stream-frame",
+            serde_json::json!({
+                "sessionId": frame.session_id,
+                "frameIndex": frame.frame_index,
+                "timestampUs": frame.timestamp_us,
+                "isKeyframe": frame.is_keyframe,
+                "data": b64,
+            }),
+        );
     }));
 
     handlers
@@ -515,7 +638,7 @@ fn permission_prompt(
         let _ = app_handle.emit("permission-request", question);
 
         let (pending, app) = (pending_answers.clone(), app_handle.clone());
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             tokio::time::sleep_until(request.deadline).await;
             if pending.lock().remove(&id).is_some() {
                 let _ = app.emit("permission-request-closed", id);
@@ -558,6 +681,56 @@ fn pending_permission_questions(state: State<DesktopRuntimeState>) -> Vec<Permis
     questions
 }
 
+async fn flush_offline_transfers(
+    app: &AppHandle,
+    state: &DesktopRuntimeState,
+    peer_fingerprint: &str,
+) {
+    let queued = state.offline_queue.drain_for_peer(peer_fingerprint);
+    if queued.is_empty() {
+        return;
+    }
+    let _ = app.emit("queued-transfers-changed", peer_fingerprint);
+    for item in queued {
+        match item.payload {
+            QueuedPayload::File { path, .. } => {
+                let location = Some(path.to_string_lossy().into_owned());
+                let _ = state
+                    .device
+                    .send_file(peer_fingerprint, &path, location, None::<fn(u64, u64)>)
+                    .await;
+            }
+            QueuedPayload::Clipboard { content, .. } => {
+                if let Ok(text) = String::from_utf8(content) {
+                    let _ = push_text(&state.device, peer_fingerprint, text).await;
+                }
+            }
+            QueuedPayload::Handoff { uri, title } => {
+                if let Some(mux) = state.device.sessions.get(peer_fingerprint) {
+                    let query = CapabilityQuery::negotiated(CapabilityId::HANDOFF, true);
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    let handoff_item = protocol::v1::HandoffItem {
+                        handoff_id: format!("h-{now_ms}"),
+                        source_device_id: computer_name(),
+                        handoff_type: 1,
+                        title: title.unwrap_or_else(|| uri.clone()),
+                        uri,
+                        scroll_ratio: 0.0,
+                        cursor_position: 0,
+                        timestamp_ms: now_ms,
+                        extra_payload: Vec::new(),
+                    };
+                    let _ = mux.broadcast_handoff_to_peer(handoff_item, &query).await;
+                }
+            }
+        }
+    }
+    let _ = app.emit("queued-transfers-changed", peer_fingerprint);
+}
+
 fn session_state_listener(
     app_handle: AppHandle,
     stores: Stores,
@@ -582,6 +755,14 @@ fn session_state_listener(
                     "displayName": name,
                 }),
             );
+            let app = app_handle.clone();
+            let peer_fp = peer.to_string();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                if let Some(state) = app.try_state::<DesktopRuntimeState>() {
+                    flush_offline_transfers(&app, &state, &peer_fp).await;
+                }
+            });
         }
     })
 }
@@ -716,6 +897,7 @@ fn get_permissions(
         CapabilityId::FILE_TRANSFER,
         CapabilityId::CLIPBOARD,
         CapabilityId::NOTIFICATIONS,
+        CapabilityId::DESKTOP_STREAM,
     ]
     .into_iter()
     .map(|capability| {
@@ -847,7 +1029,14 @@ struct SyncedTextDto {
 
 /// Sends what was just copied here to every connected device.
 fn send_copied_text(app: &AppHandle, text: String) {
-    let device = app.state::<DesktopRuntimeState>().device.clone();
+    let state = app.state::<DesktopRuntimeState>();
+    let _ = state.clipboard_history.record_clip(
+        protocol::v1::ClipboardFormat::TextPlain,
+        &text,
+        "This PC",
+        None::<[&str; 0]>,
+    );
+    let device = state.device.clone();
     let peers = device.stores.trust.list_peers().unwrap_or_default();
     for peer in peers
         .into_iter()
@@ -937,6 +1126,692 @@ async fn push_text(device: &Device, peer: &str, text: String) -> Result<(), Stri
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogItemDto {
+    pub id: String,
+    pub name: String,
+    pub size_bytes: u64,
+    pub timestamp: u64,
+    pub mime_type: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogResponseDto {
+    pub items: Vec<CatalogItemDto>,
+    pub total_count: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardHistoryEntryDto {
+    pub id: i64,
+    pub timestamp_ms: u64,
+    pub content: String,
+    pub is_pinned: bool,
+    pub origin_device: String,
+}
+
+#[tauri::command]
+async fn ring_peer(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    active: bool,
+) -> Result<bool, String> {
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
+    let query = CapabilityQuery::negotiated(CapabilityId::RING_DEVICE, true);
+    let request = RingRequest {
+        active,
+        duration_secs: 30,
+        force_max_volume: true,
+    };
+    let ack = mux
+        .trigger_ring_on_peer(request, &query)
+        .await
+        .map_err(user_error("Couldn't ring device."))?;
+    Ok(ack.is_ringing)
+}
+
+#[tauri::command]
+async fn send_pc_action(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    action: i32,
+) -> Result<bool, String> {
+    let pc_action = match action {
+        0 => PcAction::LockWorkstation,
+        1 => PcAction::SleepSystem,
+        2 => PcAction::ShutdownSystem,
+        3 => PcAction::ToggleMute,
+        _ => return Err("Invalid PC action".to_string()),
+    };
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
+    let query = CapabilityQuery::negotiated(CapabilityId::PC_CONTROL, true);
+    let request = PcActionRequest {
+        action: pc_action as i32,
+        force: false,
+    };
+    let resp = mux
+        .send_pc_action_to_peer(request, &query)
+        .await
+        .map_err(user_error("Couldn't execute PC action."))?;
+    Ok(resp.success)
+}
+
+#[tauri::command]
+async fn query_file_catalog(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    category: i32,
+    limit: u32,
+    offset: u32,
+) -> Result<CatalogResponseDto, String> {
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
+    let query = CapabilityQuery::negotiated(CapabilityId::FILE_CATALOG, true);
+    let req = CatalogQuery {
+        category,
+        limit,
+        offset,
+    };
+    let resp = mux
+        .query_file_catalog_from_peer(req, &query)
+        .await
+        .map_err(user_error("Couldn't browse files on device."))?;
+    Ok(CatalogResponseDto {
+        items: resp
+            .items
+            .into_iter()
+            .map(|item| CatalogItemDto {
+                id: item.item_id,
+                name: item.file_name,
+                size_bytes: item.size_bytes,
+                timestamp: item.timestamp,
+                mime_type: item.mime_type,
+            })
+            .collect(),
+        total_count: resp.total_count,
+    })
+}
+
+#[tauri::command]
+async fn get_catalog_thumbnail(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    item_id: String,
+    max_edge: u32,
+) -> Result<String, String> {
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
+    let query = CapabilityQuery::negotiated(CapabilityId::FILE_CATALOG, true);
+    let req = ThumbnailRequest {
+        item_id,
+        max_dimension: max_edge,
+    };
+    let resp = mux
+        .request_thumbnail_from_peer(req, &query)
+        .await
+        .map_err(user_error("Couldn't load thumbnail."))?;
+    use base64::engine::general_purpose::STANDARD as BASE64;
+    use base64::Engine;
+    let b64 = BASE64.encode(&resp.image_data);
+    let mime = if resp.mime_type.is_empty() {
+        "image/jpeg"
+    } else {
+        &resp.mime_type
+    };
+    Ok(format!("data:{mime};base64,{b64}"))
+}
+
+#[tauri::command]
+async fn mount_cloud_files(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Result<String, String> {
+    let peer_name = state.device.stores.peer_name(&peer_fingerprint);
+    let base_dir = std::env::var("USERPROFILE")
+        .map(PathBuf::from)
+        .or_else(|_| app.path().home_dir())
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let mount_path = base_dir
+        .join("Continue")
+        .join(shown_name(peer_name.clone()));
+    let _ = std::fs::create_dir_all(&mount_path);
+
+    let config = transfer::CloudFilesConfig::new(
+        &mount_path,
+        "Continue",
+        shown_name(peer_name),
+        &peer_fingerprint,
+    );
+
+    let mount = Arc::new(transfer::CloudFilesMount::new(config));
+    if transfer::CloudFilesMount::is_supported() {
+        let _ = mount.register();
+
+        if let Some(mux) = state.device.sessions.get(&peer_fingerprint) {
+            let query = CapabilityQuery::negotiated(CapabilityId::FILE_CATALOG, true);
+            let req = CatalogQuery {
+                category: 0,
+                limit: 100,
+                offset: 0,
+            };
+            if let Ok(catalog) = mux.query_file_catalog_from_peer(req, &query).await {
+                let entries: Vec<transfer::CloudFilesEntry> = catalog
+                    .items
+                    .into_iter()
+                    .map(|item| {
+                        transfer::CloudFilesEntry::file(
+                            item.file_name,
+                            item.size_bytes,
+                            item.timestamp,
+                            item.item_id.into_bytes(),
+                        )
+                    })
+                    .collect();
+                let _ = mount.create_placeholders(&entries);
+            }
+        }
+    }
+
+    state.cloud_mounts.lock().insert(peer_fingerprint, mount);
+    let path_str = mount_path.to_string_lossy().into_owned();
+    let _ = app.opener().open_path(&path_str, None::<&str>);
+    Ok(path_str)
+}
+
+#[tauri::command]
+fn open_cloud_files_folder(
+    app: AppHandle,
+    state: State<DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Result<(), String> {
+    let peer_name = state.device.stores.peer_name(&peer_fingerprint);
+    let base_dir = std::env::var("USERPROFILE")
+        .map(PathBuf::from)
+        .or_else(|_| app.path().home_dir())
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let mount_path = base_dir.join("Continue").join(shown_name(peer_name));
+    app.opener()
+        .open_path(mount_path.to_string_lossy(), None::<&str>)
+        .map_err(user_error("Couldn't open folder."))
+}
+
+#[tauri::command]
+fn get_clipboard_history(
+    state: State<DesktopRuntimeState>,
+    limit: u32,
+) -> Result<Vec<ClipboardHistoryEntryDto>, String> {
+    let clips = state
+        .clipboard_history
+        .list_clips(limit.max(1))
+        .map_err(user_error("Couldn't load clipboard history."))?;
+    Ok(clips
+        .into_iter()
+        .map(|c| ClipboardHistoryEntryDto {
+            id: c.id,
+            timestamp_ms: c.timestamp_ms,
+            content: c.content,
+            is_pinned: c.is_pinned,
+            origin_device: c.origin_device,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn pin_clipboard_clip(
+    state: State<DesktopRuntimeState>,
+    id: i64,
+    pinned: bool,
+) -> Result<bool, String> {
+    state
+        .clipboard_history
+        .pin_clip(id, pinned)
+        .map_err(user_error("Couldn't pin clip."))
+}
+
+#[tauri::command]
+fn delete_clipboard_clip(state: State<DesktopRuntimeState>, id: i64) -> Result<bool, String> {
+    state
+        .clipboard_history
+        .delete_clip(id)
+        .map_err(user_error("Couldn't delete clip."))
+}
+
+#[tauri::command]
+fn clear_clipboard_history(state: State<DesktopRuntimeState>) -> Result<usize, String> {
+    state
+        .clipboard_history
+        .clear_unpinned()
+        .map_err(user_error("Couldn't clear clipboard history."))
+}
+
+#[tauri::command]
+fn get_active_handoffs(state: State<DesktopRuntimeState>) -> Vec<HandoffItemDto> {
+    state.active_handoffs.lock().values().cloned().collect()
+}
+
+#[tauri::command]
+async fn broadcast_handoff(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    title: String,
+    uri: String,
+    handoff_type: i32,
+    scroll_ratio: f32,
+) -> Result<bool, String> {
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
+    let query = CapabilityQuery::negotiated(CapabilityId::HANDOFF, true);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let handoff_id = format!("h-{now_ms}");
+    let item = protocol::v1::HandoffItem {
+        handoff_id,
+        source_device_id: computer_name(),
+        handoff_type,
+        title,
+        uri,
+        scroll_ratio,
+        cursor_position: 0,
+        timestamp_ms: now_ms,
+        extra_payload: Vec::new(),
+    };
+    let ack = mux
+        .broadcast_handoff_to_peer(item, &query)
+        .await
+        .map_err(user_error("Couldn't send handoff to device."))?;
+    Ok(ack.success)
+}
+
+#[tauri::command]
+async fn dismiss_handoff(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    handoff_id: String,
+) -> Result<bool, String> {
+    state.active_handoffs.lock().remove(&handoff_id);
+    if let Some(mux) = state.device.sessions.get(&peer_fingerprint) {
+        let query = CapabilityQuery::negotiated(CapabilityId::HANDOFF, true);
+        let _ = mux.dismiss_handoff_on_peer(handoff_id, &query).await;
+    }
+    Ok(true)
+}
+
+#[tauri::command]
+async fn open_handoff(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    handoff_id: String,
+    uri: String,
+) -> Result<(), String> {
+    state.active_handoffs.lock().remove(&handoff_id);
+    let _ = app.opener().open_url(&uri, None::<&str>);
+    if let Some(mux) = state.device.sessions.get(&peer_fingerprint) {
+        let query = CapabilityQuery::negotiated(CapabilityId::HANDOFF, true);
+        let _ = mux.dismiss_handoff_on_peer(handoff_id, &query).await;
+    }
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedTransferDto {
+    pub id: String,
+    pub peer_id: String,
+    pub kind: String,
+    pub label: String,
+    pub queued_at: u64,
+}
+
+impl From<&QueuedTransfer> for QueuedTransferDto {
+    fn from(q: &QueuedTransfer) -> Self {
+        let (kind, label) = match &q.payload {
+            QueuedPayload::File { relative_name, .. } => {
+                ("file".to_string(), relative_name.clone())
+            }
+            QueuedPayload::Clipboard { content, .. } => {
+                let text = String::from_utf8_lossy(content).to_string();
+                ("text".to_string(), text)
+            }
+            QueuedPayload::Handoff { uri, title } => {
+                ("handoff".to_string(), title.clone().unwrap_or_else(|| uri.clone()))
+            }
+        };
+        Self {
+            id: q.id.clone(),
+            peer_id: q.peer_fingerprint.clone(),
+            kind,
+            label,
+            queued_at: q.queued_at,
+        }
+    }
+}
+
+#[tauri::command]
+fn queue_offline_file(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    file_path: String,
+) -> Result<String, String> {
+    let path = PathBuf::from(&file_path);
+    let relative_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
+    let payload = QueuedPayload::File {
+        path,
+        relative_name,
+        mime_type: None,
+    };
+    let id = state
+        .offline_queue
+        .enqueue(&peer_fingerprint, payload)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("queued-transfers-changed", &peer_fingerprint);
+    Ok(id)
+}
+
+#[tauri::command]
+fn queue_offline_text(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    text: String,
+) -> Result<String, String> {
+    let payload = QueuedPayload::Clipboard {
+        content: text.into_bytes(),
+        mime_type: "text/plain".to_string(),
+    };
+    let id = state
+        .offline_queue
+        .enqueue(&peer_fingerprint, payload)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("queued-transfers-changed", &peer_fingerprint);
+    Ok(id)
+}
+
+#[tauri::command]
+fn get_queued_transfers(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> Vec<QueuedTransferDto> {
+    state
+        .offline_queue
+        .peek_for_peer(&peer_fingerprint)
+        .iter()
+        .map(QueuedTransferDto::from)
+        .collect()
+}
+
+#[tauri::command]
+fn remove_queued_transfer(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    item_id: String,
+) -> bool {
+    let removed = state.offline_queue.remove_item(&peer_fingerprint, &item_id);
+    if removed {
+        let _ = app.emit("queued-transfers-changed", &peer_fingerprint);
+    }
+    removed
+}
+
+#[tauri::command]
+fn clear_queued_transfers(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+) -> usize {
+    let cleared = state.offline_queue.clear_peer(&peer_fingerprint);
+    if cleared > 0 {
+        let _ = app.emit("queued-transfers-changed", &peer_fingerprint);
+    }
+    cleared
+}
+
+#[tauri::command]
+fn set_lockdown_mode(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    active: bool,
+) {
+    state.device.stores.permissions.set_lockdown(active);
+    let _ = app.emit("lockdown-changed", active);
+}
+
+#[tauri::command]
+fn is_lockdown_mode(state: State<'_, DesktopRuntimeState>) -> bool {
+    state.device.stores.permissions.is_locked_down()
+}
+
+#[tauri::command]
+fn get_drop_folder(state: State<'_, DesktopRuntimeState>) -> Option<String> {
+    state
+        .drop_folder
+        .lock()
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn set_drop_folder(
+    state: State<'_, DesktopRuntimeState>,
+    folder_path: Option<String>,
+) -> Result<(), String> {
+    let mut lock = state.drop_folder.lock();
+    *lock = folder_path.map(PathBuf::from);
+    Ok(())
+}
+
+#[tauri::command]
+async fn start_desktop_stream(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    package_name: Option<String>,
+    width: u32,
+    height: u32,
+    dpi: u32,
+) -> Result<DesktopStreamInfoDto, String> {
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| "Peer is not connected".to_string())?;
+
+    if state.device.stores.permissions.is_locked_down() {
+        return Err("Device is in lockdown mode".into());
+    }
+    let grant = state
+        .device
+        .stores
+        .permissions
+        .query_state(&peer_fingerprint, CapabilityId::DESKTOP_STREAM)
+        .unwrap_or(PermissionState::Allow);
+    if grant == PermissionState::Deny {
+        return Err("Desktop streaming capability is blocked for this peer".into());
+    }
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let session_id = format!("dstream-{now_ms}");
+
+    let req = protocol::v1::DesktopStreamStartRequest {
+        session_id: session_id.clone(),
+        target_package_name: package_name.clone().unwrap_or_default(),
+        requested_width: width,
+        requested_height: height,
+        requested_dpi: dpi,
+        max_fps: 60,
+        preferred_codec: protocol::v1::StreamCodec::H264 as i32,
+    };
+
+    let query = CapabilityQuery::negotiated(CapabilityId::DESKTOP_STREAM, true);
+    let resp = mux
+        .start_desktop_stream_on_peer(req, &query)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let info = DesktopStreamInfoDto {
+        session_id: session_id.clone(),
+        peer_fingerprint: peer_fingerprint.clone(),
+        package_name: package_name.clone(),
+        width: if resp.actual_width > 0 {
+            resp.actual_width
+        } else {
+            width
+        },
+        height: if resp.actual_height > 0 {
+            resp.actual_height
+        } else {
+            height
+        },
+        dpi: if resp.actual_dpi > 0 {
+            resp.actual_dpi
+        } else {
+            dpi
+        },
+        status: "active".into(),
+    };
+
+    let session = DesktopStreamSession {
+        session_id: session_id.clone(),
+        peer_fingerprint,
+        package_name,
+        width: info.width,
+        height: info.height,
+        dpi: info.dpi,
+    };
+
+    state.active_desktop_streams.lock().insert(session_id, session);
+    let _ = app.emit("desktop-stream-started", &info);
+
+    Ok(info)
+}
+
+#[tauri::command]
+async fn stop_desktop_stream(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    session_id: String,
+) -> Result<(), String> {
+    let session = state.active_desktop_streams.lock().remove(&session_id);
+
+    if let Some(sess) = session {
+        if let Some(mux) = state.device.sessions.get(&sess.peer_fingerprint) {
+            let ctl = protocol::v1::DesktopStreamControl {
+                session_id: session_id.clone(),
+                action: protocol::v1::DesktopControlAction::DesktopControlStop as i32,
+                new_width: 0,
+                new_height: 0,
+                new_dpi: 0,
+            };
+            let query = CapabilityQuery::negotiated(CapabilityId::DESKTOP_STREAM, true);
+            let _ = mux.send_desktop_control_to_peer(ctl, &query).await;
+        }
+        let _ = app.emit("desktop-stream-stopped", &session_id);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn send_desktop_input(
+    state: State<'_, DesktopRuntimeState>,
+    event: DesktopInputDto,
+) -> Result<(), String> {
+    let peer_fingerprint = {
+        let lock = state.active_desktop_streams.lock();
+        let sess = lock
+            .get(&event.session_id)
+            .ok_or("Stream session not found")?;
+        sess.peer_fingerprint.clone()
+    };
+
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| "Peer is not connected".to_string())?;
+
+    let event_type = match event.event_type.as_str() {
+        "pointer_down" => protocol::v1::DesktopInputEventType::DesktopInputPointerDown as i32,
+        "pointer_up" => protocol::v1::DesktopInputEventType::DesktopInputPointerUp as i32,
+        "pointer_move" => protocol::v1::DesktopInputEventType::DesktopInputPointerMove as i32,
+        "scroll" => protocol::v1::DesktopInputEventType::DesktopInputScroll as i32,
+        "key_down" => protocol::v1::DesktopInputEventType::DesktopInputKeyDown as i32,
+        "key_up" => protocol::v1::DesktopInputEventType::DesktopInputKeyUp as i32,
+        _ => protocol::v1::DesktopInputEventType::DesktopInputUnspecified as i32,
+    };
+
+    let input_event = protocol::v1::DesktopInputEvent {
+        session_id: event.session_id,
+        event_type,
+        x: event.x,
+        y: event.y,
+        button: event.button.unwrap_or(0),
+        key_code: event.key_code.unwrap_or(0),
+        scroll_dx: event.scroll_dx.unwrap_or(0),
+        scroll_dy: event.scroll_dy.unwrap_or(0),
+        key_text: event.key_text.unwrap_or_default(),
+    };
+
+    let query = CapabilityQuery::negotiated(CapabilityId::DESKTOP_STREAM, true);
+    mux.send_desktop_input_to_peer(input_event, &query)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_active_desktop_streams(
+    state: State<'_, DesktopRuntimeState>,
+) -> Vec<DesktopStreamInfoDto> {
+    state
+        .active_desktop_streams
+        .lock()
+        .values()
+        .map(|s| DesktopStreamInfoDto {
+            session_id: s.session_id.clone(),
+            peer_fingerprint: s.peer_fingerprint.clone(),
+            package_name: s.package_name.clone(),
+            width: s.width,
+            height: s.height,
+            dpi: s.dpi,
+            status: "active".into(),
+        })
+        .collect()
+}
+
 fn initialize_desktop_runtime(
     app_handle: &AppHandle,
     db_path: &Path,
@@ -946,6 +1821,59 @@ fn initialize_desktop_runtime(
 ) -> Result<DesktopRuntimeState, Box<dyn std::error::Error>> {
     let stores = Stores::open(db_path)?;
     let keys = DeviceKeys::load_or_create(&secrets::device_key_store(secrets_dir)?)?;
+    let clipboard_history = Arc::new(ClipboardHistoryStore::open(
+        db_path.with_file_name("continue_clipboard.db"),
+    )?);
+    let cloud_mounts = Arc::new(Mutex::new(HashMap::new()));
+    let active_handoffs = Arc::new(Mutex::new(HashMap::new()));
+    let offline_queue = Arc::new(OfflineTransferQueue::new());
+    let drop_folder: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
+    let active_desktop_streams: Arc<Mutex<HashMap<String, DesktopStreamSession>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
+    let (offline_queue_for_drop, drop_folder_for_loop, app_for_drop) = (
+        offline_queue.clone(),
+        drop_folder.clone(),
+        app_handle.clone(),
+    );
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+            let folder_opt = drop_folder_for_loop.lock().clone();
+            if let Some(folder) = folder_opt {
+                if folder.is_dir() {
+                    if let Some(state) = app_for_drop.try_state::<DesktopRuntimeState>() {
+                        let connected_peer = state
+                            .device
+                            .stores
+                            .trust
+                            .list_peers()
+                            .ok()
+                            .and_then(|peers| {
+                                peers
+                                    .into_iter()
+                                    .find(|p| state.device.sessions.get(&p.fingerprint).is_some())
+                            });
+                        if let Some(peer) = connected_peer {
+                            let config = DropFolderConfig::new(
+                                folder.clone(),
+                                peer.fingerprint.clone(),
+                            );
+                            let watcher = DropFolderWatcher::new(
+                                config,
+                                offline_queue_for_drop.clone(),
+                            );
+                            if let Ok(enqueued) = watcher.scan_directory() {
+                                if !enqueued.is_empty() {
+                                    flush_offline_transfers(&app_for_drop, &state, &peer.fingerprint).await;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
 
     let pending_answers = PendingAnswers::default();
     let connected = Arc::new(tray::Connected::default());
@@ -954,6 +1882,9 @@ fn initialize_desktop_runtime(
         &stores,
         pending_answers.clone(),
         clipboard.clone(),
+        clipboard_history.clone(),
+        active_handoffs.clone(),
+        active_desktop_streams.clone(),
         app_handle,
     );
     handlers.on_device_info = Some(device_info_listener(
@@ -979,6 +1910,12 @@ fn initialize_desktop_runtime(
         incoming,
         clipboard,
         batteries,
+        clipboard_history,
+        cloud_mounts,
+        active_handoffs,
+        offline_queue,
+        drop_folder,
+        active_desktop_streams,
     })
 }
 
@@ -1051,7 +1988,13 @@ fn main() {
                 tracing::warn!("No tray icon, so closing the window will quit: {error}");
             }
             start_at_login_by_default(app.handle(), &app_data);
-            if !std::env::args().any(|arg| arg == BACKGROUND_ARG) {
+            if std::env::args().any(|arg| arg == BACKGROUND_ARG) {
+                tracing::info!("Startup: in background mode (--background)");
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            } else {
+                tracing::info!("Startup: in foreground mode, calling tray::show_window");
                 tray::show_window(app.handle());
             }
             Ok(())
@@ -1085,7 +2028,34 @@ fn main() {
             send_file_to_peer,
             send_clipboard_text,
             press_notification_button,
-            dismiss_notification
+            dismiss_notification,
+            ring_peer,
+            send_pc_action,
+            query_file_catalog,
+            get_catalog_thumbnail,
+            mount_cloud_files,
+            open_cloud_files_folder,
+            get_clipboard_history,
+            pin_clipboard_clip,
+            delete_clipboard_clip,
+            clear_clipboard_history,
+            get_active_handoffs,
+            broadcast_handoff,
+            dismiss_handoff,
+            open_handoff,
+            queue_offline_file,
+            queue_offline_text,
+            get_queued_transfers,
+            remove_queued_transfer,
+            clear_queued_transfers,
+            set_lockdown_mode,
+            is_lockdown_mode,
+            get_drop_folder,
+            set_drop_folder,
+            start_desktop_stream,
+            stop_desktop_stream,
+            send_desktop_input,
+            get_active_desktop_streams
         ])
         // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
         .on_window_event(|window, event| {

@@ -112,7 +112,44 @@ export const PERMISSIONS: Record<number, { label: string; description: string }>
   1: { label: "Files", description: "Send files to this computer" },
   2: { label: "Text", description: "Send copied text and links" },
   3: { label: "Notifications", description: "Show its notifications here" },
+  6: { label: "Handoff", description: "Pick up open tabs, links, and documents" },
+  8: { label: "Ring device", description: "Sound alarm to locate misplaced device" },
+  9: { label: "PC control", description: "Remote lock, sleep, or mute control" },
+  10: { label: "Remote typing", description: "Dictation and keyboard input from phone" },
+  11: { label: "Macro deck", description: "Custom quick action shortcuts from phone" },
+  12: { label: "File catalog", description: "Browse photos, documents, and mount files" },
+  13: { label: "Desktop stream", description: "Stream phone apps or desktop workspace to PC" },
 };
+
+export interface DesktopStreamInfo {
+  sessionId: string;
+  peerFingerprint: string;
+  packageName?: string;
+  width: number;
+  height: number;
+  dpi: number;
+  status: string;
+}
+
+export interface DesktopInputEventDto {
+  sessionId: string;
+  eventType: "pointer_down" | "pointer_up" | "pointer_move" | "scroll" | "key_down" | "key_up";
+  x: number;
+  y: number;
+  button?: number;
+  keyCode?: number;
+  scrollDx?: number;
+  scrollDy?: number;
+  keyText?: string;
+}
+
+export interface DesktopStreamFrameEvent {
+  sessionId: string;
+  frameIndex: number;
+  timestampUs: number;
+  isKeyframe: boolean;
+  data: string;
+}
 
 /** A notification from the phone, to read and act on here. */
 export interface PhoneNotification {
@@ -137,4 +174,60 @@ export const isMac =
 
 export const MOD_KEY = isMac ? "⌘" : "Ctrl+";
 export const MOD_SHIFT_KEY = isMac ? "⌘⇧" : "Ctrl+Shift+";
+
+export enum CatalogCategory {
+  Unspecified = 0,
+  Photos = 1,
+  Screenshots = 2,
+  Downloads = 3,
+  Documents = 4,
+}
+
+export interface CatalogItem {
+  id: string;
+  name: string;
+  sizeBytes: number;
+  timestamp: number;
+  mimeType: string;
+}
+
+export interface CatalogResponse {
+  items: CatalogItem[];
+  totalCount: number;
+}
+
+export interface ClipboardHistoryItem {
+  id: number;
+  timestampMs: number;
+  content: string;
+  isPinned: boolean;
+  originDevice: string;
+}
+
+export enum HandoffType {
+  Unspecified = 0,
+  Url = 1,
+  Document = 2,
+  Map = 3,
+}
+
+export interface HandoffItem {
+  handoffId: string;
+  peerId: string;
+  sourceDeviceId: string;
+  handoffType: HandoffType;
+  title: string;
+  uri: string;
+  scrollRatio: number;
+  cursorPosition: number;
+  timestampMs: number;
+}
+
+export interface QueuedTransfer {
+  id: string;
+  peerId: string;
+  kind: "file" | "text" | "handoff";
+  label: string;
+  queuedAt: number;
+}
 

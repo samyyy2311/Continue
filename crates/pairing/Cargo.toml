@@ -18,6 +18,13 @@ ed25519-dalek = { workspace = true }
 x25519-dalek = { workspace = true }
 zeroize = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net", "io-util", "sync", "time"] }
+sha2 = { workspace = true }
+hkdf = { workspace = true }
+rand = { workspace = true }
+subtle = "2"
 
 [dev-dependencies]
-rand = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+
+

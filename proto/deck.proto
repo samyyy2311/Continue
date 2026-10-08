@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package continue.v1;
+
+message DeckTileConfig {
+  string tile_id = 1;
+  string label = 2;
+  string icon = 3;
+  string action_command = 4;
+}
+
+message DeckLayoutSync {
+  repeated DeckTileConfig tiles = 1;
+}
+
+message DeckTriggerEvent {
+  string tile_id = 1;
+}
+
+message DeckAck {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message DeckEnvelope {
+  oneof payload {
+    DeckLayoutSync layout = 1;
+    DeckTriggerEvent trigger = 2;
+    DeckAck ack = 3;
+  }
+}

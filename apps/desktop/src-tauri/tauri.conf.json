@@ -4,14 +4,15 @@
   "version": "0.1.0",
   "identifier": "in.caffeinelabs.continue.desktop",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Continue",
         "width": 1040,
         "height": 720,
@@ -19,7 +20,7 @@
         "minHeight": 520,
         "resizable": true,
         "fullscreen": false,
-        "visible": false
+        "visible": true
       }
     ],
     "security": {

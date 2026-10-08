@@ -1,0 +1,105 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+enum DesktopStreamStatus {
+  DESKTOP_STREAM_STATUS_UNSPECIFIED = 0;
+  DESKTOP_STREAM_STATUS_ACTIVE      = 1;
+  DESKTOP_STREAM_STATUS_DECLINED    = 2;
+  DESKTOP_STREAM_STATUS_BUSY        = 3;
+  DESKTOP_STREAM_STATUS_UNSUPPORTED = 4;
+  DESKTOP_STREAM_STATUS_STOPPED     = 5;
+  DESKTOP_STREAM_STATUS_ERROR       = 6;
+}
+
+enum StreamCodec {
+  STREAM_CODEC_UNSPECIFIED = 0;
+  STREAM_CODEC_H264        = 1;
+  STREAM_CODEC_VP8         = 2;
+  STREAM_CODEC_RAW_RGBA    = 3;
+}
+
+message DesktopStreamStartRequest {
+  string       session_id          = 1;
+  string       target_package_name = 2;
+  uint32       requested_width     = 3;
+  uint32       requested_height    = 4;
+  uint32       requested_dpi       = 5;
+  uint32       max_fps             = 6;
+  StreamCodec  preferred_codec     = 7;
+}
+
+message DesktopStreamStartResponse {
+  string               session_id     = 1;
+  DesktopStreamStatus  status         = 2;
+  string               error_message  = 3;
+  uint32               actual_width   = 4;
+  uint32               actual_height  = 5;
+  uint32               actual_dpi     = 6;
+  StreamCodec          selected_codec = 7;
+  uint32               display_id     = 8;
+}
+
+enum DesktopInputEventType {
+  DESKTOP_INPUT_UNSPECIFIED  = 0;
+  DESKTOP_INPUT_POINTER_DOWN = 1;
+  DESKTOP_INPUT_POINTER_UP   = 2;
+  DESKTOP_INPUT_POINTER_MOVE = 3;
+  DESKTOP_INPUT_SCROLL       = 4;
+  DESKTOP_INPUT_KEY_DOWN     = 5;
+  DESKTOP_INPUT_KEY_UP       = 6;
+}
+
+message DesktopInputEvent {
+  string                session_id = 1;
+  DesktopInputEventType event_type = 2;
+  uint32                x          = 3;
+  uint32                y          = 4;
+  uint32                button     = 5;
+  uint32                key_code   = 6;
+  int32                 scroll_dx  = 7;
+  int32                 scroll_dy  = 8;
+  string                key_text   = 9;
+}
+
+enum DesktopControlAction {
+  DESKTOP_CONTROL_UNSPECIFIED      = 0;
+  DESKTOP_CONTROL_STOP             = 1;
+  DESKTOP_CONTROL_REQUEST_KEYFRAME = 2;
+  DESKTOP_CONTROL_RESIZE           = 3;
+}
+
+message DesktopStreamControl {
+  string               session_id = 1;
+  DesktopControlAction action     = 2;
+  uint32               new_width  = 3;
+  uint32               new_height = 4;
+  uint32               new_dpi    = 5;
+}
+
+message DesktopStreamFrame {
+  string session_id   = 1;
+  uint64 frame_index  = 2;
+  uint64 timestamp_us = 3;
+  bool   is_keyframe  = 4;
+  bytes  data         = 5;
+}
+
+message DesktopStreamAck {
+  string session_id    = 1;
+  bool   success       = 2;
+  string error_message = 3;
+}
+
+message DesktopStreamEnvelope {
+  oneof payload {
+    DesktopStreamStartRequest  start_request  = 1;
+    DesktopStreamStartResponse start_response = 2;
+    DesktopInputEvent          input_event    = 3;
+    DesktopStreamControl       control        = 4;
+    DesktopStreamFrame         frame          = 5;
+    DesktopStreamAck           ack            = 6;
+  }
+}

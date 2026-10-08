@@ -27,7 +27,7 @@ pub const MAX_DEVICE_NAME_BYTES: usize = 64;
 
 /// Byte length of the pairing session token.
 ///
-/// Distinct from SHA256_DIGEST_LEN — this is 16 bytes, not 32.
+/// Distinct from SHA256_DIGEST_LEN: this is 16 bytes, not 32.
 pub const SESSION_TOKEN_LEN: usize = 16;
 
 /// Maximum active pairing session lifetime in seconds.
@@ -59,6 +59,73 @@ pub const MAX_FRAME_CLIPBOARD_BYTES: usize = 1024 * 1024;
 
 /// Notification messages.
 pub const MAX_FRAME_NOTIFICATION_BYTES: usize = 64 * 1024;
+
+/// Media capture control messages.
+pub const MAX_FRAME_MEDIA_CAPTURE_BYTES: usize = 64 * 1024;
+
+/// Media control messages (commands, metadata, artwork).
+pub const MAX_FRAME_MEDIA_CONTROL_BYTES: usize = 256 * 1024;
+
+/// Handoff continuity messages (URI, state, document context).
+pub const MAX_FRAME_HANDOFF_BYTES: usize = 64 * 1024;
+
+/// Maximum UTF-8 byte length for a handoff target URI.
+pub const MAX_HANDOFF_URI_BYTES: usize = 4 * 1024;
+
+/// Maximum UTF-8 byte length for a handoff title.
+pub const MAX_HANDOFF_TITLE_BYTES: usize = 512;
+
+/// Telemetry messages (battery, radio state).
+pub const MAX_FRAME_TELEMETRY_BYTES: usize = 16 * 1024;
+
+/// Ring device / Find My Phone control messages.
+pub const MAX_FRAME_RING_BYTES: usize = 16 * 1024;
+
+/// PC remote control actions and response messages.
+pub const MAX_FRAME_PC_CONTROL_BYTES: usize = 16 * 1024;
+
+/// Remote input (dictation / text typing) message frame size.
+pub const MAX_FRAME_REMOTE_INPUT_BYTES: usize = 16 * 1024;
+
+/// Maximum UTF-8 byte length for a single remote text input chunk.
+pub const MAX_REMOTE_INPUT_TEXT_BYTES: usize = 8 * 1024;
+
+/// Deck configuration and layout sync message frame size.
+pub const MAX_FRAME_DECK_BYTES: usize = 64 * 1024;
+
+/// Maximum number of tiles supported in a deck layout.
+pub const MAX_DECK_TILES: usize = 64;
+
+/// Maximum UTF-8 byte length for a deck tile ID.
+pub const MAX_DECK_TILE_ID_BYTES: usize = 128;
+
+/// Maximum UTF-8 byte length for a deck tile label.
+pub const MAX_DECK_LABEL_BYTES: usize = 256;
+
+// File catalog & thumbnails
+
+/// File catalog query and response message frame size.
+pub const MAX_FRAME_CATALOG_BYTES: usize = 256 * 1024;
+
+/// Thumbnail image response message frame size.
+pub const MAX_FRAME_THUMBNAIL_BYTES: usize = 1024 * 1024;
+
+/// Maximum items returned in a single catalog query page.
+pub const MAX_CATALOG_PAGE_SIZE: u32 = 250;
+
+/// Maximum UTF-8 byte length for a catalog item ID.
+pub const MAX_CATALOG_ITEM_ID_BYTES: usize = 128;
+
+// Desktop & App Streaming
+
+/// Maximum frame size for desktop streaming envelopes (frames, input, controls).
+pub const MAX_FRAME_DESKTOP_STREAM_BYTES: usize = 2 * 1024 * 1024;
+
+/// Maximum UTF-8 byte length for a stream session ID.
+pub const MAX_STREAM_SESSION_ID_BYTES: usize = 64;
+
+/// Maximum UTF-8 byte length for a target package name.
+pub const MAX_STREAM_PACKAGE_NAME_BYTES: usize = 256;
 
 // File transfer
 

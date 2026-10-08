@@ -15,7 +15,7 @@ use crate::error::CryptoError;
 
 type HmacSha256 = Hmac<Sha256>;
 
-// Domain separators — ASCII, fixed length, version-tagged.
+// Domain separators: ASCII, fixed length, version-tagged.
 // Role separation prevents reflection attacks.
 const DOMAIN_INIT: &[u8] = b"PAIRING_V1_INIT";
 const DOMAIN_RESP: &[u8] = b"PAIRING_V1_RESP";

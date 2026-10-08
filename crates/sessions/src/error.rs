@@ -22,4 +22,28 @@ pub enum SessionError {
 
     #[error("Unexpected session envelope payload")]
     UnexpectedMessage,
+
+    #[error("Capability error: {0}")]
+    Capability(#[from] capabilities::CapabilityError),
+
+    #[error("Media control rejected: {0}")]
+    MediaControlRejected(String),
+
+    #[error("Handoff rejected: {0}")]
+    HandoffRejected(String),
+
+    #[error("Handoff validation failed: {0}")]
+    HandoffValidation(String),
+
+    #[error("Remote input validation failed: {0}")]
+    RemoteInputValidation(String),
+
+    #[error("Deck validation failed: {0}")]
+    DeckValidation(String),
+
+    #[error("Catalog validation failed: {0}")]
+    CatalogValidation(String),
+
+    #[error("Desktop stream validation failed: {0}")]
+    DesktopStreamValidation(String),
 }

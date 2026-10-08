@@ -13,9 +13,18 @@ use notifications::Body as NotificationBody;
 use protocol::CapabilityId;
 use transfer::{receive_file, send_file, ReceivedFile};
 
+use crate::catalog::CatalogDispatcher;
+use crate::deck::DeckDispatcher;
+use crate::desktop_stream::DesktopStreamDispatcher;
 use crate::device::{PeerDevice, ThisDevice};
+use crate::handoff::HandoffDispatcher;
 use crate::incoming::{IncomingFiles, SaveFolder};
+use crate::media_control::MediaControlDispatcher;
 use crate::multiplexer::{OnPeerUpdate, PeerUpdate, SessionMultiplexer};
+use crate::pc_control::PcControlDispatcher;
+use crate::remote_input::RemoteInputDispatcher;
+use crate::ring::RingDispatcher;
+use crate::telemetry::TelemetryDispatcher;
 
 /// How long a question waits for the user before it counts as declined.
 pub const PROMPT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -47,17 +56,84 @@ pub type PermissionPrompt =
 
 /// Called with the sender's fingerprint and what it sent.
 pub type OnReceived<T> = Arc<dyn Fn(&str, T) + Send + Sync>;
+pub type MediaCommandHandler = Arc<
+    dyn Fn(&str, protocol::v1::MediaCommandRequest) -> protocol::v1::MediaCommandResponse
+        + Send
+        + Sync,
+>;
+pub type RingHandler =
+    Arc<dyn Fn(&str, protocol::v1::RingRequest) -> protocol::v1::RingAck + Send + Sync>;
+pub type PcActionHandler = Arc<
+    dyn Fn(&str, protocol::v1::PcActionRequest) -> protocol::v1::PcActionResponse + Send + Sync,
+>;
+pub type RemoteInputHandler =
+    Arc<dyn Fn(&str, protocol::v1::TextInputChunk) -> protocol::v1::RemoteInputAck + Send + Sync>;
+pub type DeckLayoutHandler =
+    Arc<dyn Fn(&str, protocol::v1::DeckLayoutSync) -> protocol::v1::DeckAck + Send + Sync>;
+pub type DeckTriggerHandler =
+    Arc<dyn Fn(&str, protocol::v1::DeckTriggerEvent) -> protocol::v1::DeckAck + Send + Sync>;
+pub type CatalogQueryHandler =
+    Arc<dyn Fn(&str, protocol::v1::CatalogQuery) -> protocol::v1::CatalogResponse + Send + Sync>;
+pub type ThumbnailRequestHandler = Arc<
+    dyn Fn(&str, protocol::v1::ThumbnailRequest) -> protocol::v1::ThumbnailResponse + Send + Sync,
+>;
+pub type DesktopStreamStartHandler = Arc<
+    dyn Fn(
+            &str,
+            protocol::v1::DesktopStreamStartRequest,
+        ) -> protocol::v1::DesktopStreamStartResponse
+        + Send
+        + Sync,
+>;
+pub type DesktopInputHandler = Arc<
+    dyn Fn(&str, protocol::v1::DesktopInputEvent) -> protocol::v1::DesktopStreamAck
+        + Send
+        + Sync,
+>;
+pub type DesktopControlHandler = Arc<
+    dyn Fn(&str, protocol::v1::DesktopStreamControl) -> protocol::v1::DesktopStreamAck
+        + Send
+        + Sync,
+>;
+pub type DesktopStreamFrameHandler = Arc<
+    dyn Fn(&str, protocol::v1::DesktopStreamFrame) + Send + Sync,
+>;
 
 /// Callbacks and configuration for active capabilities over a multiplexed session.
 #[derive(Clone)]
 pub struct SessionCapabilityHandlers {
     pub save_folder: SaveFolder,
     pub incoming: IncomingFiles,
+    pub media_control_dispatcher: Arc<MediaControlDispatcher>,
+    pub handoff_dispatcher: Arc<HandoffDispatcher>,
+    pub telemetry_dispatcher: Arc<TelemetryDispatcher>,
+    pub ring_dispatcher: Arc<RingDispatcher>,
+    pub pc_control_dispatcher: Arc<PcControlDispatcher>,
+    pub remote_input_dispatcher: Arc<RemoteInputDispatcher>,
+    pub deck_dispatcher: Arc<DeckDispatcher>,
+    pub catalog_dispatcher: Arc<CatalogDispatcher>,
+    pub desktop_stream_dispatcher: Arc<DesktopStreamDispatcher>,
     pub on_file_received: Option<OnReceived<ReceivedFile>>,
     pub on_clipboard_received: Option<OnReceived<ClipboardUpdate>>,
     /// Called with notifications the peer shows here, and with replies to and dismissals of
     /// the ones this device sent it.
     pub on_notification: Option<OnReceived<NotificationBody>>,
+    pub on_media_status_received: Option<OnReceived<protocol::v1::MediaStatusUpdate>>,
+    pub on_media_command_received: Option<MediaCommandHandler>,
+    pub on_handoff_received: Option<OnReceived<protocol::v1::HandoffItem>>,
+    pub on_handoff_dismissed: Option<OnReceived<String>>,
+    pub on_telemetry_received: Option<OnReceived<protocol::v1::DeviceTelemetry>>,
+    pub on_ring_requested: Option<RingHandler>,
+    pub on_pc_action_requested: Option<PcActionHandler>,
+    pub on_remote_input: Option<RemoteInputHandler>,
+    pub on_deck_layout_synced: Option<DeckLayoutHandler>,
+    pub on_deck_tile_triggered: Option<DeckTriggerHandler>,
+    pub on_catalog_query: Option<CatalogQueryHandler>,
+    pub on_thumbnail_request: Option<ThumbnailRequestHandler>,
+    pub on_desktop_stream_start: Option<DesktopStreamStartHandler>,
+    pub on_desktop_input: Option<DesktopInputHandler>,
+    pub on_desktop_control: Option<DesktopControlHandler>,
+    pub on_desktop_frame: Option<DesktopStreamFrameHandler>,
     /// How this device introduces itself to peers.
     pub this_device: ThisDevice,
     /// Called with what a peer says about itself each time a session starts.
@@ -76,9 +152,34 @@ impl SessionCapabilityHandlers {
         Self {
             save_folder: SaveFolder::new(save_folder),
             incoming: IncomingFiles::default(),
+            media_control_dispatcher: Arc::new(MediaControlDispatcher::new()),
+            handoff_dispatcher: Arc::new(HandoffDispatcher::new()),
+            telemetry_dispatcher: Arc::new(TelemetryDispatcher::new()),
+            ring_dispatcher: Arc::new(RingDispatcher::new()),
+            pc_control_dispatcher: Arc::new(PcControlDispatcher::new()),
+            remote_input_dispatcher: Arc::new(RemoteInputDispatcher::new()),
+            deck_dispatcher: Arc::new(DeckDispatcher::new()),
+            catalog_dispatcher: Arc::new(CatalogDispatcher::new()),
+            desktop_stream_dispatcher: Arc::new(DesktopStreamDispatcher::new()),
             on_file_received: None,
             on_clipboard_received: None,
             on_notification: None,
+            on_media_status_received: None,
+            on_media_command_received: None,
+            on_handoff_received: None,
+            on_handoff_dismissed: None,
+            on_telemetry_received: None,
+            on_ring_requested: None,
+            on_pc_action_requested: None,
+            on_remote_input: None,
+            on_deck_layout_synced: None,
+            on_deck_tile_triggered: None,
+            on_catalog_query: None,
+            on_thumbnail_request: None,
+            on_desktop_stream_start: None,
+            on_desktop_input: None,
+            on_desktop_control: None,
+            on_desktop_frame: None,
             this_device: ThisDevice::default(),
             on_device_info: None,
             on_device_status: None,
@@ -339,6 +440,420 @@ pub fn spawn_capabilities_dispatcher(
                         }
                         let _ = notifications::acknowledge(&mut stream.send_stream, allowed).await;
                     }
+                    CapabilityId::MEDIA_CONTROL => {
+                        debug!("Handling incoming media control stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::MEDIA_CONTROL, None).await;
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::MEDIA_CONTROL, is_permitted);
+
+                        let on_status = handlers.on_media_status_received.clone();
+                        let on_command = handlers.on_media_command_received.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .media_control_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |cmd| {
+                                    if let Some(ref cb) = on_command {
+                                        cb(&peer, cmd)
+                                    } else {
+                                        protocol::v1::MediaCommandResponse {
+                                            command_id: cmd.command_id,
+                                            success: false,
+                                            error_message: "Media command not handled".into(),
+                                        }
+                                    }
+                                },
+                                |stat| {
+                                    if let Some(ref cb) = on_status {
+                                        cb(&peer, stat);
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process media control stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::HANDOFF => {
+                        debug!("Handling incoming handoff stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::HANDOFF, None).await;
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::HANDOFF, is_permitted);
+
+                        let on_received = handlers.on_handoff_received.clone();
+                        let on_dismissed = handlers.on_handoff_dismissed.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .handoff_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |item| {
+                                    if let Some(ref cb) = on_received {
+                                        cb(&peer, item);
+                                    }
+                                    Ok(())
+                                },
+                                |dismiss_id| {
+                                    if let Some(ref cb) = on_dismissed {
+                                        cb(&peer, dismiss_id);
+                                    }
+                                    Ok(())
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process handoff stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::TELEMETRY => {
+                        debug!("Handling incoming telemetry stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::TELEMETRY, None).await;
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::TELEMETRY, is_permitted);
+
+                        let on_received = handlers.on_telemetry_received.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .telemetry_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |telemetry| {
+                                    if let Some(ref cb) = on_received {
+                                        cb(&peer, telemetry);
+                                    }
+                                    Ok(())
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process telemetry stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::RING_DEVICE => {
+                        debug!("Handling incoming ring device stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::RING_DEVICE, None).await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::RING_DEVICE);
+                            }
+                        }
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::RING_DEVICE, is_permitted);
+
+                        let on_ring = handlers.on_ring_requested.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .ring_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |req| {
+                                    if let Some(ref cb) = on_ring {
+                                        cb(&peer, req)
+                                    } else {
+                                        protocol::v1::RingAck {
+                                            is_ringing: false,
+                                            status_message: "Ring request not handled".into(),
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process ring stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::PC_CONTROL => {
+                        debug!("Handling incoming PC control stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::PC_CONTROL, None).await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::PC_CONTROL);
+                            }
+                        }
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::PC_CONTROL, is_permitted);
+
+                        let on_action = handlers.on_pc_action_requested.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .pc_control_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |req| {
+                                    if let Some(ref cb) = on_action {
+                                        cb(&peer, req)
+                                    } else {
+                                        protocol::v1::PcActionResponse {
+                                            success: false,
+                                            error_message: "PC control action not handled".into(),
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process PC control stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::REMOTE_INPUT => {
+                        debug!("Handling incoming remote input stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::REMOTE_INPUT, None).await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::REMOTE_INPUT);
+                            }
+                        }
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::REMOTE_INPUT, is_permitted);
+
+                        let on_chunk = handlers.on_remote_input.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .remote_input_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |chunk| {
+                                    if let Some(ref cb) = on_chunk {
+                                        cb(&peer, chunk)
+                                    } else {
+                                        protocol::v1::RemoteInputAck {
+                                            success: false,
+                                            error_message: "Remote input not handled".into(),
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process remote input stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::DECK => {
+                        debug!("Handling incoming deck stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::DECK, None).await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::DECK);
+                            }
+                        }
+
+                        let query = CapabilityQuery::negotiated(CapabilityId::DECK, is_permitted);
+
+                        let on_layout = handlers.on_deck_layout_synced.clone();
+                        let on_trigger = handlers.on_deck_tile_triggered.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .deck_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |layout| {
+                                    if let Some(ref cb) = on_layout {
+                                        cb(&peer, layout)
+                                    } else {
+                                        protocol::v1::DeckAck {
+                                            success: false,
+                                            error_message: "Deck layout sync not handled".into(),
+                                        }
+                                    }
+                                },
+                                |trigger| {
+                                    if let Some(ref cb) = on_trigger {
+                                        cb(&peer, trigger)
+                                    } else {
+                                        protocol::v1::DeckAck {
+                                            success: false,
+                                            error_message: "Deck tile trigger not handled".into(),
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process deck stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::FILE_CATALOG => {
+                        debug!("Handling incoming file catalog stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::FILE_CATALOG, None).await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::FILE_CATALOG);
+                            }
+                        }
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::FILE_CATALOG, is_permitted);
+
+                        let on_query = handlers.on_catalog_query.clone();
+                        let on_thumb = handlers.on_thumbnail_request.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .catalog_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |q| {
+                                    if let Some(ref cb) = on_query {
+                                        cb(&peer, q)
+                                    } else {
+                                        protocol::v1::CatalogResponse {
+                                            items: Vec::new(),
+                                            total_count: 0,
+                                        }
+                                    }
+                                },
+                                |req| {
+                                    if let Some(ref cb) = on_thumb {
+                                        cb(&peer, req)
+                                    } else {
+                                        protocol::v1::ThumbnailResponse {
+                                            item_id: req.item_id,
+                                            image_data: Vec::new(),
+                                            mime_type: String::new(),
+                                            success: false,
+                                            error_message: "Thumbnail requests not handled".into(),
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process file catalog stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::DESKTOP_STREAM => {
+                        debug!("Handling incoming desktop stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::DESKTOP_STREAM, None)
+                                .await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::DESKTOP_STREAM);
+                            }
+                        }
+
+                        let query = CapabilityQuery::negotiated(
+                            CapabilityId::DESKTOP_STREAM,
+                            is_permitted,
+                        );
+
+                        let on_start = handlers.on_desktop_stream_start.clone();
+                        let on_input = handlers.on_desktop_input.clone();
+                        let on_ctl = handlers.on_desktop_control.clone();
+                        let on_frame = handlers.on_desktop_frame.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .desktop_stream_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |req| {
+                                    if let Some(ref cb) = on_start {
+                                        cb(&peer, req)
+                                    } else {
+                                        protocol::v1::DesktopStreamStartResponse {
+                                            session_id: req.session_id,
+                                            status: protocol::v1::DesktopStreamStatus::Unsupported
+                                                as i32,
+                                            error_message:
+                                                "Desktop streaming not supported on this host"
+                                                    .into(),
+                                            actual_width: 0,
+                                            actual_height: 0,
+                                            actual_dpi: 0,
+                                            selected_codec: 0,
+                                            display_id: 0,
+                                        }
+                                    }
+                                },
+                                |input| {
+                                    if let Some(ref cb) = on_input {
+                                        cb(&peer, input)
+                                    } else {
+                                        protocol::v1::DesktopStreamAck {
+                                            session_id: input.session_id,
+                                            success: false,
+                                            error_message: "Desktop input not handled".into(),
+                                        }
+                                    }
+                                },
+                                |ctl| {
+                                    if let Some(ref cb) = on_ctl {
+                                        cb(&peer, ctl)
+                                    } else {
+                                        protocol::v1::DesktopStreamAck {
+                                            session_id: ctl.session_id,
+                                            success: false,
+                                            error_message: "Desktop control not handled".into(),
+                                        }
+                                    }
+                                },
+                                |frame| {
+                                    if let Some(ref cb) = on_frame {
+                                        cb(&peer, frame);
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process desktop stream from {peer_fp}: {e}");
+                        }
+                    }
                     unknown => {
                         debug!("Received unsupported capability stream {unknown:?} from {peer_fp}");
                     }
@@ -394,5 +909,229 @@ impl SessionMultiplexer {
             .map_err(notifications::NotificationError::Transport)?;
 
         notifications::send(&mut send, &mut recv, body, query).await
+    }
+
+    pub async fn send_media_command_to_peer(
+        &self,
+        command: protocol::v1::MediaCommandRequest,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::MediaCommandResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::MEDIA_CONTROL)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = MediaControlDispatcher::new();
+        dispatcher
+            .send_command(&mut send, &mut recv, command, query)
+            .await
+    }
+
+    pub async fn publish_media_status_to_peer(
+        &self,
+        update: protocol::v1::MediaStatusUpdate,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::MediaCommandResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::MEDIA_CONTROL)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = MediaControlDispatcher::new();
+        dispatcher
+            .publish_status(&mut send, &mut recv, update, query)
+            .await
+    }
+
+    pub async fn trigger_ring_on_peer(
+        &self,
+        request: protocol::v1::RingRequest,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::RingAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::RING_DEVICE)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = RingDispatcher::new();
+        dispatcher
+            .trigger_ring(&mut send, &mut recv, request, query)
+            .await
+    }
+
+    pub async fn send_pc_action_to_peer(
+        &self,
+        request: protocol::v1::PcActionRequest,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::PcActionResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::PC_CONTROL)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = PcControlDispatcher::new();
+        dispatcher
+            .send_action(&mut send, &mut recv, request, query)
+            .await
+    }
+
+    pub async fn send_remote_input_chunk_to_peer(
+        &self,
+        chunk: protocol::v1::TextInputChunk,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::RemoteInputAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::REMOTE_INPUT)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = RemoteInputDispatcher::new();
+        dispatcher
+            .send_chunk(&mut send, &mut recv, chunk, query)
+            .await
+    }
+
+    pub async fn sync_deck_layout_to_peer(
+        &self,
+        layout: protocol::v1::DeckLayoutSync,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::DeckAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::DECK)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = DeckDispatcher::new();
+        dispatcher
+            .sync_layout(&mut send, &mut recv, layout, query)
+            .await
+    }
+
+    pub async fn trigger_deck_tile_on_peer(
+        &self,
+        trigger: protocol::v1::DeckTriggerEvent,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::DeckAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::DECK)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = DeckDispatcher::new();
+        dispatcher
+            .trigger_tile(&mut send, &mut recv, trigger, query)
+            .await
+    }
+
+    pub async fn query_file_catalog_from_peer(
+        &self,
+        query: protocol::v1::CatalogQuery,
+        capability_query: &CapabilityQuery,
+    ) -> Result<protocol::v1::CatalogResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::FILE_CATALOG)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = CatalogDispatcher::new();
+        dispatcher
+            .query_catalog(&mut send, &mut recv, query, capability_query)
+            .await
+    }
+
+    pub async fn request_thumbnail_from_peer(
+        &self,
+        req: protocol::v1::ThumbnailRequest,
+        capability_query: &CapabilityQuery,
+    ) -> Result<protocol::v1::ThumbnailResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::FILE_CATALOG)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = CatalogDispatcher::new();
+        dispatcher
+            .request_thumbnail(&mut send, &mut recv, req, capability_query)
+            .await
+    }
+
+    pub async fn broadcast_handoff_to_peer(
+        &self,
+        item: protocol::v1::HandoffItem,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::HandoffAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::HANDOFF)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = HandoffDispatcher::new();
+        dispatcher
+            .broadcast_handoff(&mut send, &mut recv, item, query)
+            .await
+    }
+
+    pub async fn dismiss_handoff_on_peer(
+        &self,
+        handoff_id: String,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::HandoffAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::HANDOFF)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = HandoffDispatcher::new();
+        dispatcher
+            .dismiss_handoff(&mut send, &mut recv, handoff_id, query)
+            .await
+    }
+
+    pub async fn start_desktop_stream_on_peer(
+        &self,
+        req: protocol::v1::DesktopStreamStartRequest,
+        capability_query: &CapabilityQuery,
+    ) -> Result<protocol::v1::DesktopStreamStartResponse, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::DESKTOP_STREAM)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = DesktopStreamDispatcher::new();
+        dispatcher
+            .start_stream(&mut send, &mut recv, req, capability_query)
+            .await
+    }
+
+    pub async fn send_desktop_input_to_peer(
+        &self,
+        event: protocol::v1::DesktopInputEvent,
+        capability_query: &CapabilityQuery,
+    ) -> Result<protocol::v1::DesktopStreamAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::DESKTOP_STREAM)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = DesktopStreamDispatcher::new();
+        dispatcher
+            .send_input_event(&mut send, &mut recv, event, capability_query)
+            .await
+    }
+
+    pub async fn send_desktop_control_to_peer(
+        &self,
+        ctl: protocol::v1::DesktopStreamControl,
+        capability_query: &CapabilityQuery,
+    ) -> Result<protocol::v1::DesktopStreamAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::DESKTOP_STREAM)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = DesktopStreamDispatcher::new();
+        dispatcher
+            .send_control(&mut send, &mut recv, ctl, capability_query)
+            .await
     }
 }

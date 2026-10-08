@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package continue.v1;
+
+enum CatalogCategory {
+  CATALOG_CATEGORY_UNSPECIFIED = 0;
+  CATALOG_CATEGORY_PHOTOS = 1;
+  CATALOG_CATEGORY_SCREENSHOTS = 2;
+  CATALOG_CATEGORY_DOWNLOADS = 3;
+  CATALOG_CATEGORY_DOCUMENTS = 4;
+}
+
+message CatalogQuery {
+  CatalogCategory category = 1;
+  uint32 limit = 2;
+  uint32 offset = 3;
+}
+
+message CatalogItem {
+  string item_id = 1;
+  string file_name = 2;
+  uint64 size_bytes = 3;
+  uint64 timestamp = 4;
+  string mime_type = 5;
+}
+
+message CatalogResponse {
+  repeated CatalogItem items = 1;
+  uint32 total_count = 2;
+}
+
+message ThumbnailRequest {
+  string item_id = 1;
+  uint32 max_dimension = 2;
+}
+
+message ThumbnailResponse {
+  string item_id = 1;
+  bytes image_data = 2;
+  string mime_type = 3;
+  bool success = 4;
+  string error_message = 5;
+}
+
+message CatalogEnvelope {
+  oneof payload {
+    CatalogQuery query = 1;
+    CatalogResponse response = 2;
+    ThumbnailRequest thumb_req = 3;
+    ThumbnailResponse thumb_resp = 4;
+  }
+}

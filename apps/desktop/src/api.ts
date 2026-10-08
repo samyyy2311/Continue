@@ -4,14 +4,21 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  CatalogResponse,
+  ClipboardHistoryItem,
+  DesktopInputEventDto,
+  DesktopStreamFrameEvent,
+  DesktopStreamInfo,
   DeviceIdentity,
   Grant,
+  HandoffItem,
   HistoryEntry,
   IncomingTransfer,
   PeerPermission,
   PermissionAnswer,
   PermissionQuestion,
   PhoneNotification,
+  QueuedTransfer,
   TrustedPeer,
 } from "./types.ts";
 
@@ -134,6 +141,160 @@ export const pressNotificationButton = (peerFingerprint: string, notificationId:
 /** Clears a notification on the phone too. */
 export const dismissNotification = (peerFingerprint: string, notificationId: string) =>
   invoke<void>("dismiss_notification", { peerFingerprint, notificationId });
+
+export const ringPeer = (peerFingerprint: string, active: boolean) =>
+  invoke<boolean>("ring_peer", { peerFingerprint, active });
+
+export const sendPcAction = (peerFingerprint: string, action: number) =>
+  invoke<boolean>("send_pc_action", { peerFingerprint, action });
+
+export const queryFileCatalog = (
+  peerFingerprint: string,
+  category: number,
+  limit: number = 50,
+  offset: number = 0,
+) =>
+  invoke<CatalogResponse>("query_file_catalog", {
+    peerFingerprint,
+    category,
+    limit,
+    offset,
+  });
+
+export const getCatalogThumbnail = (
+  peerFingerprint: string,
+  itemId: string,
+  maxEdge: number = 256,
+) =>
+  invoke<string>("get_catalog_thumbnail", {
+    peerFingerprint,
+    itemId,
+    maxEdge,
+  });
+
+export const mountCloudFiles = (peerFingerprint: string) =>
+  invoke<string>("mount_cloud_files", { peerFingerprint });
+
+export const openCloudFilesFolder = (peerFingerprint: string) =>
+  invoke<void>("open_cloud_files_folder", { peerFingerprint });
+
+export const getClipboardHistory = (limit: number = 50) =>
+  invoke<ClipboardHistoryItem[]>("get_clipboard_history", { limit });
+
+export const pinClipboardClip = (id: number, pinned: boolean) =>
+  invoke<boolean>("pin_clipboard_clip", { id, pinned });
+
+export const deleteClipboardClip = (id: number) =>
+  invoke<boolean>("delete_clipboard_clip", { id });
+
+export const clearClipboardHistory = () =>
+  invoke<number>("clear_clipboard_history");
+
+export const getActiveHandoffs = () =>
+  invoke<HandoffItem[]>("get_active_handoffs");
+
+export const broadcastHandoff = (
+  peerFingerprint: string,
+  title: string,
+  uri: string,
+  handoffType: number = 1,
+  scrollRatio: number = 0,
+) =>
+  invoke<boolean>("broadcast_handoff", {
+    peerFingerprint,
+    title,
+    uri,
+    handoffType,
+    scrollRatio,
+  });
+
+export const dismissHandoff = (peerFingerprint: string, handoffId: string) =>
+  invoke<boolean>("dismiss_handoff", { peerFingerprint, handoffId });
+
+export const openHandoff = (
+  peerFingerprint: string,
+  handoffId: string,
+  uri: string,
+) =>
+  invoke<void>("open_handoff", { peerFingerprint, handoffId, uri });
+
+export const onHandoffReceived = (handler: (item: HandoffItem) => void): Promise<UnlistenFn> =>
+  listen<HandoffItem>("handoff-received", (event) => handler(event.payload));
+
+export const onHandoffDismissed = (handler: (handoffId: string) => void): Promise<UnlistenFn> =>
+  listen<string>("handoff-dismissed", (event) => handler(event.payload));
+
+export const queueOfflineFile = (peerFingerprint: string, filePath: string) =>
+  invoke<string>("queue_offline_file", { peerFingerprint, filePath });
+
+export const queueOfflineText = (peerFingerprint: string, text: string) =>
+  invoke<string>("queue_offline_text", { peerFingerprint, text });
+
+export const getQueuedTransfers = (peerFingerprint: string) =>
+  invoke<QueuedTransfer[]>("get_queued_transfers", { peerFingerprint });
+
+export const removeQueuedTransfer = (peerFingerprint: string, itemId: string) =>
+  invoke<boolean>("remove_queued_transfer", { peerFingerprint, itemId });
+
+export const clearQueuedTransfers = (peerFingerprint: string) =>
+  invoke<number>("clear_queued_transfers", { peerFingerprint });
+
+export const setLockdownMode = (active: boolean) =>
+  invoke<void>("set_lockdown_mode", { active });
+
+export const isLockdownMode = () =>
+  invoke<boolean>("is_lockdown_mode");
+
+export const getDropFolder = () =>
+  invoke<string | null>("get_drop_folder");
+
+export const setDropFolder = (folderPath: string | null) =>
+  invoke<void>("set_drop_folder", { folderPath });
+
+export const onQueuedTransfersChanged = (handler: (peerId: string) => void): Promise<UnlistenFn> =>
+  listen<string>("queued-transfers-changed", (event) => handler(event.payload));
+
+export const onLockdownChanged = (handler: (active: boolean) => void): Promise<UnlistenFn> =>
+  listen<boolean>("lockdown-changed", (event) => handler(event.payload));
+
+export const startDesktopStream = (
+  peerFingerprint: string,
+  packageName?: string,
+  width: number = 1920,
+  height: number = 1080,
+  dpi: number = 240,
+) =>
+  invoke<DesktopStreamInfo>("start_desktop_stream", {
+    peerFingerprint,
+    packageName,
+    width,
+    height,
+    dpi,
+  });
+
+export const stopDesktopStream = (sessionId: string) =>
+  invoke<void>("stop_desktop_stream", { sessionId });
+
+export const sendDesktopInput = (event: DesktopInputEventDto) =>
+  invoke<void>("send_desktop_input", { event });
+
+export const getActiveDesktopStreams = () =>
+  invoke<DesktopStreamInfo[]>("get_active_desktop_streams");
+
+export const onDesktopStreamStarted = (
+  handler: (info: DesktopStreamInfo) => void,
+): Promise<UnlistenFn> =>
+  listen<DesktopStreamInfo>("desktop-stream-started", (event) => handler(event.payload));
+
+export const onDesktopStreamStopped = (
+  handler: (sessionId: string) => void,
+): Promise<UnlistenFn> =>
+  listen<string>("desktop-stream-stopped", (event) => handler(event.payload));
+
+export const onDesktopStreamFrame = (
+  handler: (frame: DesktopStreamFrameEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<DesktopStreamFrameEvent>("desktop-stream-frame", (event) => handler(event.payload));
 
 /** Commands reject with the backend's error string; anything else is unexpected. */
 export function errorMessage(error: unknown): string {

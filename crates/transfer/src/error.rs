@@ -26,6 +26,9 @@ pub enum TransferError {
     #[error("Protocol error: {0}")]
     Protocol(#[from] protocol::ProtocolError),
 
+    #[error("Frame error: {0}")]
+    Frame(#[from] protocol::FrameError),
+
     #[error("Invalid filename: {0}")]
     InvalidFilename(String),
 
@@ -49,4 +52,25 @@ pub enum TransferError {
 
     #[error("Not connected to that device")]
     NotConnected,
+
+    #[error("Media capture rejected: {0}")]
+    CaptureRejected(String),
+
+    #[error("Media capture unsupported on remote device")]
+    CaptureUnsupported,
+
+    #[error("Media capture device is busy")]
+    CaptureBusy,
+
+    #[error("Bridge session error: {0}")]
+    BridgeSession(String),
+
+    #[error("Transfer queue full: {0}")]
+    QueueFull(String),
+
+    #[error("Cloud files provider error: {0}")]
+    CloudFiles(String),
+
+    #[error("Cloud files not supported on this platform")]
+    UnsupportedPlatform,
 }

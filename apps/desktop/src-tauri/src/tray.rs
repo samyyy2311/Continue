@@ -50,9 +50,20 @@ pub fn exists(app: &AppHandle) -> bool {
 
 pub fn show_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        tracing::info!("show_window: found 'main' window; showing, unminimizing, and setting focus");
+        let r1 = window.show();
+        let r2 = window.unminimize();
+        let r3 = window.set_focus();
+        tracing::info!("show_window results: show={r1:?}, unminimize={r2:?}, focus={r3:?}");
+    } else {
+        let windows = app.webview_windows();
+        tracing::warn!("show_window: 'main' window not found! Total webview windows count = {}", windows.len());
+        for (label, window) in windows {
+            tracing::info!("show_window: showing window with label: '{label}'");
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
     }
 }
 

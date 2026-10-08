@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+syntax = "proto3";
+
+package continue.v1;
+
+enum CameraCaptureMode {
+  CAMERA_CAPTURE_MODE_UNSPECIFIED   = 0;
+  CAMERA_CAPTURE_MODE_PHOTO         = 1;
+  CAMERA_CAPTURE_MODE_DOCUMENT_SCAN = 2;
+}
+
+enum CameraCaptureDestination {
+  CAMERA_CAPTURE_DESTINATION_UNSPECIFIED = 0;
+  CAMERA_CAPTURE_DESTINATION_SAVE_FILE   = 1;
+  CAMERA_CAPTURE_DESTINATION_CLIPBOARD   = 2;
+  CAMERA_CAPTURE_DESTINATION_BOTH        = 3;
+}
+
+message CameraCaptureRequest {
+  string                   capture_id    = 1;
+  CameraCaptureMode        mode          = 2;
+  CameraCaptureDestination destination   = 3;
+  bool                     flash_enabled = 4;
+  uint32                   max_width     = 5;
+  uint32                   max_height    = 6;
+}
+
+enum CameraCaptureStatus {
+  CAMERA_CAPTURE_STATUS_UNSPECIFIED  = 0;
+  CAMERA_CAPTURE_STATUS_SUCCESS      = 1;
+  CAMERA_CAPTURE_STATUS_DECLINED     = 2;
+  CAMERA_CAPTURE_STATUS_BUSY         = 3;
+  CAMERA_CAPTURE_STATUS_UNSUPPORTED  = 4;
+  CAMERA_CAPTURE_STATUS_ERROR        = 5;
+}
+
+message CameraCaptureResponse {
+  string              capture_id      = 1;
+  CameraCaptureStatus status          = 2;
+  string              reason          = 3;
+  string              mime_type       = 4;
+  uint64              file_size       = 5;
+  bytes               sha256_checksum = 6;
+  uint32              width           = 7;
+  uint32              height          = 8;
+  string              file_name       = 9;
+}
+
+message CameraCaptureAck {
+  string capture_id     = 1;
+  uint64 bytes_received = 2;
+  bool   verified       = 3;
+}

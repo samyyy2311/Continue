@@ -15,6 +15,16 @@ impl CapabilityId {
     pub const FILE_TRANSFER: Self = Self(1);
     pub const CLIPBOARD: Self = Self(2);
     pub const NOTIFICATIONS: Self = Self(3);
+    pub const MEDIA_CAPTURE: Self = Self(4);
+    pub const MEDIA_CONTROL: Self = Self(5);
+    pub const HANDOFF: Self = Self(6);
+    pub const TELEMETRY: Self = Self(7);
+    pub const RING_DEVICE: Self = Self(8);
+    pub const PC_CONTROL: Self = Self(9);
+    pub const REMOTE_INPUT: Self = Self(10);
+    pub const DECK: Self = Self(11);
+    pub const FILE_CATALOG: Self = Self(12);
+    pub const DESKTOP_STREAM: Self = Self(13);
 
     pub const fn new(id: u32) -> Self {
         Self(id)
@@ -30,6 +40,16 @@ impl CapabilityId {
             Self::FILE_TRANSFER => Some("file_transfer"),
             Self::CLIPBOARD => Some("clipboard"),
             Self::NOTIFICATIONS => Some("notifications"),
+            Self::MEDIA_CAPTURE => Some("media_capture"),
+            Self::MEDIA_CONTROL => Some("media_control"),
+            Self::HANDOFF => Some("handoff"),
+            Self::TELEMETRY => Some("telemetry"),
+            Self::RING_DEVICE => Some("ring_device"),
+            Self::PC_CONTROL => Some("pc_control"),
+            Self::REMOTE_INPUT => Some("remote_input"),
+            Self::DECK => Some("deck"),
+            Self::FILE_CATALOG => Some("file_catalog"),
+            Self::DESKTOP_STREAM => Some("desktop_stream"),
             _ => None,
         }
     }
