@@ -112,6 +112,7 @@ export const PERMISSIONS: Record<number, { label: string; description: string }>
   1: { label: "Files", description: "Send files to this computer" },
   2: { label: "Text", description: "Send copied text and links" },
   3: { label: "Notifications", description: "Show its notifications here" },
+  6: { label: "Handoff", description: "Pick up open tabs, links, and documents" },
   8: { label: "Ring device", description: "Sound alarm to locate misplaced device" },
   9: { label: "PC control", description: "Remote lock, sleep, or mute control" },
   10: { label: "Remote typing", description: "Dictation and keyboard input from phone" },
@@ -170,5 +171,24 @@ export interface ClipboardHistoryItem {
   content: string;
   isPinned: boolean;
   originDevice: string;
+}
+
+export enum HandoffType {
+  Unspecified = 0,
+  Url = 1,
+  Document = 2,
+  Map = 3,
+}
+
+export interface HandoffItem {
+  handoffId: string;
+  peerId: string;
+  sourceDeviceId: string;
+  handoffType: HandoffType;
+  title: string;
+  uri: string;
+  scrollRatio: number;
+  cursorPosition: number;
+  timestampMs: number;
 }
 

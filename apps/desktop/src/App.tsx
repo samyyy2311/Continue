@@ -42,12 +42,15 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import { ButtonGroup, ConnectionStatus, ProgressBar, Switch } from "./components.tsx";
 import {
+  broadcastHandoff,
   cancelIncoming,
   clearHistory,
   connectToPeer,
   disconnectPeer,
+  dismissHandoff,
   reconnectPeer,
   errorMessage,
+  getActiveHandoffs,
   getAutostart,
   getDeviceIdentity,
   getHistory,
@@ -55,10 +58,13 @@ import {
   getPermissions,
   getTrustedPeers,
   listIncoming,
+  onHandoffDismissed,
+  onHandoffReceived,
   onIncomingEnded,
   onIncomingProgress,
   onNotificationPosted,
   onNotificationRemoved,
+  openHandoff,
   openLink,
   openReceived,
   ringPeer,
@@ -81,6 +87,7 @@ import {
 } from "./format.ts";
 import { CatalogDialog } from "./CatalogDialog.tsx";
 import { ClipboardHistoryDialog } from "./ClipboardHistoryDialog.tsx";
+import { HandoffCard } from "./HandoffCard.tsx";
 import { NotificationList } from "./Notifications.tsx";
 import { PairDialog } from "./PairDialog.tsx";
 import {
@@ -91,6 +98,7 @@ import {
   type HistoryEntry,
   GRANT_OPTIONS,
   type Grant,
+  type HandoffItem,
   type HistoryFilter,
   type IncomingTransfer,
   isMac,
@@ -229,6 +237,7 @@ export default function App() {
   const [dragCount, setDragCount] = useState<number | null>(null);
   const [textInput, setTextInput] = useState("");
   const [notifications, setNotifications] = useState<PhoneNotification[]>([]);
+  const [handoffs, setHandoffs] = useState<HandoffItem[]>([]);
 
   const selectedPeer = peers?.find((p) => p.fingerprint === selectedPeerId) ?? peers?.[0] ?? null;
 
@@ -309,11 +318,12 @@ export default function App() {
       return;
     }
     let active = true;
-    Promise.all([getDeviceIdentity(), getTrustedPeers(), getHistory()])
-      .then(([loadedIdentity, loadedPeers, history]) => {
+    Promise.all([getDeviceIdentity(), getTrustedPeers(), getHistory(), getActiveHandoffs()])
+      .then(([loadedIdentity, loadedPeers, history, loadedHandoffs]) => {
         if (!active) return;
         setIdentity(loadedIdentity);
         setPeers(loadedPeers);
+        setHandoffs(loadedHandoffs);
         // Anything sent or coming in since the window opened stays on top.
         setActivity((live) => [...live, ...history.map(fromHistory)]);
       })
@@ -440,6 +450,17 @@ export default function App() {
             }),
         );
         keep(unSynced);
+
+        const unHandoffRecv = await onHandoffReceived((item) => {
+          setHandoffs((prev) => [item, ...prev.filter((h) => h.handoffId !== item.handoffId)]);
+          showToast(`Continue from ${item.sourceDeviceId || "device"}`);
+        });
+        keep(unHandoffRecv);
+
+        const unHandoffDismiss = await onHandoffDismissed((handoffId) => {
+          setHandoffs((prev) => prev.filter((h) => h.handoffId !== handoffId));
+        });
+        keep(unHandoffDismiss);
       } catch (error) {
         showError(errorMessage(error));
       }
@@ -662,12 +683,45 @@ export default function App() {
     }
   };
 
+  const handleOpenHandoff = async (item: HandoffItem) => {
+    try {
+      const peerId = item.peerId || selectedPeer?.fingerprint || "";
+      await openHandoff(peerId, item.handoffId, item.uri);
+      setHandoffs((prev) => prev.filter((h) => h.handoffId !== item.handoffId));
+      showToast("Opened in browser");
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
+  const handleDismissHandoff = async (item: HandoffItem) => {
+    try {
+      const peerId = item.peerId || selectedPeer?.fingerprint || "";
+      await dismissHandoff(peerId, item.handoffId);
+      setHandoffs((prev) => prev.filter((h) => h.handoffId !== item.handoffId));
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
+  const handleBroadcastHandoff = async (url: string) => {
+    const peer = readyPeer();
+    if (!peer) return;
+    try {
+      await broadcastHandoff(peer.fingerprint, url, url, 1, 0);
+      showToast(`Sent to ${peer.displayName} to continue reading`);
+    } catch (error) {
+      showError(errorMessage(error));
+    }
+  };
+
   const rowActions: RowActions = {
     retry: retryItem,
     copy: copyToClipboard,
     open: (path, reveal) => openReceived(path, reveal).catch((error) => showError(errorMessage(error))),
     openLink: (url) => openLink(url).catch((error) => showError(errorMessage(error))),
     cancelIncoming: (transferId) => cancelIncoming(transferId).catch((error) => showError(errorMessage(error))),
+    handoffLink: handleBroadcastHandoff,
   };
 
   const chooseFilesRef = useRef(chooseFiles);
@@ -796,6 +850,10 @@ export default function App() {
               textInput={textInput}
               onTextInputChange={setTextInput}
               onSendText={handleSendText}
+              handoffs={handoffs.filter((h) => !h.peerId || !selectedPeer || h.peerId === selectedPeer.fingerprint)}
+              onOpenHandoff={handleOpenHandoff}
+              onDismissHandoff={handleDismissHandoff}
+              onBroadcastHandoff={handleBroadcastHandoff}
               onConnect={(address) => selectedPeer && handleConnect(selectedPeer, address)}
               onReconnect={() => selectedPeer && handleReconnect(selectedPeer)}
               onDisconnect={() => selectedPeer && handleDisconnect(selectedPeer)}
@@ -895,6 +953,7 @@ interface RowActions {
   open: (path: string, reveal: boolean) => void;
   openLink: (url: string) => void;
   cancelIncoming: (transferId: string) => void;
+  handoffLink?: (url: string) => void;
 }
 
 /** Under a day heading (`underDay`), older rows show the time rather than repeat the day. */
@@ -970,9 +1029,21 @@ function ActivityRow(props: { item: Activity; actions: RowActions; underDay?: bo
           </button>
         )}
         {link && (
-          <button type="button" className="btn btn-tonal btn-small" onClick={() => actions.openLink(link)}>
-            Open link
-          </button>
+          <>
+            <button type="button" className="btn btn-tonal btn-small" onClick={() => actions.openLink(link)}>
+              Open link
+            </button>
+            {actions.handoffLink && (
+              <button
+                type="button"
+                className="btn btn-tonal btn-small"
+                onClick={() => actions.handoffLink!(link)}
+                title="Continue reading on device"
+              >
+                Handoff
+              </button>
+            )}
+          </>
         )}
       </div>
     </li>
@@ -993,6 +1064,10 @@ interface HomeViewProps {
   textInput: string;
   onTextInputChange: (val: string) => void;
   onSendText: () => void;
+  handoffs: HandoffItem[];
+  onOpenHandoff: (item: HandoffItem) => void;
+  onDismissHandoff: (item: HandoffItem) => void;
+  onBroadcastHandoff: (url: string) => void;
   onConnect: (address: string) => void;
   onReconnect: () => void;
   onDisconnect: () => void;
@@ -1018,6 +1093,10 @@ function HomeView(props: HomeViewProps) {
     isRinging,
     onToggleRing,
     textInput,
+    handoffs,
+    onOpenHandoff,
+    onDismissHandoff,
+    onBroadcastHandoff,
   } = props;
   const { onTextInputChange, onSendText, onConnect, onReconnect, onDisconnect, isConnecting } = props;
   const { activeTransfers, recentActivity, rowActions, onNavigateHistory, notifications, onError } = props;
@@ -1097,6 +1176,22 @@ function HomeView(props: HomeViewProps) {
       </aside>
 
       <div className="home-main">
+        {online && handoffs.length > 0 && (
+          <section className="section" aria-label="Continue where you left off">
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {handoffs.map((item) => (
+                <HandoffCard
+                  key={item.handoffId}
+                  item={item}
+                  peerName={peer.displayName}
+                  onOpen={onOpenHandoff}
+                  onDismiss={onDismissHandoff}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
         <section className="section">
           {online && (
             <div className="send-actions">
@@ -1145,6 +1240,22 @@ function HomeView(props: HomeViewProps) {
               aria-label="Text to send"
               disabled={!online}
             />
+            {online && linkIn(textInput) && (
+              <button
+                type="button"
+                className="btn btn-tonal btn-small"
+                onClick={() => {
+                  const link = linkIn(textInput);
+                  if (link) {
+                    onBroadcastHandoff(link);
+                    onTextInputChange("");
+                  }
+                }}
+                title="Send link to continue on phone"
+              >
+                Handoff
+              </button>
+            )}
             <button type="submit" className="composer-send" disabled={!online || !textInput.trim()} aria-label="Send">
               <ArrowUp size={22} />
             </button>

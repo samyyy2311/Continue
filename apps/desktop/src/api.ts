@@ -8,6 +8,7 @@ import type {
   ClipboardHistoryItem,
   DeviceIdentity,
   Grant,
+  HandoffItem,
   HistoryEntry,
   IncomingTransfer,
   PeerPermission,
@@ -184,6 +185,40 @@ export const deleteClipboardClip = (id: number) =>
 
 export const clearClipboardHistory = () =>
   invoke<number>("clear_clipboard_history");
+
+export const getActiveHandoffs = () =>
+  invoke<HandoffItem[]>("get_active_handoffs");
+
+export const broadcastHandoff = (
+  peerFingerprint: string,
+  title: string,
+  uri: string,
+  handoffType: number = 1,
+  scrollRatio: number = 0,
+) =>
+  invoke<boolean>("broadcast_handoff", {
+    peerFingerprint,
+    title,
+    uri,
+    handoffType,
+    scrollRatio,
+  });
+
+export const dismissHandoff = (peerFingerprint: string, handoffId: string) =>
+  invoke<boolean>("dismiss_handoff", { peerFingerprint, handoffId });
+
+export const openHandoff = (
+  peerFingerprint: string,
+  handoffId: string,
+  uri: string,
+) =>
+  invoke<void>("open_handoff", { peerFingerprint, handoffId, uri });
+
+export const onHandoffReceived = (handler: (item: HandoffItem) => void): Promise<UnlistenFn> =>
+  listen<HandoffItem>("handoff-received", (event) => handler(event.payload));
+
+export const onHandoffDismissed = (handler: (handoffId: string) => void): Promise<UnlistenFn> =>
+  listen<string>("handoff-dismissed", (event) => handler(event.payload));
 
 /** Commands reject with the backend's error string; anything else is unexpected. */
 export function errorMessage(error: unknown): string {

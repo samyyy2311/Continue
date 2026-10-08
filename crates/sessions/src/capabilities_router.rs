@@ -940,4 +940,36 @@ impl SessionMultiplexer {
             .request_thumbnail(&mut send, &mut recv, req, capability_query)
             .await
     }
+
+    pub async fn broadcast_handoff_to_peer(
+        &self,
+        item: protocol::v1::HandoffItem,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::HandoffAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::HANDOFF)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = HandoffDispatcher::new();
+        dispatcher
+            .broadcast_handoff(&mut send, &mut recv, item, query)
+            .await
+    }
+
+    pub async fn dismiss_handoff_on_peer(
+        &self,
+        handoff_id: String,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::HandoffAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::HANDOFF)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = HandoffDispatcher::new();
+        dispatcher
+            .dismiss_handoff(&mut send, &mut recv, handoff_id, query)
+            .await
+    }
 }

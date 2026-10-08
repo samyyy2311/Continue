@@ -112,6 +112,21 @@ pub struct DesktopRuntimeState {
     batteries: Batteries,
     clipboard_history: Arc<ClipboardHistoryStore>,
     cloud_mounts: Arc<Mutex<HashMap<String, Arc<transfer::CloudFilesMount>>>>,
+    active_handoffs: Arc<Mutex<HashMap<String, HandoffItemDto>>>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffItemDto {
+    pub handoff_id: String,
+    pub peer_id: String,
+    pub source_device_id: String,
+    pub handoff_type: i32,
+    pub title: String,
+    pub uri: String,
+    pub scroll_ratio: f32,
+    pub cursor_position: u64,
+    pub timestamp_ms: u64,
 }
 
 #[derive(Serialize)]
@@ -331,6 +346,7 @@ fn session_handlers(
     pending_answers: PendingAnswers,
     clipboard: ClipboardSync,
     clipboard_history: Arc<ClipboardHistoryStore>,
+    active_handoffs: Arc<Mutex<HashMap<String, HandoffItemDto>>>,
     app_handle: &AppHandle,
 ) -> sessions::SessionCapabilityHandlers {
     let mut handlers = sessions::SessionCapabilityHandlers::new(download_dir)
@@ -427,6 +443,29 @@ fn session_handlers(
         }
         // Only the phone carries out button presses.
         notifications::Body::Action(_) => {}
+    }));
+
+    let (app, handoffs_store) = (app_handle.clone(), active_handoffs.clone());
+    handlers.on_handoff_received = Some(Arc::new(move |peer, item| {
+        let dto = HandoffItemDto {
+            handoff_id: item.handoff_id.clone(),
+            peer_id: peer.to_string(),
+            source_device_id: item.source_device_id,
+            handoff_type: item.handoff_type,
+            title: item.title,
+            uri: item.uri,
+            scroll_ratio: item.scroll_ratio,
+            cursor_position: item.cursor_position,
+            timestamp_ms: item.timestamp_ms,
+        };
+        handoffs_store.lock().insert(item.handoff_id.clone(), dto.clone());
+        let _ = app.emit("handoff-received", dto);
+    }));
+
+    let (app, handoffs_store) = (app_handle.clone(), active_handoffs);
+    handlers.on_handoff_dismissed = Some(Arc::new(move |_peer, handoff_id| {
+        handoffs_store.lock().remove(&handoff_id);
+        let _ = app.emit("handoff-dismissed", handoff_id);
     }));
 
     handlers
@@ -1232,6 +1271,80 @@ fn clear_clipboard_history(state: State<DesktopRuntimeState>) -> Result<usize, S
         .map_err(user_error("Couldn't clear clipboard history."))
 }
 
+#[tauri::command]
+fn get_active_handoffs(state: State<DesktopRuntimeState>) -> Vec<HandoffItemDto> {
+    state.active_handoffs.lock().values().cloned().collect()
+}
+
+#[tauri::command]
+async fn broadcast_handoff(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    title: String,
+    uri: String,
+    handoff_type: i32,
+    scroll_ratio: f32,
+) -> Result<bool, String> {
+    let mux = state
+        .device
+        .sessions
+        .get(&peer_fingerprint)
+        .ok_or_else(|| NOT_CONNECTED.to_string())?;
+    let query = CapabilityQuery::negotiated(CapabilityId::HANDOFF, true);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let handoff_id = format!("h-{now_ms}");
+    let item = protocol::v1::HandoffItem {
+        handoff_id,
+        source_device_id: computer_name(),
+        handoff_type,
+        title,
+        uri,
+        scroll_ratio,
+        cursor_position: 0,
+        timestamp_ms: now_ms,
+        extra_payload: Vec::new(),
+    };
+    let ack = mux
+        .broadcast_handoff_to_peer(item, &query)
+        .await
+        .map_err(user_error("Couldn't send handoff to device."))?;
+    Ok(ack.success)
+}
+
+#[tauri::command]
+async fn dismiss_handoff(
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    handoff_id: String,
+) -> Result<bool, String> {
+    state.active_handoffs.lock().remove(&handoff_id);
+    if let Some(mux) = state.device.sessions.get(&peer_fingerprint) {
+        let query = CapabilityQuery::negotiated(CapabilityId::HANDOFF, true);
+        let _ = mux.dismiss_handoff_on_peer(handoff_id, &query).await;
+    }
+    Ok(true)
+}
+
+#[tauri::command]
+async fn open_handoff(
+    app: AppHandle,
+    state: State<'_, DesktopRuntimeState>,
+    peer_fingerprint: String,
+    handoff_id: String,
+    uri: String,
+) -> Result<(), String> {
+    state.active_handoffs.lock().remove(&handoff_id);
+    let _ = app.opener().open_url(&uri, None::<&str>);
+    if let Some(mux) = state.device.sessions.get(&peer_fingerprint) {
+        let query = CapabilityQuery::negotiated(CapabilityId::HANDOFF, true);
+        let _ = mux.dismiss_handoff_on_peer(handoff_id, &query).await;
+    }
+    Ok(())
+}
+
 fn initialize_desktop_runtime(
     app_handle: &AppHandle,
     db_path: &Path,
@@ -1245,6 +1358,7 @@ fn initialize_desktop_runtime(
         db_path.with_file_name("continue_clipboard.db"),
     )?);
     let cloud_mounts = Arc::new(Mutex::new(HashMap::new()));
+    let active_handoffs = Arc::new(Mutex::new(HashMap::new()));
 
     let pending_answers = PendingAnswers::default();
     let connected = Arc::new(tray::Connected::default());
@@ -1254,6 +1368,7 @@ fn initialize_desktop_runtime(
         pending_answers.clone(),
         clipboard.clone(),
         clipboard_history.clone(),
+        active_handoffs.clone(),
         app_handle,
     );
     handlers.on_device_info = Some(device_info_listener(
@@ -1281,6 +1396,7 @@ fn initialize_desktop_runtime(
         batteries,
         clipboard_history,
         cloud_mounts,
+        active_handoffs,
     })
 }
 
@@ -1397,7 +1513,11 @@ fn main() {
             get_clipboard_history,
             pin_clipboard_clip,
             delete_clipboard_clip,
-            clear_clipboard_history
+            clear_clipboard_history,
+            get_active_handoffs,
+            broadcast_handoff,
+            dismiss_handoff,
+            open_handoff
         ])
         // Closing the window keeps Continue in the tray, still receiving. Quit is in the tray menu.
         .on_window_event(|window, event| {
