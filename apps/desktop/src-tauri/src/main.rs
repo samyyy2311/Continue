@@ -638,7 +638,7 @@ fn permission_prompt(
         let _ = app_handle.emit("permission-request", question);
 
         let (pending, app) = (pending_answers.clone(), app_handle.clone());
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             tokio::time::sleep_until(request.deadline).await;
             if pending.lock().remove(&id).is_some() {
                 let _ = app.emit("permission-request-closed", id);
@@ -757,7 +757,7 @@ fn session_state_listener(
             );
             let app = app_handle.clone();
             let peer_fp = peer.to_string();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 if let Some(state) = app.try_state::<DesktopRuntimeState>() {
                     flush_offline_transfers(&app, &state, &peer_fp).await;
@@ -1836,7 +1836,7 @@ fn initialize_desktop_runtime(
         drop_folder.clone(),
         app_handle.clone(),
     );
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
             let folder_opt = drop_folder_for_loop.lock().clone();
