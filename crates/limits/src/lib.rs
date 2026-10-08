@@ -27,7 +27,7 @@ pub const MAX_DEVICE_NAME_BYTES: usize = 64;
 
 /// Byte length of the pairing session token.
 ///
-/// Distinct from SHA256_DIGEST_LEN — this is 16 bytes, not 32.
+/// Distinct from SHA256_DIGEST_LEN: this is 16 bytes, not 32.
 pub const SESSION_TOKEN_LEN: usize = 16;
 
 /// Maximum active pairing session lifetime in seconds.

@@ -7,7 +7,7 @@
 //! It is 43 characters long and URL-safe.
 //!
 //! The fingerprint is used in the trust store and logs. Full fingerprints
-//! are never logged by default — use `Fingerprint::diagnostic()` for log output.
+//! are never logged by default; use `Fingerprint::diagnostic()` for log output.
 
 use std::fmt;
 
