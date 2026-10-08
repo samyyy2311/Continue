@@ -23,6 +23,8 @@ fn main() {
         proto_dir.join("telemetry.proto"),
         proto_dir.join("ring.proto"),
         proto_dir.join("pc_control.proto"),
+        proto_dir.join("remote_input.proto"),
+        proto_dir.join("deck.proto"),
     ];
 
     for file in &proto_files {

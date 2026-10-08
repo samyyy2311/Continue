@@ -34,4 +34,10 @@ pub enum SessionError {
 
     #[error("Handoff validation failed: {0}")]
     HandoffValidation(String),
+
+    #[error("Remote input validation failed: {0}")]
+    RemoteInputValidation(String),
+
+    #[error("Deck validation failed: {0}")]
+    DeckValidation(String),
 }

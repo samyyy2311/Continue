@@ -21,6 +21,8 @@ impl CapabilityId {
     pub const TELEMETRY: Self = Self(7);
     pub const RING_DEVICE: Self = Self(8);
     pub const PC_CONTROL: Self = Self(9);
+    pub const REMOTE_INPUT: Self = Self(10);
+    pub const DECK: Self = Self(11);
 
     pub const fn new(id: u32) -> Self {
         Self(id)
@@ -42,6 +44,8 @@ impl CapabilityId {
             Self::TELEMETRY => Some("telemetry"),
             Self::RING_DEVICE => Some("ring_device"),
             Self::PC_CONTROL => Some("pc_control"),
+            Self::REMOTE_INPUT => Some("remote_input"),
+            Self::DECK => Some("deck"),
             _ => None,
         }
     }

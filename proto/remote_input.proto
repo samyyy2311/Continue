@@ -1,0 +1,24 @@
+// SPDX-FileCopyrightText: Contributors to the Continue project
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package continue.v1;
+
+message TextInputChunk {
+  string text = 1;
+  bool commit = 2;
+  uint64 sequence = 3;
+}
+
+message RemoteInputAck {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message RemoteInputEnvelope {
+  oneof payload {
+    TextInputChunk chunk = 1;
+    RemoteInputAck ack = 2;
+  }
+}

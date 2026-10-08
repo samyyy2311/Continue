@@ -13,12 +13,14 @@ use notifications::Body as NotificationBody;
 use protocol::CapabilityId;
 use transfer::{receive_file, send_file, ReceivedFile};
 
+use crate::deck::DeckDispatcher;
 use crate::device::{PeerDevice, ThisDevice};
 use crate::handoff::HandoffDispatcher;
 use crate::incoming::{IncomingFiles, SaveFolder};
 use crate::media_control::MediaControlDispatcher;
 use crate::multiplexer::{OnPeerUpdate, PeerUpdate, SessionMultiplexer};
 use crate::pc_control::PcControlDispatcher;
+use crate::remote_input::RemoteInputDispatcher;
 use crate::ring::RingDispatcher;
 use crate::telemetry::TelemetryDispatcher;
 
@@ -62,6 +64,12 @@ pub type RingHandler =
 pub type PcActionHandler = Arc<
     dyn Fn(&str, protocol::v1::PcActionRequest) -> protocol::v1::PcActionResponse + Send + Sync,
 >;
+pub type RemoteInputHandler =
+    Arc<dyn Fn(&str, protocol::v1::TextInputChunk) -> protocol::v1::RemoteInputAck + Send + Sync>;
+pub type DeckLayoutHandler =
+    Arc<dyn Fn(&str, protocol::v1::DeckLayoutSync) -> protocol::v1::DeckAck + Send + Sync>;
+pub type DeckTriggerHandler =
+    Arc<dyn Fn(&str, protocol::v1::DeckTriggerEvent) -> protocol::v1::DeckAck + Send + Sync>;
 
 /// Callbacks and configuration for active capabilities over a multiplexed session.
 #[derive(Clone)]
@@ -73,6 +81,8 @@ pub struct SessionCapabilityHandlers {
     pub telemetry_dispatcher: Arc<TelemetryDispatcher>,
     pub ring_dispatcher: Arc<RingDispatcher>,
     pub pc_control_dispatcher: Arc<PcControlDispatcher>,
+    pub remote_input_dispatcher: Arc<RemoteInputDispatcher>,
+    pub deck_dispatcher: Arc<DeckDispatcher>,
     pub on_file_received: Option<OnReceived<ReceivedFile>>,
     pub on_clipboard_received: Option<OnReceived<ClipboardUpdate>>,
     /// Called with notifications the peer shows here, and with replies to and dismissals of
@@ -85,6 +95,9 @@ pub struct SessionCapabilityHandlers {
     pub on_telemetry_received: Option<OnReceived<protocol::v1::DeviceTelemetry>>,
     pub on_ring_requested: Option<RingHandler>,
     pub on_pc_action_requested: Option<PcActionHandler>,
+    pub on_remote_input: Option<RemoteInputHandler>,
+    pub on_deck_layout_synced: Option<DeckLayoutHandler>,
+    pub on_deck_tile_triggered: Option<DeckTriggerHandler>,
     /// How this device introduces itself to peers.
     pub this_device: ThisDevice,
     /// Called with what a peer says about itself each time a session starts.
@@ -108,6 +121,8 @@ impl SessionCapabilityHandlers {
             telemetry_dispatcher: Arc::new(TelemetryDispatcher::new()),
             ring_dispatcher: Arc::new(RingDispatcher::new()),
             pc_control_dispatcher: Arc::new(PcControlDispatcher::new()),
+            remote_input_dispatcher: Arc::new(RemoteInputDispatcher::new()),
+            deck_dispatcher: Arc::new(DeckDispatcher::new()),
             on_file_received: None,
             on_clipboard_received: None,
             on_notification: None,
@@ -118,6 +133,9 @@ impl SessionCapabilityHandlers {
             on_telemetry_received: None,
             on_ring_requested: None,
             on_pc_action_requested: None,
+            on_remote_input: None,
+            on_deck_layout_synced: None,
+            on_deck_tile_triggered: None,
             this_device: ThisDevice::default(),
             on_device_info: None,
             on_device_status: None,
@@ -566,6 +584,96 @@ pub fn spawn_capabilities_dispatcher(
                             error!("Failed to process PC control stream from {peer_fp}: {e}");
                         }
                     }
+                    CapabilityId::REMOTE_INPUT => {
+                        debug!("Handling incoming remote input stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::REMOTE_INPUT, None).await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::REMOTE_INPUT);
+                            }
+                        }
+
+                        let query =
+                            CapabilityQuery::negotiated(CapabilityId::REMOTE_INPUT, is_permitted);
+
+                        let on_chunk = handlers.on_remote_input.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .remote_input_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |chunk| {
+                                    if let Some(ref cb) = on_chunk {
+                                        cb(&peer, chunk)
+                                    } else {
+                                        protocol::v1::RemoteInputAck {
+                                            success: false,
+                                            error_message: "Remote input not handled".into(),
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process remote input stream from {peer_fp}: {e}");
+                        }
+                    }
+                    CapabilityId::DECK => {
+                        debug!("Handling incoming deck stream from {peer_fp}");
+                        let is_permitted =
+                            permitted(&handlers, &peer_fp, CapabilityId::DECK, None).await;
+
+                        if is_permitted {
+                            if let Some(store) = &handlers.permission_store {
+                                store.consume_if_allow_once(&peer_fp, CapabilityId::DECK);
+                            }
+                        }
+
+                        let query = CapabilityQuery::negotiated(CapabilityId::DECK, is_permitted);
+
+                        let on_layout = handlers.on_deck_layout_synced.clone();
+                        let on_trigger = handlers.on_deck_tile_triggered.clone();
+                        let peer = peer_fp.clone();
+
+                        let result = handlers
+                            .deck_dispatcher
+                            .receive_envelope(
+                                &mut stream.send_stream,
+                                &mut stream.recv_stream,
+                                &query,
+                                |layout| {
+                                    if let Some(ref cb) = on_layout {
+                                        cb(&peer, layout)
+                                    } else {
+                                        protocol::v1::DeckAck {
+                                            success: false,
+                                            error_message: "Deck layout sync not handled".into(),
+                                        }
+                                    }
+                                },
+                                |trigger| {
+                                    if let Some(ref cb) = on_trigger {
+                                        cb(&peer, trigger)
+                                    } else {
+                                        protocol::v1::DeckAck {
+                                            success: false,
+                                            error_message: "Deck tile trigger not handled".into(),
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+
+                        if let Err(e) = result {
+                            error!("Failed to process deck stream from {peer_fp}: {e}");
+                        }
+                    }
                     unknown => {
                         debug!("Received unsupported capability stream {unknown:?} from {peer_fp}");
                     }
@@ -684,6 +792,54 @@ impl SessionMultiplexer {
         let dispatcher = PcControlDispatcher::new();
         dispatcher
             .send_action(&mut send, &mut recv, request, query)
+            .await
+    }
+
+    pub async fn send_remote_input_chunk_to_peer(
+        &self,
+        chunk: protocol::v1::TextInputChunk,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::RemoteInputAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::REMOTE_INPUT)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = RemoteInputDispatcher::new();
+        dispatcher
+            .send_chunk(&mut send, &mut recv, chunk, query)
+            .await
+    }
+
+    pub async fn sync_deck_layout_to_peer(
+        &self,
+        layout: protocol::v1::DeckLayoutSync,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::DeckAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::DECK)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = DeckDispatcher::new();
+        dispatcher
+            .sync_layout(&mut send, &mut recv, layout, query)
+            .await
+    }
+
+    pub async fn trigger_deck_tile_on_peer(
+        &self,
+        trigger: protocol::v1::DeckTriggerEvent,
+        query: &CapabilityQuery,
+    ) -> Result<protocol::v1::DeckAck, crate::error::SessionError> {
+        let (mut send, mut recv) = self
+            .open_stream(CapabilityId::DECK)
+            .await
+            .map_err(crate::error::SessionError::Transport)?;
+
+        let dispatcher = DeckDispatcher::new();
+        dispatcher
+            .trigger_tile(&mut send, &mut recv, trigger, query)
             .await
     }
 }
